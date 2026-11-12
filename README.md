@@ -48,4 +48,8 @@ docker-compose.yml        локальная БД
 docker-compose.prod.yml   рантайм на VPS (образы из GHCR)
 deploy/nginx/             конфиг reverse proxy на хосте
 scripts/gh-setup.sh       метки, вехи, бэклог, правила ветки main
+.pi/
+  agents/                 субагенты цикла: plan, code, review
+  prompts/cycle.md        команда /cycle: план → код → ревью → PR
+  settings.json           модели по умолчанию и лимиты субагентов
 ```

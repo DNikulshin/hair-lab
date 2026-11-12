@@ -1,0 +1,9 @@
+{
+  "$schema": "https://pi.dev/schemas/settings.schema.json",
+  "defaultProvider": "polza-ai",
+  "defaultModel": "deepseek/deepseek-v4.1-flash",
+  "subagents": {
+    "defaultModel": "polza-ai/deepseek/deepseek-v4.1-flash",
+    "maxSubagentSpawnsPerRun": 12
+  }
+}

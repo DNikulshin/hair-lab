@@ -126,8 +126,13 @@
 ## Цикл разработки
 
 `/cycle <задача>` запускает `plan → code → review`. Артефакты — в
-`.pi/artifacts/<YYYY-MM-DD>-<slug>/` (каталог в `.gitignore`):
+`.pi/artifacts/<YYYY-MM-DD>-<номер>-<slug>/` (каталог в `.gitignore`):
 `plan.md` → `code-report.md` → `review.md` → `followups.md`.
+
+Субагенты проекта лежат в `.pi/agents/` (`plan`, `code`, `review`) — они перекрывают
+одноимённых глобальных, поэтому модели и промпты правятся под проект здесь.
+Команда `/cycle` — `.pi/prompts/cycle.md`, настройки моделей и лимитов — `.pi/settings.json`.
+По умолчанию: план — GLM-5.3 (thinking high), код — DeepSeek V4.1 Flash, ревью — GPT-6 Luna Pro.
 
 - Цикл нужен для задач про данные, контракты, авторизацию, платежи, миграции.
   Мелкие правки делаем напрямую.
