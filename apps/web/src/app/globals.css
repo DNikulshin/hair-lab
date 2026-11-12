@@ -1,0 +1,74 @@
+@import 'tailwindcss';
+
+/*
+ * Дизайн-токены — единственное место, где задаются цвета, шрифты и ритм.
+ * Семантика (surface / ink / muted / accent) вместо «серых» имён:
+ * тему можно менять здесь, не трогая компоненты.
+ *
+ * Стилистика салона ещё не утверждена — палитра нейтральная и временная.
+ */
+:root {
+  --surface: #faf8f5;
+  --surface-raised: #ffffff;
+  --ink: #12100e;
+  --muted: #6b6560;
+  --accent: #2f4f4a;
+  --border: #e3ddd4;
+
+  --font-body-stack:
+    ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial,
+    'Noto Sans', sans-serif;
+
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --surface: #12100e;
+    --surface-raised: #1b1815;
+    --ink: #f4f1ec;
+    --muted: #a8a19a;
+    --accent: #8fc4b8;
+    --border: #2c2723;
+
+    color-scheme: dark;
+  }
+}
+
+/*
+ * `@theme inline` превращает переменные в утилиты Tailwind:
+ * bg-surface, text-ink, border-border, font-body.
+ */
+@theme inline {
+  --color-surface: var(--surface);
+  --color-surface-raised: var(--surface-raised);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
+  --color-border: var(--border);
+
+  --font-body: var(--font-body-stack);
+
+  --radius-card: 12px;
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    @apply bg-surface font-body text-ink antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  h1,
+  h2,
+  h3 {
+    @apply text-balance;
+  }
+
+  p {
+    @apply text-pretty;
+  }
+}

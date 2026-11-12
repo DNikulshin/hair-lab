@@ -1,0 +1,55 @@
+name: Board sync
+
+# Колонки Kanban — метки status:*. Workflow переключает их по событиям PR,
+# чтобы доска отражала реальное состояние без ручных действий.
+on:
+  pull_request:
+    types: [opened, reopened, ready_for_review, converted_to_draft, closed]
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+
+jobs:
+  sync:
+    # PR из форков не трогаем: у них нет прав на метки.
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            const body = pr.body ?? '';
+            const issues = [...body.matchAll(/(?:closes|closes:|fixes|resolves)\s+#(\d+)/gi)]
+              .map((m) => Number(m[1]));
+            if (issues.length === 0) {
+              core.info('В теле PR нет ссылок "Closes #N" — метки не меняем.');
+              return;
+            }
+
+            const open = context.payload.action !== 'closed';
+            const draft = pr.draft === true;
+            const add = !open ? [] : draft ? ['status:in-progress'] : ['status:review'];
+            const remove = !open ? ['status:in-progress', 'status:review'] : draft ? ['status:review'] : ['status:in-progress'];
+
+            for (const number of issues) {
+              for (const label of add) {
+                await github.rest.issues.addLabels({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: number,
+                  labels: [label],
+                }).catch((error) => core.warning(`#${number}: ${error.message}`));
+              }
+              for (const label of remove) {
+                await github.rest.issues.removeLabel({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: number,
+                  name: label,
+                }).catch(() => {});
+              }
+            }
+            core.info(`Обновлены issues: ${issues.join(', ')}`);

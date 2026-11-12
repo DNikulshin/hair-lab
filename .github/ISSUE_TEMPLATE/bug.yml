@@ -1,0 +1,39 @@
+name: Баг
+description: Что-то работает не так, как ожидалось
+labels: ['type:bug', 'status:todo']
+body:
+  - type: textarea
+    id: steps
+    attributes:
+      label: Шаги воспроизведения
+      placeholder: |
+        1. Открыть /booking
+        2. Выбрать слот 12:00
+        3. Нажать «Записаться»
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Ожидаемый результат
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Фактический результат
+      description: Без персональных данных клиентов. Телефоны и email в issue не вставлять.
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Где воспроизводится
+      placeholder: локально / main / прод, браузер, commit sha
+  - type: dropdown
+    id: severity
+    attributes:
+      label: Серьёзность
+      options: ['p1 — блокер (данные, оплата, доступ)', 'p2 — заметно мешает', 'p3 — косметика']
+    validations:
+      required: true

@@ -1,0 +1,57 @@
+name: Задача / фича
+description: Новая функциональность или изменение поведения
+labels: ['type:feature', 'status:todo']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Заполняйте коротко и по делу. Задача должна быть закрыта одним PR (или явно разбита на подзадачи).
+  - type: textarea
+    id: goal
+    attributes:
+      label: Цель
+      description: Какую проблему решаем и для кого. Одно-два предложения.
+      placeholder: Клиент может записаться на услугу без регистрации.
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Что входит в задачу
+      description: Список конкретных изменений по слоям (contracts → api → web).
+      placeholder: |
+        - contracts: схема создания записи
+        - api: POST /bookings, уникальность слота в БД
+        - web: форма записи
+    validations:
+      required: true
+  - type: textarea
+    id: out-of-scope
+    attributes:
+      label: Что не входит
+      description: Обязательно. Всё соблазнительное, но не нужное в этой задаче.
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Критерии приёмки
+      description: Проверяемые условия, по которым владелец принимает работу.
+      placeholder: |
+        - повторная отправка формы не создаёт вторую запись
+        - занятый слот возвращает slot_unavailable
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Область
+      multiple: true
+      options: [api, web, contracts, данные/БД, инфраструктура, дизайн]
+    validations:
+      required: true
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Приоритет
+      options: ['p1 — блокирует MVP', 'p2 — нужно к релизу', 'p3 — можно позже']
+    validations:
+      required: true
