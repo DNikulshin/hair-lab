@@ -37,7 +37,13 @@ jobs:
             const open = context.payload.action !== 'closed';
             const draft = pr.draft === true;
             const add = !open ? [] : draft ? ['status:in-progress'] : ['status:review'];
-            const remove = !open ? ['status:in-progress', 'status:review'] : draft ? ['status:review'] : ['status:in-progress'];
+            // Метка статуса должна быть одна: при переходе убираем предыдущую.
+            // status:todo приходит из шаблона issue, status:review/status:in-progress — от PR.
+            const remove = !open
+              ? ['status:in-progress', 'status:review', 'status:todo']
+              : draft
+                ? ['status:review', 'status:todo']
+                : ['status:in-progress', 'status:todo'];
 
             for (const number of issues) {
               for (const label of add) {
