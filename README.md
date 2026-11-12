@@ -25,7 +25,8 @@ pnpm dev                      # web :3000, api :3001
 
 Подробности: [docs/environment.md](./docs/environment.md), деплой — [docs/deploy.md](./docs/deploy.md),
 процесс (ветки, issues, Kanban) — [docs/workflow.md](./docs/workflow.md), интеграции —
-[docs/integrations.md](./docs/integrations.md).
+[docs/integrations.md](./docs/integrations.md), выбор почтового провайдера —
+[docs/email-providers.md](./docs/email-providers.md).
 
 ## Структура
 
