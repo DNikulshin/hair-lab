@@ -16,7 +16,12 @@ jobs:
     # PR из форков не трогаем: у них нет прав на метки.
     if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
+    env:
+      # PAT со scope `project`: GITHUB_TOKEN не умеет Projects v2.
+      PROJECT_TOKEN: ${{ secrets.PROJECT_TOKEN }}
     steps:
+      - uses: actions/checkout@v4
+
       - uses: actions/github-script@v7
         with:
           script: |
@@ -53,3 +58,11 @@ jobs:
               }
             }
             core.info(`Обновлены issues: ${issues.join(', ')}`);
+
+      # Полная синхронизация колонок доски. Без PROJECT_TOKEN шаг пропускается.
+      - name: Синхронизировать доску Projects
+        if: env.PROJECT_TOKEN != ''
+        env:
+          GH_TOKEN: ${{ secrets.PROJECT_TOKEN }}
+          PROJECT_NUMBER: ${{ vars.PROJECT_NUMBER || '4' }}
+        run: ./scripts/gh-project-sync.sh
