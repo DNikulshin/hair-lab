@@ -157,7 +157,7 @@ jobs:
           PAYMENT_RECEIPT_EMAIL=${{ vars.PAYMENT_RECEIPT_EMAIL || '' }}
 
           # Почта
-          SMTP_HOST=${{ vars.SMTP_HOST || 'smtp.gmail.com' }}
+          SMTP_HOST=${{ vars.SMTP_HOST || 'smtp.yandex.ru' }}
           SMTP_PORT=${{ vars.SMTP_PORT || '465' }}
           SMTP_SECURE=${{ vars.SMTP_SECURE || 'true' }}
           SMTP_USER=${{ vars.SMTP_USER || '' }}
