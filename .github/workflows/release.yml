@@ -39,9 +39,8 @@ jobs:
             echo "::error::Тег $GITHUB_REF_NAME указывает на коммит вне main — слияние некорректно, образы не публикуются."
             exit 1
           fi
+      # Версия pnpm берётся из packageManager в package.json.
       - uses: pnpm/action-setup@v4
-        with:
-          version: 9
       - uses: actions/setup-node@v4
         with:
           node-version-file: .nvmrc
