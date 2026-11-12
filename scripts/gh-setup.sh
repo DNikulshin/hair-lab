@@ -45,7 +45,11 @@ protect_main() {
 {
   "required_status_checks": {
     "strict": true,
-    "contexts": ["checks", "docker (api)", "docker (web)"]
+    "contexts": [
+      "checks",
+      "docker (api, apps/api/Dockerfile)",
+      "docker (web, apps/web/Dockerfile)"
+    ]
   },
   "enforce_admins": false,
   "required_pull_request_reviews": {

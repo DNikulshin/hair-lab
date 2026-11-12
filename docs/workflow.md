@@ -66,7 +66,8 @@ fix(web): не терять выбранный слот при ошибке се
 - Объём: одна задача. Если дифф разрастается — дробить на PR.
 - Merge — squash: в `main` попадает один коммит, история линейная. Merge commit и rebase
   отключены на уровне репозитория.
-- PR не мержится, пока не зелёные `checks`, `docker (api)`, `docker (web)`
+- PR не мержится, пока не зелёные `checks`, `docker (api, apps/api/Dockerfile)`,
+  `docker (web, apps/web/Dockerfile)`
   (правила ветки `main`, включаются `./scripts/gh-setup.sh --protect`).
 
 ## Метки и релизы
