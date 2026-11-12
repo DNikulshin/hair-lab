@@ -30,6 +30,25 @@ services:
       SALON_TIMEZONE: ${SALON_TIMEZONE:-Europe/Moscow}
       CORS_ORIGINS: ${CORS_ORIGINS:?задайте CORS_ORIGINS}
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-hair_lab}?schema=public
+      # Базовый адрес для ссылок в письмах (вход по ссылке, подтверждение записи).
+      APP_URL: ${APP_URL:-}
+      # Аутентификация (issue #6). Пустое значение = интеграция ещё не включена.
+      AUTH_SECRET: ${AUTH_SECRET:-}
+      # ЮKassa (issue #8): test до запуска, live только осознанно.
+      PAYMENTS_MODE: ${PAYMENTS_MODE:-test}
+      YOOKASSA_SHOP_ID: ${YOOKASSA_SHOP_ID:-}
+      YOOKASSA_SECRET_KEY: ${YOOKASSA_SECRET_KEY:-}
+      YOOKASSA_RETURN_URL: ${YOOKASSA_RETURN_URL:-}
+      YOOKASSA_VAT_CODE: ${YOOKASSA_VAT_CODE:-1}
+      PAYMENT_RECEIPT_EMAIL: ${PAYMENT_RECEIPT_EMAIL:-}
+      # Почта (issue #9): SMTP Яндекса или Google.
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-465}
+      SMTP_SECURE: ${SMTP_SECURE:-true}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM_EMAIL: ${SMTP_FROM_EMAIL:-}
+      SMTP_FROM_NAME: ${SMTP_FROM_NAME:-Стриж Lab}
     depends_on:
       db:
         condition: service_healthy

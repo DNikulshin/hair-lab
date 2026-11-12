@@ -60,12 +60,15 @@ docker compose -f docker-compose.prod.yml up -d
 
 Переменные репозитория (Settings → Variables):
 
-| Переменная                        | Назначение                                          |
-| --------------------------------- | --------------------------------------------------- |
-| `DEPLOY_ENABLED`                  | `true` включает деплой-джобу                        |
-| `VPS_APP_DIR`                     | каталог на сервере, по умолчанию `/opt/hair-lab`    |
-| `POSTGRES_USER`, `POSTGRES_DB`    | учётные данные БД                                   |
-| `NEXT_PUBLIC_SITE_*`, `LOG_LEVEL` | бренд и настройки (подставляются в образ и compose) |
+| Переменная                                                                                               | Назначение                                          |
+| -------------------------------------------------------------------------------------------------------- | --------------------------------------------------- |
+| `DEPLOY_ENABLED`                                                                                         | `true` включает деплой-джобу                        |
+| `VPS_APP_DIR`                                                                                            | каталог на сервере, по умолчанию `/opt/hair-lab`    |
+| `POSTGRES_USER`, `POSTGRES_DB`                                                                           | учётные данные БД                                   |
+| `NEXT_PUBLIC_SITE_*`, `LOG_LEVEL`                                                                        | бренд и настройки (подставляются в образ и compose) |
+| `APP_URL`                                                                                                | базовый адрес для ссылок в письмах                  |
+| `PAYMENTS_MODE`, `YOOKASSA_SHOP_ID`, `YOOKASSA_RETURN_URL`, `YOOKASSA_VAT_CODE`, `PAYMENT_RECEIPT_EMAIL` | ЮKassa (issue #8)                                   |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_FROM_EMAIL`, `SMTP_FROM_NAME`                | почта (issue #9)                                    |
 
 Секреты:
 
@@ -74,6 +77,12 @@ docker compose -f docker-compose.prod.yml up -d
 | `VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY` | доступ по SSH (ключ без passphrase)               |
 | `POSTGRES_PASSWORD`                   | пароль БД                                         |
 | `GHCR_PAT`                            | токен с `read:packages` для `docker login` на VPS |
+| `AUTH_SECRET`                         | подпись токенов входа (≥ 32 символов)             |
+| `YOOKASSA_SECRET_KEY`                 | секретный ключ магазина ЮKassa                    |
+| `SMTP_PASSWORD`                       | пароль приложения почты                           |
+
+Имена образов в GHCR приводятся к нижнему регистру в workflow (шаг «Нормализовать имя образа»):
+Docker не принимает заглавные буквы в имени образа.
 
 Подготовка сервера (один раз): Docker + compose plugin, пользователь с доступом к `docker`,
 каталог `${VPS_APP_DIR}`, порты 80/443 для reverse proxy.
