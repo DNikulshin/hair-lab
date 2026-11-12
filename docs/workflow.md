@@ -31,6 +31,18 @@
 по событиям PR: открытие PR → `review`, черновик → `in-progress`, закрытие → метки снимаются.
 Issue закрывается автоматически строкой `Closes #<номер>` в теле PR.
 
+### Доска Projects
+
+https://github.com/users/DNikulshin/projects/4 — одна доска на проект, колонки = поле
+`Status`: Todo / In progress / Review / Blocked / Done.
+
+- Каждая карточка — issue репозитория; состояние в колонке выводится из меток `status:*`,
+  закрытый issue попадает в Done.
+- Синхронизация: `./scripts/gh-project-sync.sh` (идемпотентно, можно запускать вручную).
+- Автоматически: `board.yml` вызывает скрипт, если задан секрет `PROJECT_TOKEN`
+  (PAT со scope `project`; `GITHUB_TOKEN` не имеет доступа к Projects v2).
+- Номер проекта переопределяется переменной репозитория `PROJECT_NUMBER` (по умолчанию 4).
+
 Дополнительные метки: `type:*` (feature/bug/chore/spike), `area:*` (api/web/contracts/data/infra/design),
 `prio:p1..p3`, `size:s|m|l`, `needs-owner` (нужно решение, а не код).
 
