@@ -157,12 +157,12 @@ jobs:
           PAYMENT_RECEIPT_EMAIL=${{ vars.PAYMENT_RECEIPT_EMAIL || '' }}
 
           # Почта
-          SMTP_HOST=${{ vars.SMTP_HOST || '' }}
+          SMTP_HOST=${{ vars.SMTP_HOST || 'smtp.gmail.com' }}
           SMTP_PORT=${{ vars.SMTP_PORT || '465' }}
           SMTP_SECURE=${{ vars.SMTP_SECURE || 'true' }}
           SMTP_USER=${{ vars.SMTP_USER || '' }}
-          SMTP_PASSWORD=${{ secrets.SMTP_PASSWORD }}
           SMTP_FROM_EMAIL=${{ vars.SMTP_FROM_EMAIL || vars.SMTP_USER || '' }}
+          SMTP_PASSWORD=${{ secrets.SMTP_PASSWORD }}
           SMTP_FROM_NAME=${{ vars.SMTP_FROM_NAME || vars.NEXT_PUBLIC_SITE_NAME || 'Стриж Lab' }}
           EOF
 
