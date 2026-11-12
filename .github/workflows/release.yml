@@ -1,0 +1,169 @@
+name: Release
+
+# Пайплайн выпуска: образы в GHCR, затем деплой на VPS.
+# 1) push в main → образы с тегом sha и latest
+# 2) тег v*.*.* → дополнительно версия
+# 3) деплой выполняется, только если задана переменная репозитория DEPLOY_ENABLED=true
+on:
+  push:
+    branches: [main]
+    tags: ['v*.*.*']
+  workflow_dispatch:
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_BASE: ${{ github.repository }}
+
+jobs:
+  # По тегу проверяем, что релиз действительно собран из main (корректное слияние),
+  # и прогоняем проверки заново — тег может указывать на старый коммит.
+  verify-tag:
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Коммит тега должен быть в main
+        run: |
+          git fetch origin main --no-tags
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::Тег $GITHUB_REF_NAME указывает на коммит вне main — слияние некорректно, образы не публикуются."
+            exit 1
+          fi
+      # Версия pnpm берётся из packageManager в package.json.
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @hair-lab/contracts build
+      - run: pnpm typecheck
+      - run: pnpm lint
+      - run: pnpm check:arch
+      - run: pnpm test
+
+  images:
+    needs: [verify-tag]
+    # Для push в main verify-tag пропускается — образы собираются как обычно.
+    if: always() && (needs.verify-tag.result == 'success' || needs.verify-tag.result == 'skipped')
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - component: api
+            dockerfile: apps/api/Dockerfile
+            build_args: ''
+          - component: web
+            dockerfile: apps/web/Dockerfile
+            build_args: |
+              NEXT_PUBLIC_SITE_NAME=${{ vars.NEXT_PUBLIC_SITE_NAME || 'Стриж Lab' }}
+              NEXT_PUBLIC_SITE_SHORT_NAME=${{ vars.NEXT_PUBLIC_SITE_SHORT_NAME || 'Стриж' }}
+              NEXT_PUBLIC_SITE_DESCRIPTION=${{ vars.NEXT_PUBLIC_SITE_DESCRIPTION || 'Салон красоты в Москве: услуги, мастера и онлайн-запись.' }}
+              NEXT_PUBLIC_SITE_URL=${{ vars.NEXT_PUBLIC_SITE_URL || 'https://strizhlab.ru' }}
+              NEXT_PUBLIC_SITE_CITY=${{ vars.NEXT_PUBLIC_SITE_CITY || 'Москва' }}
+              NEXT_PUBLIC_SITE_TIMEZONE=${{ vars.NEXT_PUBLIC_SITE_TIMEZONE || 'Europe/Moscow' }}
+              NEXT_PUBLIC_API_URL=${{ vars.NEXT_PUBLIC_API_URL || 'https://strizhlab.ru/api' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Собрать теги
+        id: tags
+        run: |
+          IMAGE="${REGISTRY}/${IMAGE_BASE}-${{ matrix.component }}"
+          TAGS="${IMAGE}:${{ github.sha }}"
+          TAGS="${TAGS},${IMAGE}:latest"
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            TAGS="${TAGS},${IMAGE}:${GITHUB_REF_NAME}"
+          fi
+          echo "list=${TAGS}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          push: true
+          tags: ${{ steps.tags.outputs.list }}
+          build-args: ${{ matrix.build_args }}
+          cache-from: type=gha,scope=${{ matrix.component }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.component }}
+
+  deploy:
+    needs: images
+    if: github.ref == 'refs/heads/main' && vars.DEPLOY_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Подготовить SSH
+        env:
+          SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H "$VPS_HOST" >> ~/.ssh/known_hosts
+
+      - name: Собрать .env для VPS
+        run: |
+          cat > .env.prod <<EOF
+          POSTGRES_USER=${{ vars.POSTGRES_USER || 'hair_lab' }}
+          POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}
+          POSTGRES_DB=${{ vars.POSTGRES_DB || 'hair_lab' }}
+          GHCR_IMAGE_API=${{ env.REGISTRY }}/${{ env.IMAGE_BASE }}-api
+          GHCR_IMAGE_WEB=${{ env.REGISTRY }}/${{ env.IMAGE_BASE }}-web
+          IMAGE_TAG=${{ github.sha }}
+          LOG_LEVEL=${{ vars.LOG_LEVEL || 'info' }}
+          SALON_TIMEZONE=${{ vars.NEXT_PUBLIC_SITE_TIMEZONE || 'Europe/Moscow' }}
+          CORS_ORIGINS=${{ vars.NEXT_PUBLIC_SITE_URL || 'https://strizhlab.ru' }}
+          EOF
+
+      - name: Выгрузить compose и .env на VPS
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          APP_DIR: ${{ vars.VPS_APP_DIR || '/opt/hair-lab' }}
+        run: |
+          ssh "$VPS_USER@$VPS_HOST" "mkdir -p '$APP_DIR'"
+          scp docker-compose.prod.yml .env.prod "$VPS_USER@$VPS_HOST:$APP_DIR/"
+          ssh "$VPS_USER@$VPS_HOST" "mv '$APP_DIR/.env.prod' '$APP_DIR/.env'"
+
+      - name: Обновить контейнеры
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          APP_DIR: ${{ vars.VPS_APP_DIR || '/opt/hair-lab' }}
+          GHCR_PAT: ${{ secrets.GHCR_PAT }}
+          GHCR_USER: ${{ github.repository_owner }}
+        run: |
+          ssh "$VPS_USER@$VPS_HOST" \
+            "APP_DIR='$APP_DIR' GHCR_PAT='$GHCR_PAT' GHCR_USER='$GHCR_USER' bash -s" <<'REMOTE'
+          set -euo pipefail
+          cd "$APP_DIR"
+          if [ -n "${GHCR_PAT}" ]; then
+            printf '%s' "$GHCR_PAT" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
+          fi
+          docker compose -f docker-compose.prod.yml pull
+          docker compose -f docker-compose.prod.yml up -d --remove-orphans
+          docker image prune -f
+          REMOTE

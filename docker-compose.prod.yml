@@ -1,0 +1,53 @@
+# Прод-развёртывание на одном VPS: те же образы, что выпускает CI в GHCR.
+# Локальная проверка: GHCR_IMAGE_API=... GHCR_IMAGE_WEB=... IMAGE_TAG=<sha> \
+#   docker compose -f docker-compose.prod.yml up -d
+name: hair-lab
+
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?задайте POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?задайте POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-hair_lab}
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    image: ${GHCR_IMAGE_API:?задайте GHCR_IMAGE_API}:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      API_HOST: 0.0.0.0
+      API_PORT: 3001
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      SALON_TIMEZONE: ${SALON_TIMEZONE:-Europe/Moscow}
+      CORS_ORIGINS: ${CORS_ORIGINS:?задайте CORS_ORIGINS}
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-hair_lab}?schema=public
+    depends_on:
+      db:
+        condition: service_healthy
+    # Только loopback: снаружи — nginx на хосте (deploy/nginx/hair-lab.conf.example).
+    ports:
+      - '127.0.0.1:${API_PORT:-3001}:3001'
+
+  web:
+    image: ${GHCR_IMAGE_WEB:?задайте GHCR_IMAGE_WEB}:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - '127.0.0.1:${WEB_PORT:-3000}:3000'
+
+volumes:
+  db-data:

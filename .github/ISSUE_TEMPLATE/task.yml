@@ -1,0 +1,25 @@
+name: Инфраструктура / техническая задача
+description: CI, деплой, зависимости, рефакторинг без изменения поведения
+labels: ['type:chore', 'status:todo']
+body:
+  - type: textarea
+    id: goal
+    attributes:
+      label: Зачем
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Что делаем
+    validations:
+      required: true
+  - type: textarea
+    id: done
+    attributes:
+      label: Готово, когда
+      placeholder: |
+        - пайплайн зелёный
+        - прод обновлён, откат проверен
+    validations:
+      required: true

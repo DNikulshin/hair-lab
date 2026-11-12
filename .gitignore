@@ -1,0 +1,22 @@
+# зависимости и артефакты сборки
+node_modules/
+dist/
+.next/
+.turbo/
+coverage/
+*.tsbuildinfo
+
+# окружение и секреты
+.env
+.env.*
+!.env.example
+
+# артефакты агентского цикла
+.pi/artifacts/
+
+# прочее
+.DS_Store
+*.log
+
+# генерируется Next.js
+next-env.d.ts
