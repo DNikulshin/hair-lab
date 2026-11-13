@@ -11,7 +11,9 @@ export default function LoginPage() {
         <section className="flex flex-col gap-6 rounded-card border border-border bg-surface-raised p-6">
           <div className="flex flex-col gap-2">
             <h1 className="text-2xl font-semibold">Вход</h1>
-            <p className="text-sm text-muted">Войдите в аккаунт по электронной почте и паролю.</p>
+            <p className="text-sm text-muted">
+              Войдите по паролю или запросите одноразовую ссылку на почту.
+            </p>
           </div>
           <LoginForm />
         </section>

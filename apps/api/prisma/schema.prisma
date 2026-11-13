@@ -139,6 +139,7 @@ model Client {
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   sessions     Session[]
+  loginTokens  LoginToken[]
   appointments Appointment[]
 
   @@map("clients")
@@ -161,6 +162,22 @@ model Session {
 
   @@index([clientId])
   @@map("sessions")
+}
+
+/// Одноразовая ссылка для входа и подтверждения email. В БД хранится только SHA-256 токена.
+model LoginToken {
+  id String @id @default(uuid()) @db.Uuid
+
+  tokenHash String @unique @map("token_hash")
+  clientId  String @map("client_id") @db.Uuid
+  client    Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  expiresAt  DateTime  @map("expires_at") @db.Timestamptz(3)
+  consumedAt DateTime? @map("consumed_at") @db.Timestamptz(3)
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([clientId, consumedAt])
+  @@map("login_tokens")
 }
 
 /// Гостевая запись на услугу. Персональные данные клиента маскируются в логах.

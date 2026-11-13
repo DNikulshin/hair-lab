@@ -1,5 +1,8 @@
 import {
   authResponseSchema,
+  magicLinkConsumeSchema,
+  magicLinkRequestSchema,
+  okResponseSchema,
   type AuthResponse,
   type LoginRequest,
   type RegisterRequest,
@@ -7,26 +10,33 @@ import {
 
 export type AuthFailure = { kind: 'network' } | { kind: 'http'; status: number; body: unknown };
 export type AuthResult = { ok: true; data: AuthResponse } | { ok: false; failure: AuthFailure };
+export type MagicLinkRequestResult = { ok: true } | { ok: false; failure: AuthFailure };
 
-async function submit(path: string, body: LoginRequest | RegisterRequest): Promise<AuthResult> {
-  let response: Response;
+async function postJson(path: string, body: unknown): Promise<Response | null> {
   try {
-    response = await fetch(path, {
+    return await fetch(path, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
       cache: 'no-store',
     });
   } catch {
-    return { ok: false, failure: { kind: 'network' } };
+    return null;
   }
+}
 
-  let payload: unknown;
+async function readPayload(response: Response): Promise<unknown> {
   try {
-    payload = await response.json();
+    return await response.json();
   } catch {
-    payload = null;
+    return null;
   }
+}
+
+async function submitAuth(path: string, body: unknown): Promise<AuthResult> {
+  const response = await postJson(path, body);
+  if (response === null) return { ok: false, failure: { kind: 'network' } };
+  const payload = await readPayload(response);
   if (response.ok) {
     const parsed = authResponseSchema.safeParse(payload);
     return parsed.success
@@ -37,9 +47,29 @@ async function submit(path: string, body: LoginRequest | RegisterRequest): Promi
 }
 
 export function login(body: LoginRequest): Promise<AuthResult> {
-  return submit('/api/auth/login', body);
+  return submitAuth('/api/auth/login', body);
 }
 
 export function register(body: RegisterRequest): Promise<AuthResult> {
-  return submit('/api/auth/register', body);
+  return submitAuth('/api/auth/register', body);
+}
+
+export async function requestMagicLink(email: string): Promise<MagicLinkRequestResult> {
+  const parsed = magicLinkRequestSchema.safeParse({ email });
+  if (!parsed.success) {
+    return { ok: false, failure: { kind: 'http', status: 400, body: null } };
+  }
+  const response = await postJson('/api/auth/magic-link', parsed.data);
+  if (response === null) return { ok: false, failure: { kind: 'network' } };
+  const payload = await readPayload(response);
+  if (response.ok && okResponseSchema.safeParse(payload).success) return { ok: true };
+  return { ok: false, failure: { kind: 'http', status: response.status, body: payload } };
+}
+
+export function consumeMagicLink(token: string): Promise<AuthResult> {
+  const parsed = magicLinkConsumeSchema.safeParse({ token });
+  if (!parsed.success) {
+    return Promise.resolve({ ok: false, failure: { kind: 'http', status: 401, body: null } });
+  }
+  return submitAuth('/api/auth/magic-link/consume', parsed.data);
 }

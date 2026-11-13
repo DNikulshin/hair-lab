@@ -12,10 +12,12 @@ export interface RenderedEmail {
   html: string;
   replyTo?: string;
   /**
-   * Момент начала события (записи). Письмо, у которого это время уже прошло,
-   * не отправляется: `failed` с причиной `expired` (см. план #9).
+   * Deadline отправки: начало записи или истечение одноразовой ссылки. Письмо,
+   * для которого этот момент уже наступил, не отправляется (`failed: expired`).
    */
   startsAt: Date;
+  /** Called after a successful transport send for short-lived in-memory delivery secrets. */
+  afterSent?: () => void;
 }
 
 export interface EmailTemplate {

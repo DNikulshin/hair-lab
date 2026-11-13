@@ -1,7 +1,6 @@
 'use client';
 
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import { useState, type FormEvent } from 'react';
 import { register } from '../api/auth-api';
 import { mapAuthError } from '../model/map-auth-error';
@@ -9,11 +8,11 @@ import { mapAuthError } from '../model/map-auth-error';
 const INPUT_CLASS = 'w-full rounded-card border border-border bg-surface-raised px-3 py-2 text-sm';
 
 export function RegisterForm() {
-  const router = useRouter();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -26,8 +25,22 @@ export function RegisterForm() {
       setError(mapAuthError(result.failure));
       return;
     }
-    router.replace('/');
-    router.refresh();
+    setSubmitted(true);
+  }
+
+  if (submitted) {
+    return (
+      <div className="flex flex-col gap-3" role="status">
+        <h2 className="text-lg font-semibold">Проверьте почту</h2>
+        <p className="text-sm text-muted">
+          Если для этого адреса можно создать аккаунт или выполнить вход, мы отправили ссылку для
+          подтверждения и входа.
+        </p>
+        <Link href="/" className="w-fit text-sm underline">
+          На главную
+        </Link>
+      </div>
+    );
   }
 
   return (

@@ -12,6 +12,22 @@ describe('mapAuthError', () => {
     ).toContain('Проверьте данные или войдите');
   });
 
+  it('maps credential failures to neutral wording', () => {
+    expect(
+      mapAuthError({
+        kind: 'http',
+        status: 401,
+        body: { error: { code: 'unauthorized', message: 'Неизвестный адрес' } },
+      }),
+    ).toContain('Неверная почта или пароль');
+  });
+
+  it('maps validation failures to neutral wording', () => {
+    expect(mapAuthError({ kind: 'http', status: 400, body: null })).toContain(
+      'Проверьте адрес почты и пароль',
+    );
+  });
+
   it('does not expose server details or entered values', () => {
     expect(
       mapAuthError({
