@@ -2,13 +2,29 @@
 
 # Образ web: Next.js standalone. NEXT_PUBLIC_* встраиваются в бандл на этапе сборки,
 # поэтому бренд передаётся build-arg'ами (значения — из workflow или из CI-переменных).
-FROM node:22-alpine AS build
+#
+# Слои разделены намеренно: `deps` копирует только манифесты воркспейса, поэтому слой
+# `pnpm install` переиспользуется, пока не изменились lockfile или package.json пакетов.
+FROM node:22-alpine AS base
 ENV PNPM_HOME=/pnpm
 ENV PATH=$PNPM_HOME:$PATH
 RUN corepack enable
 WORKDIR /repo
-COPY . .
 
+FROM base AS deps
+# Все воркспейс-пакеты из pnpm-workspace.yaml: без их манифестов `--frozen-lockfile` не пройдёт.
+COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
+COPY apps/api/package.json apps/api/
+COPY apps/web/package.json apps/web/
+COPY packages/contracts/package.json packages/contracts/
+COPY tooling/eslint/package.json tooling/eslint/
+COPY tooling/prettier/package.json tooling/prettier/
+COPY tooling/tsconfig/package.json tooling/tsconfig/
+RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
+    pnpm install --frozen-lockfile
+
+FROM deps AS build
+# NEXT_PUBLIC_* должны быть заданы до `next build`: значения встраиваются в клиентский бандл.
 ARG NEXT_PUBLIC_SITE_NAME
 ARG NEXT_PUBLIC_SITE_SHORT_NAME
 ARG NEXT_PUBLIC_SITE_DESCRIPTION
@@ -25,8 +41,10 @@ ENV NEXT_PUBLIC_SITE_NAME=$NEXT_PUBLIC_SITE_NAME \
     NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL \
     NEXT_TELEMETRY_DISABLED=1
 
-RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
-    pnpm install --frozen-lockfile
+# Исходники только того, что нужно web: общий тулинг, контракты и сам пакет.
+COPY tooling tooling
+COPY packages/contracts packages/contracts
+COPY apps/web apps/web
 RUN pnpm --filter @hair-lab/contracts build \
  && pnpm --filter @hair-lab/web build
 
