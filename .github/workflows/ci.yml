@@ -58,22 +58,49 @@ jobs:
       - run: pnpm test
       - run: pnpm format:check
 
-  # Проверка Dockerfile на каждом PR: собираем только образы затронутых компонентов,
-  # без публикации. Пустая матрица (docs-only PR) не запускает ни одной сборки.
+  # Проверка Dockerfile на каждом PR: собираем только образы затронутых компонентов.
+  #
+  # ВАЖНО: матрица здесь статическая (оба компонента всегда в ней), а пропуск делается
+  # на уровне шагов. Причина — required checks в branch protection: они привязаны к именам
+  # `docker (api, apps/api/Dockerfile)` и `docker (web, apps/web/Dockerfile)`. Если job
+  # пропустить целиком (`if` или динамическая матрица), эти имена никогда не отчитаются,
+  # и PR навсегда получает «Expected — Waiting for status to be reported». Поэтому job
+  # всегда создаёт оба чека, а неизменённый компонент просто не выполняет шаги.
   docker:
     runs-on: ubuntu-latest
     needs: [checks, changes]
-    # Пустая матрица — docs-only PR: job не запускается вообще (if считается до развёрания матрицы).
-    if: needs.changes.outputs.any == 'true'
     strategy:
       fail-fast: false
-      matrix: ${{ fromJSON(needs.changes.outputs.matrix) }}
+      matrix:
+        include:
+          - component: api
+            dockerfile: apps/api/Dockerfile
+          - component: web
+            dockerfile: apps/web/Dockerfile
     steps:
+      # Решает, собирать ли этот компонент: значение приходит из job `changes`.
+      - name: Определить, нужна ли сборка
+        id: gate
+        run: |
+          if [ "${{ matrix.component }}" = "api" ]; then
+            echo "run=${{ needs.changes.outputs.api }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=${{ needs.changes.outputs.web }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Компонент не менялся — сборка пропущена
+        if: steps.gate.outputs.run != 'true'
+        run: |
+          echo "Код ${{ matrix.component }} не менялся: сборка пропущена, чек остаётся зелёным"
+
       - uses: actions/checkout@v4
+        if: steps.gate.outputs.run == 'true'
 
       - uses: docker/setup-buildx-action@v3
+        if: steps.gate.outputs.run == 'true'
 
       - uses: docker/build-push-action@v6
+        if: steps.gate.outputs.run == 'true'
         with:
           context: .
           file: ${{ matrix.dockerfile }}
