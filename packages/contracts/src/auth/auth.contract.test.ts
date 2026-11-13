@@ -4,6 +4,8 @@ import {
   clientAccountSchema,
   emailSchema,
   loginRequestSchema,
+  magicLinkConsumeSchema,
+  magicLinkRequestSchema,
   okResponseSchema,
   passwordSchema,
   registerRequestSchema,
@@ -85,6 +87,21 @@ describe('clientAccountSchema', () => {
     expect(() => clientAccountSchema.parse({ ...client, email: 'bad' })).toThrow();
     expect(() => clientAccountSchema.parse({ ...client, emailVerifiedAt: '04.03.2030' })).toThrow();
     expect(() => clientAccountSchema.parse({ id: clientId, email })).toThrow();
+  });
+});
+
+describe('magic link request contracts', () => {
+  it('normalizes request email and validates consume token shape', () => {
+    expect(magicLinkRequestSchema.parse({ email: ' Client@Example.Invalid ' })).toEqual({ email });
+    expect(magicLinkConsumeSchema.parse({ token: 'one-time-token' })).toEqual({
+      token: 'one-time-token',
+    });
+  });
+
+  it('rejects empty, overlong, and non-string tokens', () => {
+    expect(() => magicLinkConsumeSchema.parse({ token: '' })).toThrow();
+    expect(() => magicLinkConsumeSchema.parse({ token: 'x'.repeat(129) })).toThrow();
+    expect(() => magicLinkConsumeSchema.parse({ token: 42 })).toThrow();
   });
 });
 
