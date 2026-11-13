@@ -6,6 +6,7 @@ import {
 } from '@hair-lab/contracts';
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import { buildServer } from '../src/app/build-server';
+import { createBooking } from '../src/features/bookings/bookings.service';
 import { env } from '../src/shared/config/env';
 import { createFixture, createTestDb, fakeClient } from './db/helpers';
 
@@ -379,6 +380,77 @@ describe('POST /bookings', () => {
     expect(bookingResponseSchema.parse(second.body).booking.id).toBe(
       bookingResponseSchema.parse(first.body).booking.id,
     );
+    expect(await db.appointment.count({ where: { masterId } })).toBe(1);
+  });
+
+  it('параллельные запросы с одним ключом: 201 и 200, никаких 409 и дублей', async () => {
+    const { masterId, serviceId, date } = await setupSalon();
+    const slot = slotsResponseSchema.parse((await getSlots({ serviceId, date })).body)
+      .items[0] as Slot;
+    const body = bookingBody({
+      masterId,
+      serviceId,
+      startsAt: slot.startsAt,
+      idempotencyKey: nextKey(),
+    });
+
+    // Сценарий сетевого ретрая: оба запроса проходят предпроверку одновременно, один
+    // фиксирует запись, второй проигрывает гонку (23P01/23505/P2034). Проигравший обязан
+    // вернуть 200 по тому же ключу — и ни в каком случае 409 slot_unavailable.
+    const [first, second] = await Promise.all([postBooking(body), postBooking(body)]);
+
+    expect([first.statusCode, second.statusCode].sort((a, b) => a - b)).toEqual([200, 201]);
+
+    const firstId = bookingResponseSchema.parse(first.body).booking.id;
+    const secondId = bookingResponseSchema.parse(second.body).booking.id;
+    expect(secondId).toBe(firstId);
+
+    expect(await db.appointment.count({ where: { masterId } })).toBe(1);
+    expect(await db.outboxMessage.count({ where: { appointmentId: firstId } })).toBe(1);
+  });
+
+  it('повтор, когда слот занят нашей же записью: 200, а не 409 slot_unavailable', async () => {
+    const { masterId, serviceId, date } = await setupSalon();
+    const slot = slotsResponseSchema.parse((await getSlots({ serviceId, date })).body)
+      .items[0] as Slot;
+    const body = bookingBody({
+      masterId,
+      serviceId,
+      startsAt: slot.startsAt,
+      idempotencyKey: nextKey(),
+    });
+
+    const created = await postBooking(body);
+    expect(created.statusCode).toBe(201);
+    const bookingId = bookingResponseSchema.parse(created.body).booking.id;
+
+    // Окно гонки: запись уже зафиксирована, но чтение по ключу в начале createBooking
+    // её ещё не видит — так выглядит сетевой ретрай, уехавший после P2034. Дальше слот
+    // занят нашей же записью, и сервис обязан вернуть 200 по ключу, а не 409.
+    let hideExisting = true;
+    const staleDb = new Proxy(db, {
+      get(target, property, receiver) {
+        if (property === 'appointment') {
+          const original = target.appointment.findUnique.bind(target.appointment);
+          const delegate = Object.create(target.appointment) as typeof target.appointment;
+          delegate.findUnique = (async (args: never) => {
+            if (hideExisting) {
+              hideExisting = false;
+              return null;
+            }
+            return original(args);
+          }) as typeof delegate.findUnique;
+          return delegate;
+        }
+        const value = Reflect.get(target, property, receiver) as unknown;
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    }) as typeof db;
+
+    const replayed = await createBooking(staleDb, body);
+
+    expect(replayed.status).toBe(200);
+    expect(replayed.booking.id).toBe(bookingId);
     expect(await db.appointment.count({ where: { masterId } })).toBe(1);
   });
 
