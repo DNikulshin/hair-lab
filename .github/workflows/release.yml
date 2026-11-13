@@ -23,6 +23,23 @@ env:
   IMAGE_BASE: ${{ github.repository }}
 
 jobs:
+  # Что изменилось: пересобираем только затронутые образы (scripts/changed-components.mjs).
+  # Тег v*.*.*, workflow_dispatch, отсутствие базы для диффа — всегда оба образа.
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      api: ${{ steps.detect.outputs.api }}
+      web: ${{ steps.detect.outputs.web }}
+      any: ${{ steps.detect.outputs.any }}
+      matrix: ${{ steps.detect.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - id: detect
+        run: node scripts/changed-components.mjs
+
   # По тегу проверяем, что релиз действительно собран из main (корректное слияние),
   # и прогоняем проверки заново — тег может указывать на старый коммит.
   verify-tag:
@@ -53,27 +70,14 @@ jobs:
       - run: pnpm test
 
   images:
-    needs: [verify-tag]
+    needs: [verify-tag, changes]
     # Для push в main verify-tag пропускается — образы собираются как обычно.
-    if: always() && (needs.verify-tag.result == 'success' || needs.verify-tag.result == 'skipped')
+    # Пустая матрица (docs-only push) не запускает ни одной сборки.
+    if: always() && needs.changes.result == 'success' && needs.changes.outputs.any == 'true' && (needs.verify-tag.result == 'success' || needs.verify-tag.result == 'skipped')
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - component: api
-            dockerfile: apps/api/Dockerfile
-            build_args: ''
-          - component: web
-            dockerfile: apps/web/Dockerfile
-            build_args: |
-              NEXT_PUBLIC_SITE_NAME=${{ vars.NEXT_PUBLIC_SITE_NAME || 'Стриж Lab' }}
-              NEXT_PUBLIC_SITE_SHORT_NAME=${{ vars.NEXT_PUBLIC_SITE_SHORT_NAME || 'Стриж' }}
-              NEXT_PUBLIC_SITE_DESCRIPTION=${{ vars.NEXT_PUBLIC_SITE_DESCRIPTION || 'Салон красоты в Москве: услуги, мастера и онлайн-запись.' }}
-              NEXT_PUBLIC_SITE_URL=${{ vars.NEXT_PUBLIC_SITE_URL || 'https://strizhlab.ru' }}
-              NEXT_PUBLIC_SITE_CITY=${{ vars.NEXT_PUBLIC_SITE_CITY || 'Москва' }}
-              NEXT_PUBLIC_SITE_TIMEZONE=${{ vars.NEXT_PUBLIC_SITE_TIMEZONE || 'Europe/Moscow' }}
-              NEXT_PUBLIC_API_URL=${{ vars.NEXT_PUBLIC_API_URL || 'https://strizhlab.ru/api' }}
+      matrix: ${{ fromJSON(needs.changes.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v4
 
@@ -100,19 +104,37 @@ jobs:
           fi
           echo "list=${TAGS}" >> "$GITHUB_OUTPUT"
 
+      # NEXT_PUBLIC_* встраиваются в бандл на сборке, поэтому бренд передаётся build-arg'ами.
+      # Для api шаг не выполняется — там `BUILD_ARGS` пустой.
+      - name: Подготовить build-args (web)
+        if: matrix.component == 'web'
+        run: |
+          {
+            echo "BUILD_ARGS<<BUILD_ARGS_EOF"
+            echo "NEXT_PUBLIC_SITE_NAME=${{ vars.NEXT_PUBLIC_SITE_NAME || 'Стриж Lab' }}"
+            echo "NEXT_PUBLIC_SITE_SHORT_NAME=${{ vars.NEXT_PUBLIC_SITE_SHORT_NAME || 'Стриж' }}"
+            echo "NEXT_PUBLIC_SITE_DESCRIPTION=${{ vars.NEXT_PUBLIC_SITE_DESCRIPTION || 'Салон красоты в Москве: услуги, мастера и онлайн-запись.' }}"
+            echo "NEXT_PUBLIC_SITE_URL=${{ vars.NEXT_PUBLIC_SITE_URL || 'https://strizhlab.ru' }}"
+            echo "NEXT_PUBLIC_SITE_CITY=${{ vars.NEXT_PUBLIC_SITE_CITY || 'Москва' }}"
+            echo "NEXT_PUBLIC_SITE_TIMEZONE=${{ vars.NEXT_PUBLIC_SITE_TIMEZONE || 'Europe/Moscow' }}"
+            echo "NEXT_PUBLIC_API_URL=${{ vars.NEXT_PUBLIC_API_URL || 'https://strizhlab.ru/api' }}"
+            echo "BUILD_ARGS_EOF"
+          } >> "$GITHUB_ENV"
+
       - uses: docker/build-push-action@v6
         with:
           context: .
           file: ${{ matrix.dockerfile }}
           push: true
           tags: ${{ steps.tags.outputs.list }}
-          build-args: ${{ matrix.build_args }}
+          build-args: ${{ env.BUILD_ARGS }}
           cache-from: type=gha,scope=${{ matrix.component }}
           cache-to: type=gha,mode=max,scope=${{ matrix.component }}
 
   deploy:
-    needs: images
-    if: github.ref == 'refs/heads/main' && vars.DEPLOY_ENABLED == 'true'
+    needs: [images, changes]
+    # Ничего не собрали — нет образа с тегом sha для этого коммита, деплоить нечего.
+    if: github.ref == 'refs/heads/main' && vars.DEPLOY_ENABLED == 'true' && needs.changes.outputs.any == 'true'
     runs-on: ubuntu-latest
     environment: production
     steps:
