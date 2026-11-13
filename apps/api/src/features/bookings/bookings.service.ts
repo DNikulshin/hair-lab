@@ -1,4 +1,5 @@
 import type { Booking, BookingStatus, CreateBooking } from '@hair-lab/contracts';
+import { maskPhone } from '@hair-lab/contracts';
 import { env } from '../../shared/config/env';
 import { sqlStateOf, type Db } from '../../shared/db';
 import { isSlotBookable, loadSchedules, salonDateOf } from './slots.service';
@@ -9,7 +10,8 @@ import { isSlotBookable, loadSchedules, salonDateOf } from './slots.service';
  * Идемпотентность: клиент присылает `idempotencyKey`, повтор запроса возвращает ту же запись.
  * Непересечение слотов одного мастера держит EXCLUDE-констрейнт в БД (`23P01`), поэтому
  * одновременные запросы на один слот не создают дубль — проигравший получает 409.
- * Телефоны и почта клиента наружу не отдаются и в логи не пишутся.
+ * Телефоны и почта клиента наружу не отдаются и в логи не пишутся: для экрана успеха
+ * клиент получает только маску номера (`clientPhoneMasked`).
  */
 
 const MINUTE_MS = 60_000;
@@ -57,7 +59,7 @@ export class MasterNotFoundError extends Error {
   }
 }
 
-/** Строка записи, достаточная для DTO (без контактов клиента). */
+/** Строка записи, достаточная для DTO (телефон нужен только для маски, почта не нужна). */
 interface AppointmentRow {
   id: string;
   masterId: string;
@@ -68,6 +70,7 @@ interface AppointmentRow {
   priceKopecks: number;
   durationMin: number;
   clientName: string;
+  clientPhone: string;
 }
 
 export interface CreateBookingResult {
@@ -76,7 +79,10 @@ export interface CreateBookingResult {
   booking: Booking;
 }
 
-/** Маппинг строки БД в DTO: копейки → money, время → ISO, без телефона и почты. */
+/**
+ * Маппинг строки БД в DTO: копейки → money, время → ISO, телефон → маска.
+ * Почта не возвращается, телефон — только последние две цифры (ПДн).
+ */
 function toBookingDto(row: AppointmentRow): Booking {
   return {
     id: row.id,
@@ -88,6 +94,7 @@ function toBookingDto(row: AppointmentRow): Booking {
     price: { amountMinor: row.priceKopecks, currency: CURRENCY },
     durationMin: row.durationMin,
     clientName: row.clientName,
+    clientPhoneMasked: maskPhone(row.clientPhone),
   };
 }
 

@@ -6,7 +6,7 @@ type ServiceCardProps = {
   service: Service;
 };
 
-/** Карточка услуги: название, описание, цена и длительность, заглушка онлайн-записи. */
+/** Карточка услуги: название, описание, цена и длительность, переход к записи. */
 export function ServiceCard({ service }: ServiceCardProps) {
   return (
     <article className="flex h-full flex-col gap-3 rounded-card border border-border bg-surface-raised p-5">
@@ -18,7 +18,7 @@ export function ServiceCard({ service }: ServiceCardProps) {
         <span className="text-base font-medium">{formatPrice(service.price.amountMinor)}</span>
         <span className="text-muted">{formatDuration(service.durationMin)}</span>
       </p>
-      <BookButton idSuffix={service.id} />
+      <BookButton serviceId={service.id} serviceName={service.name} />
     </article>
   );
 }
