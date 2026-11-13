@@ -183,6 +183,50 @@ describe('client authentication API', () => {
     expect(sessions).toHaveLength(1);
   });
 
+  it('creates exactly one account when two registrations race for the same email', async () => {
+    const address = email();
+
+    // Гонку держит только уникальный индекс `clients.email`: между «найти» и «создать»
+    // окно, в которое попадают оба запроса. Один фиксируется, второй получает 23505/P2002
+    // и откатывает транзакцию целиком — ни сессии, ни токена, ни письма у него не остаётся.
+    const [first, second] = await Promise.all([register(address), register(address)]);
+
+    expect([first.statusCode, second.statusCode].sort((a, b) => a - b)).toEqual([201, 409]);
+
+    const accepted = first.statusCode === 201 ? first : second;
+    const rejected = first.statusCode === 201 ? second : first;
+    const actualId = accountId(accepted.json());
+    fixture.trackClient(actualId);
+
+    expect(accepted.headers['set-cookie']).toContain('hl_session=');
+    expect(rejected.headers['set-cookie']).toBeUndefined();
+    expect(apiErrorSchema.parse(rejected.json()).error.code).toBe('conflict');
+
+    const clients = await db.$queryRaw<Array<{ id: string }>>`
+      SELECT "id" FROM "clients" WHERE "email" = ${address}
+    `;
+    expect(clients).toHaveLength(1);
+    expect(clients[0]?.id).toBe(actualId);
+
+    // У проигравшего нет побочных эффектов: ровно одна сессия, один токен, одно письмо.
+    const sessions = await db.$queryRaw<Array<{ id: string }>>`
+      SELECT "id" FROM "sessions" WHERE "client_id" = ${actualId}::uuid
+    `;
+    expect(sessions).toHaveLength(1);
+
+    const tokens = await db.$queryRaw<Array<{ consumed_at: Date | null }>>`
+      SELECT "consumed_at" FROM "login_tokens" WHERE "client_id" = ${actualId}::uuid
+    `;
+    expect(tokens).toHaveLength(1);
+    expect(tokens[0]?.consumed_at).toBeNull();
+
+    const messages = await db.$queryRaw<Array<{ id: string }>>`
+      SELECT "id" FROM "outbox_messages"
+      WHERE "type" = 'magic_link' AND "payload"->>'email' = ${address}
+    `;
+    expect(messages).toHaveLength(1);
+  });
+
   it('consumes a single token exactly once under concurrent requests', async () => {
     const clientId = await fixture.client(email());
     const token = await insertToken(clientId);
