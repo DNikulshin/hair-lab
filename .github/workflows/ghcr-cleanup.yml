@@ -1,0 +1,45 @@
+name: GHCR cleanup
+
+# Ретенция версий образов (issue #61): каждый push в main публикует новую версию
+# пакета с тегами `sha` и `latest`, и без чистки они копятся бесконечно.
+#
+# Политика:
+# - оставляем последние N версий (N по умолчанию 10);
+# - версию с тегом `latest` не удаляем никогда — иначе пропадёт «текущий» образ;
+# - версии с semver-тегами `v*.*.*` не удаляем: на них может опираться откат релиза.
+#
+# Запуск: по расписанию (понедельник) или вручную с переопределением N.
+on:
+  schedule:
+    # Понедельник, 04:00 UTC — после возможных релизов выходных.
+    - cron: '0 4 * * 1'
+  workflow_dispatch:
+    inputs:
+      min-versions-to-keep:
+        description: 'Сколько последних версий образа оставить'
+        type: number
+        default: 10
+        required: false
+
+permissions:
+  contents: read
+  packages: delete
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        package: [hair-lab-api, hair-lab-web]
+    steps:
+      - name: Удалить старые версии ${{ matrix.package }}
+        uses: actions/delete-package-versions@v5
+        with:
+          package-name: ${{ matrix.package }}
+          package-type: container
+          # При schedule контекст inputs пуст — тогда действует значение по умолчанию.
+          min-versions-to-keep: ${{ inputs.min-versions-to-keep || 10 }}
+          # Регулярное выражение по тегам версии: latest и релизы не трогаем.
+          ignore-versions: '^(latest|v\d+\.\d+\.\d+.*)$'
+          token: ${{ secrets.GITHUB_TOKEN }}
