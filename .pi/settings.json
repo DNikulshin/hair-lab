@@ -1,8 +1,8 @@
 {
   "$schema": "https://pi.dev/schemas/settings.schema.json",
   "defaultProvider": "polza-ai",
-  "defaultModel": "openai/gpt-6-luna-pro",
-  "defaultThinkingLevel": "medium",
+  "defaultModel": "deepseek/deepseek-v4.1-flash",
+  "defaultThinkingLevel": "low",
   "subagents": {
     "defaultModel": "polza-ai/deepseek/deepseek-v4.1-flash",
     "defaultThinking": "low",

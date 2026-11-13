@@ -1,8 +1,8 @@
 ---
 name: code
 description: 'Реализация по готовому плану: правки кода и тесты.'
-model: polza-ai/openai/gpt-6-luna-pro
-thinking: medium
+model: polza-ai/deepseek/deepseek-v4.1-flash
+thinking: low
 tools: read, grep, find, ls, edit, write, bash
 ---
 
