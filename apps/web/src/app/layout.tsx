@@ -1,6 +1,8 @@
 import type { Metadata, Viewport } from 'next';
+import Link from 'next/link';
 import type { ReactNode } from 'react';
 import { siteConfig } from '@/shared/config/site';
+import { Container } from '@/shared/ui/container';
 import './globals.css';
 
 export const metadata: Metadata = {
@@ -29,7 +31,29 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="ru">
-      <body>{children}</body>
+      <body>
+        <header className="border-b border-border">
+          <Container className="flex flex-wrap items-center justify-between gap-3 py-4">
+            <Link href="/" className="font-semibold tracking-tight">
+              {siteConfig.name}
+            </Link>
+            <nav aria-label="Основная навигация">
+              <ul className="flex flex-wrap gap-4 text-sm">
+                <li>
+                  <Link href="/">Главная</Link>
+                </li>
+                <li>
+                  <Link href="/services">Услуги</Link>
+                </li>
+                <li>
+                  <Link href="/masters">Мастера</Link>
+                </li>
+              </ul>
+            </nav>
+          </Container>
+        </header>
+        {children}
+      </body>
     </html>
   );
 }
