@@ -62,6 +62,9 @@ services:
     environment:
       NODE_ENV: production
       PORT: 3000
+      # Серверные запросы Next.js к api внутри compose-сети (runtime, не build-arg).
+      # Браузер по-прежнему ходит через NEXT_PUBLIC_API_URL и nginx.
+      API_URL: http://api:3001
     depends_on:
       api:
         condition: service_healthy

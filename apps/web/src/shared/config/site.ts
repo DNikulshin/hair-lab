@@ -10,6 +10,12 @@ function requiredOrFallback(value: string | undefined, fallback: string): string
   return trimmed && trimmed.length > 0 ? trimmed : fallback;
 }
 
+/** Необязательное значение: пустая строка в окружении означает «не задано». */
+function optional(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed && trimmed.length > 0 ? trimmed : undefined;
+}
+
 export const siteConfig = {
   name: requiredOrFallback(process.env.NEXT_PUBLIC_SITE_NAME, 'Стриж Lab'),
   shortName: requiredOrFallback(process.env.NEXT_PUBLIC_SITE_SHORT_NAME, 'Стриж'),
@@ -23,6 +29,8 @@ export const siteConfig = {
   locale: 'ru-RU',
   timeZone: requiredOrFallback(process.env.NEXT_PUBLIC_SITE_TIMEZONE, 'Europe/Moscow'),
   apiUrl: requiredOrFallback(process.env.NEXT_PUBLIC_API_URL, 'http://localhost:3001'),
+  /** Телефон салона для публичных страниц. Не задан — ссылку не показываем. */
+  phone: optional(process.env.NEXT_PUBLIC_SITE_PHONE),
 } as const;
 
 export type SiteConfig = typeof siteConfig;
