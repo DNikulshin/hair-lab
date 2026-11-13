@@ -4,6 +4,7 @@ import {
   validatorCompiler,
   type ZodTypeProvider,
 } from 'fastify-type-provider-zod';
+import { bookingRoutes } from '../features/bookings';
 import { catalogRoutes } from '../features/catalog';
 import { healthRoutes } from '../features/health/health.routes';
 import { env } from '../shared/config/env';
@@ -26,6 +27,7 @@ export async function buildServer() {
   await app.register(dbPlugin, { databaseUrl: env.DATABASE_URL });
   await app.register(healthRoutes);
   await app.register(catalogRoutes);
+  await app.register(bookingRoutes);
 
   return app;
 }
