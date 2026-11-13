@@ -80,6 +80,16 @@ export const authResponseSchema = z.object({
 });
 export type AuthResponse = z.infer<typeof authResponseSchema>;
 
-/** Ответ `POST /auth/logout`: действие идемпотентно, поэтому клиенту достаточно `ok`. */
+/** Тело `POST /auth/magic-link`: одинаково выглядит для любого адреса почты. */
+export const magicLinkRequestSchema = z.object({ email: emailSchema });
+export type MagicLinkRequest = z.infer<typeof magicLinkRequestSchema>;
+
+/** Тело `POST /auth/magic-link/consume`: одноразовый token из ссылки. */
+export const magicLinkConsumeSchema = z.object({
+  token: z.string().min(1).max(128),
+});
+export type MagicLinkConsumeRequest = z.infer<typeof magicLinkConsumeSchema>;
+
+/** Ответы успешных действий: logout и запрос magic link. */
 export const okResponseSchema = z.object({ ok: z.literal(true) });
 export type OkResponse = z.infer<typeof okResponseSchema>;

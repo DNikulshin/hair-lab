@@ -5,7 +5,12 @@ import {
   validatorCompiler,
   type ZodTypeProvider,
 } from 'fastify-type-provider-zod';
-import { authRoutes } from '../features/auth';
+import {
+  authRoutes,
+  createMagicLinkTemplate,
+  createTokenDeliveryRegistry,
+  MAGIC_LINK_TYPE,
+} from '../features/auth';
 import {
   bookingRoutes,
   createBookingConfirmationTemplate,
@@ -46,7 +51,13 @@ export async function buildServer() {
 
   registerErrorHandler(app);
 
+  const tokenDelivery = createTokenDeliveryRegistry();
   const emailTemplates: EmailTemplateRegistry = {
+    [MAGIC_LINK_TYPE]: createMagicLinkTemplate({
+      appUrl: env.APP_URL,
+      fromName: env.SMTP_FROM_NAME,
+      delivery: tokenDelivery,
+    }),
     [BOOKING_CONFIRMATION_TYPE]: createBookingConfirmationTemplate({
       timezone: env.SALON_TIMEZONE,
       fromName: env.SMTP_FROM_NAME,
@@ -82,7 +93,7 @@ export async function buildServer() {
   await app.register(bookingRoutes);
   // `global: false`: лимиты задаются per-route в конфиге маршрута (см. auth.routes.ts).
   await app.register(rateLimit, { global: false });
-  await app.register(authRoutes);
+  await app.register(authRoutes, { delivery: tokenDelivery });
 
   return app;
 }
