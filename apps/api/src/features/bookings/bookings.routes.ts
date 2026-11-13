@@ -16,6 +16,10 @@ import { listSlots } from './slots.service';
  * Тело `POST /bookings` содержит телефон клиента, но в лог не попадает: стандартный
  * request-логгер Fastify (pino) пишет только метод, URL и адрес, тело не сериализует.
  * В ответе телефона и почты тоже нет (ПДн) — см. `bookingSchema` в контрактах.
+ *
+ * Запись, созданная из-под сессии, привязывается к аккаунту (`appointments.client_id`).
+ * Признак берётся из `request.authClient` (cookie), а не из тела: клиент не может записать
+ * визит на чужой аккаунт. Гостевая запись остаётся без аккаунта, её поля не менялись.
  */
 export const bookingRoutes: FastifyPluginAsyncZod = async (app) => {
   app.get(
@@ -47,7 +51,11 @@ export const bookingRoutes: FastifyPluginAsyncZod = async (app) => {
     },
     async (request, reply) => {
       try {
-        const { status, booking } = await createBooking(app.db, request.body);
+        const { status, booking } = await createBooking(
+          app.db,
+          request.body,
+          request.authClient?.id,
+        );
         return reply.status(status).send({ booking });
       } catch (error) {
         // `slot_unavailable` не выводится из статуса 409, поэтому тело собираем явно.

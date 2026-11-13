@@ -32,8 +32,6 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-hair_lab}?schema=public
       # Базовый адрес для ссылок в письмах (вход по ссылке, подтверждение записи).
       APP_URL: ${APP_URL:-}
-      # Аутентификация (issue #6). Пустое значение = интеграция ещё не включена.
-      AUTH_SECRET: ${AUTH_SECRET:-}
       # ЮKassa (issue #8): test до запуска, live только осознанно.
       PAYMENTS_MODE: ${PAYMENTS_MODE:-test}
       YOOKASSA_SHOP_ID: ${YOOKASSA_SHOP_ID:-}

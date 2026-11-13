@@ -229,6 +229,26 @@ describe('POST /bookings', () => {
     // ПДн: ни телефона, ни почты в ответе нет.
     expect(raw).not.toContain(fakeClient.phone);
     expect(raw).not.toContain(fakeClient.email);
+    const stored = await db.appointment.findFirst({ where: { masterId }, select: { clientId: true } });
+    expect(stored?.clientId).toBeNull();
+  });
+
+  it('привязывает запись к аккаунту при валидной сессии', async () => {
+    const { masterId, serviceId, date } = await setupSalon();
+    const slot = slotsResponseSchema.parse((await getSlots({ serviceId, date })).body)
+      .items[0] as Slot;
+    const clientId = await fixture.client();
+    const token = await fixture.session(clientId);
+    const response = await app.inject({
+      method: 'POST',
+      url: '/bookings',
+      headers: { cookie: `hl_session=${token}` },
+      payload: bookingBody({ masterId, serviceId, startsAt: slot.startsAt, idempotencyKey: nextKey() }),
+    });
+
+    expect(response.statusCode).toBe(201);
+    const stored = await db.appointment.findFirst({ where: { masterId }, select: { clientId: true } });
+    expect(stored?.clientId).toBe(clientId);
   });
 
   it('приводит телефон к E.164 в БД и отдаёт только маску номера', async () => {

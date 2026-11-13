@@ -35,6 +35,16 @@ ESLint-правила `no-restricted-imports` не умеют проверять
 и молча пропускают нарушения при рефакторинге путей. Скрипт работает на уровне путей
 и печатает конкретный переход, например `shared → features`. Запускается локально и в CI.
 
+## Аккаунты клиентов (issue #6, PR1)
+
+- Пароли хешируются `@node-rs/argon2` (argon2id, m=19456 KiB, t=2, p=1); неизвестный email проходит dummy-verify.
+- Сессия — opaque-токен из 32 случайных байт в base64url, в БД хранится только SHA-256 hex. Idle TTL — 14 дней, абсолютный — 60 дней; `lastUsedAt` обновляется не чаще раза в час.
+- Cookie `hl_session`: HttpOnly, SameSite=Lax, Path=/, Secure только в production. Подпись cookie и `AUTH_SECRET` не нужны.
+- CSRF для методов кроме GET/HEAD/OPTIONS проверяет Origin, с fallback на Referer; allowlist — origin(APP_URL) ∪ CORS_ORIGINS. Per-route rate limit: регистрация 5/час/IP, вход 10/мин/IP; API доверяет X-Forwarded-For от nginx (`trustProxy: true`).
+- `appointments.client_id` nullable: запись из валидной сессии привязывается к аккаунту, гостевая остаётся NULL; удаление аккаунта сохраняет историю записи через `ON DELETE SET NULL`.
+- Отклонения PR1 от первоначального plan.md: занятый email даёт HTTP 409 `conflict` с нейтральным текстом (email enumeration временно остаётся, регистрацию ограничивает rate limit; нейтральный ответ с письмом владельцу относится к PR2/#35); production использует прямой путь nginx → API, web Route Handlers являются dev-прокси и передают Cookie/Origin/Set-Cookie; cookie имеет Path=/ для SSR и будущего кабинета.
+- Magic link, подтверждение email и автопривязка старых гостевых записей остаются PR2/#35.
+
 ## Открытые вопросы
 
 - Схема БД и Prisma-миграции: модель филиалов, услуг и слотов ещё не зафиксирована.

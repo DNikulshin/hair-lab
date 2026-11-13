@@ -29,5 +29,5 @@ export async function GET(request: Request): Promise<Response> {
   });
   if (parsed.data.masterId !== undefined) upstreamQuery.set('masterId', parsed.data.masterId);
 
-  return proxyToApi(`/slots?${upstreamQuery.toString()}`);
+  return proxyToApi(`/slots?${upstreamQuery.toString()}`, {}, request);
 }

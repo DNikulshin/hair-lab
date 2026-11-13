@@ -81,13 +81,23 @@ function statusCodeOf(status: number): ApiErrorCode {
  * @param path путь API без базового адреса, например `/slots?date=2030-03-04…`.
  * @param init параметры `fetch`; тело запроса не логируется.
  */
-export async function proxyToApi(path: string, init: RequestInit = {}): Promise<Response> {
+export async function proxyToApi(
+  path: string,
+  init: RequestInit = {},
+  incomingRequest?: Request,
+): Promise<Response> {
   const method = init.method ?? 'GET';
+  const headers = new Headers(init.headers);
+  for (const name of ['cookie', 'origin', 'referer'] as const) {
+    const value = incomingRequest?.headers.get(name);
+    if (value !== null && value !== undefined) headers.set(name, value);
+  }
 
   let upstream: Response;
   try {
     upstream = await fetch(`${apiConfig.baseUrl}${path}`, {
       ...init,
+      headers,
       cache: 'no-store',
       signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
     });
@@ -97,10 +107,18 @@ export async function proxyToApi(path: string, init: RequestInit = {}): Promise<
     return jsonErrorResponse(503, 'internal_error', 'Сервис записи временно недоступен');
   }
 
+  const responseHeaders = new Headers(NO_STORE_HEADERS);
+  responseHeaders.set(
+    'Content-Type',
+    upstream.headers.get('content-type') ?? 'application/json; charset=utf-8',
+  );
+  // Нужны все Set-Cookie заголовки (не склеивать через запятую: Expires содержит запятую).
+  for (const cookie of upstream.headers.getSetCookie()) responseHeaders.append('Set-Cookie', cookie);
+  const relay = (body: BodyInit | null): Response =>
+    new Response(body, { status: upstream.status, headers: responseHeaders });
+
   const text = await upstream.text();
-  if (text.length === 0) {
-    return new Response(null, { status: upstream.status, headers: NO_STORE_HEADERS });
-  }
+  if (text.length === 0) return relay(null);
 
   let payload: unknown;
   try {
@@ -121,8 +139,8 @@ export async function proxyToApi(path: string, init: RequestInit = {}): Promise<
         statusCodeOf(upstream.status),
       );
     }
-    return Response.json(parsed.data, { status: upstream.status, headers: NO_STORE_HEADERS });
+    return relay(JSON.stringify(parsed.data));
   }
 
-  return Response.json(payload, { status: upstream.status, headers: NO_STORE_HEADERS });
+  return relay(JSON.stringify(payload));
 }

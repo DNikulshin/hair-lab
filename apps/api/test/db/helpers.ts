@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+import { createSession } from '../../src/shared/auth/session';
 import { createPrismaClient, type Db } from '../../src/shared/db';
 
 /** SQLSTATE ошибки драйвера: тот же хелпер, что использует серверный код (маппинг 409). */
@@ -79,6 +81,12 @@ interface Fixture {
     endsAt: string,
     overrides?: { idempotencyKey?: string },
   ) => Promise<string>;
+  /** Создаёт тестовый аккаунт (только example.invalid) и возвращает id. */
+  client: (email?: string, passwordHash?: string) => Promise<string>;
+  /** Создаёт сессию тестового клиента и возвращает токен для cookie. */
+  session: (clientId: string) => Promise<string>;
+  /** Помечает аккаунт, созданный HTTP-маршрутом, для точечной очистки. */
+  trackClient: (clientId: string) => void;
   /** Удаляет только созданные в тесте строки (в порядке зависимостей). */
   cleanup: () => Promise<void>;
 }
@@ -91,6 +99,8 @@ export function createFixture(db: Db): Fixture {
   const masterIds: string[] = [];
   const serviceIds: string[] = [];
   const categoryIds: string[] = [];
+  const clientIds: string[] = [];
+  const sessionClientIds: string[] = [];
 
   return {
     async master(fullName = 'Тестовый Мастер') {
@@ -141,6 +151,23 @@ export function createFixture(db: Db): Fixture {
       });
     },
 
+    async client(email = `client-${randomUUID()}@example.invalid`, passwordHash?: string) {
+      const created = await db.client.create({
+        data: { email, ...(passwordHash === undefined ? {} : { passwordHash }) },
+      });
+      clientIds.push(created.id);
+      return created.id;
+    },
+
+    async session(clientId: string) {
+      sessionClientIds.push(clientId);
+      return (await createSession(db, clientId)).token;
+    },
+
+    trackClient(clientId: string) {
+      if (!clientIds.includes(clientId)) clientIds.push(clientId);
+    },
+
     async appointment(
       masterId: string,
       serviceId: string,
@@ -155,6 +182,11 @@ export function createFixture(db: Db): Fixture {
     },
 
     async cleanup() {
+      const allSessionClientIds = [...new Set([...sessionClientIds, ...clientIds])];
+      if (allSessionClientIds.length > 0) {
+        await db.session.deleteMany({ where: { clientId: { in: allSessionClientIds } } });
+      }
+      if (clientIds.length > 0) await db.client.deleteMany({ where: { id: { in: clientIds } } });
       await db.appointment.deleteMany({
         where: { OR: [{ masterId: { in: masterIds } }, { serviceId: { in: serviceIds } }] },
       });
@@ -166,6 +198,8 @@ export function createFixture(db: Db): Fixture {
       masterIds.length = 0;
       serviceIds.length = 0;
       categoryIds.length = 0;
+      clientIds.length = 0;
+      sessionClientIds.length = 0;
     },
   };
 }
