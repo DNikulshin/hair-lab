@@ -1,4 +1,5 @@
 import type { FastifyError, FastifyInstance } from 'fastify';
+import { hasZodFastifySchemaValidationErrors } from 'fastify-type-provider-zod';
 import { ZodError } from 'zod';
 import type { ApiError, ApiErrorCode, ApiErrorDetail } from '@hair-lab/contracts';
 
@@ -12,6 +13,9 @@ const messages: Record<ApiErrorCode, string> = {
   rate_limited: 'Слишком много запросов',
   internal_error: 'Внутренняя ошибка сервера',
 };
+
+/** Сообщение по полю, если провайдер не приложил текст к ошибке. */
+const DEFAULT_DETAIL_MESSAGE = 'Некорректное значение';
 
 const statusToCode: Record<number, ApiErrorCode> = {
   400: 'validation_error',
@@ -42,6 +46,14 @@ export function buildError(
 }
 
 /**
+ * Путь поля из ошибки валидации провайдера: `instancePath` (`/clientPhone`, `/items/0/name`)
+ * приводится к виду `clientPhone` / `items.0.name`, по которому клиент находит поле формы.
+ */
+function detailPath(instancePath: string): string {
+  return instancePath.replace(/^\/+/, '').split('/').join('.');
+}
+
+/**
  * Единый формат ошибок для всех клиентов.
  * Наружу не уходят стектрейсы, тексты исключений и значения полей.
  */
@@ -56,6 +68,22 @@ export function registerErrorHandler(app: FastifyInstance): void {
       const details: ApiErrorDetail[] = error.issues.map((issue) => ({
         path: issue.path.join('.'),
         message: issue.message,
+      }));
+      return reply.status(400).send(buildError('validation_error', request.id, details));
+    }
+
+    // `fastify-type-provider-zod` не бросает `ZodError`: его `validatorCompiler` возвращает
+    // ошибку валидации Fastify с массивом `validation` (по элементу на issue). Форма отличается,
+    // поэтому распознаём её предикатом пакета, иначе 400 уходит без `details`.
+    // В `details` попадают только путь поля и текст схемы: значения полей (ПДн) там не выводятся.
+    if (hasZodFastifySchemaValidationErrors(error)) {
+      request.log.warn(
+        { requestId: request.id, issues: error.validation.length },
+        'validation failed',
+      );
+      const details: ApiErrorDetail[] = error.validation.map((issue) => ({
+        path: detailPath(issue.instancePath),
+        message: issue.message ?? DEFAULT_DETAIL_MESSAGE,
       }));
       return reply.status(400).send(buildError('validation_error', request.id, details));
     }

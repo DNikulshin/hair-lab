@@ -231,6 +231,104 @@ describe('POST /bookings', () => {
     expect(raw).not.toContain(fakeClient.email);
   });
 
+  it('приводит телефон к E.164 в БД и отдаёт только маску номера', async () => {
+    const { masterId, serviceId, date } = await setupSalon();
+    const slot = slotsResponseSchema.parse((await getSlots({ serviceId, date })).body)
+      .items[0] as Slot;
+
+    const { statusCode, body, raw } = await postBooking({
+      ...bookingBody({ masterId, serviceId, startsAt: slot.startsAt, idempotencyKey: nextKey() }),
+      clientPhone: '8 (912) 345-67-89',
+    });
+
+    expect(statusCode).toBe(201);
+    expect(bookingResponseSchema.parse(body).booking.clientPhoneMasked).toBe('+7 (***) ***-**-89');
+
+    // ПДн: в ответе только маска, полного номера в любом написании нет.
+    expect(raw).not.toContain('+79123456789');
+    expect(raw).not.toContain('9123456789');
+    expect(raw).not.toContain('345-67-89');
+
+    const stored = await db.appointment.findFirst({
+      where: { masterId },
+      select: { clientPhone: true },
+    });
+    expect(stored?.clientPhone).toBe('+79123456789');
+  });
+
+  it('принимает международный номер: 201, в БД E.164, в ответе только маска', async () => {
+    const { masterId, serviceId, date } = await setupSalon();
+    const slot = slotsResponseSchema.parse((await getSlots({ serviceId, date })).body)
+      .items[0] as Slot;
+
+    const { statusCode, body, raw } = await postBooking({
+      ...bookingBody({ masterId, serviceId, startsAt: slot.startsAt, idempotencyKey: nextKey() }),
+      clientPhone: '+1 202 555 0143',
+    });
+
+    expect(statusCode).toBe(201);
+    expect(bookingResponseSchema.parse(body).booking.clientPhoneMasked).toBe('+1 ********43');
+
+    // ПДн: в ответе только маска, полного номера в любом написании нет.
+    expect(raw).not.toContain('+12025550143');
+    expect(raw).not.toContain('2025550143');
+    expect(raw).not.toContain('202 555 0143');
+
+    const stored = await db.appointment.findFirst({
+      where: { masterId },
+      select: { clientPhone: true },
+    });
+    expect(stored?.clientPhone).toBe('+12025550143');
+  });
+
+  it('отклоняет не-телефон — 400 validation_error без значения в ответе', async () => {
+    const { masterId, serviceId, date } = await setupSalon();
+    const slot = slotsResponseSchema.parse((await getSlots({ serviceId, date })).body)
+      .items[0] as Slot;
+
+    const cases = [
+      { phone: '1234567', secret: '1234567' },
+      { phone: '8 (912) 345-67-8', secret: '912345678' },
+      { phone: '+1 202 555 01', secret: '20255501' },
+      { phone: 'не телефон', secret: 'не телефон' },
+    ];
+
+    for (const { phone, secret } of cases) {
+      const response = await postBooking({
+        ...bookingBody({ masterId, serviceId, startsAt: slot.startsAt, idempotencyKey: nextKey() }),
+        clientPhone: phone,
+      });
+
+      expect(response.statusCode).toBe(400);
+      expect(errorCode(response.body)).toBe('validation_error');
+      // ПДн: введённое значение не повторяется в теле ошибки ни в каком виде.
+      expect(response.raw).not.toContain(secret);
+    }
+
+    expect(await db.appointment.count({ where: { masterId } })).toBe(0);
+  });
+
+  it('отдаёт ошибку поля в details и не повторяет введённый телефон в ответе', async () => {
+    const { masterId, serviceId, date } = await setupSalon();
+    const slot = slotsResponseSchema.parse((await getSlots({ serviceId, date })).body)
+      .items[0] as Slot;
+
+    const { statusCode, body, raw } = await postBooking({
+      ...bookingBody({ masterId, serviceId, startsAt: slot.startsAt, idempotencyKey: nextKey() }),
+      clientPhone: 'abc',
+    });
+
+    expect(statusCode).toBe(400);
+    expect(errorCode(body)).toBe('validation_error');
+    // Форма показывает ошибку рядом с полем: путь совпадает с именем поля ввода.
+    const details = apiErrorSchema.parse(body).error.details ?? [];
+    expect(details[0]?.path).toBe('clientPhone');
+    expect(details[0]?.message).toBeTruthy();
+    // ПДн: введённое значение не попадает даже в текст ошибки поля.
+    expect(raw).not.toContain('abc');
+    expect(await db.appointment.count({ where: { masterId } })).toBe(0);
+  });
+
   it('повтор с тем же ключом возвращает 200 и ту же запись', async () => {
     const { masterId, serviceId, date } = await setupSalon();
     const slot = slotsResponseSchema.parse((await getSlots({ serviceId, date })).body)
