@@ -18,7 +18,8 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "prepare": "git rev-parse --git-dir >/dev/null 2>&1 && git config core.hooksPath .githooks || true",
-    "precommit": "node scripts/precommit.mjs"
+    "precommit": "node scripts/precommit.mjs",
+    "rag:sync": "node scripts/rag-sync.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
