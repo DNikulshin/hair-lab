@@ -22,7 +22,15 @@ const statusToCode: Record<number, ApiErrorCode> = {
   429: 'rate_limited',
 };
 
-function buildError(code: ApiErrorCode, requestId: string, details?: ApiErrorDetail[]): ApiError {
+/**
+ * Тело ошибки в едином формате. Экспортируется, чтобы фича могла вернуть специфичный код
+ * (`slot_unavailable`), который не выводится из HTTP-статуса.
+ */
+export function buildError(
+  code: ApiErrorCode,
+  requestId: string,
+  details?: ApiErrorDetail[],
+): ApiError {
   return {
     error: {
       code,

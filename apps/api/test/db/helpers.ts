@@ -1,5 +1,8 @@
 import { createPrismaClient, type Db } from '../../src/shared/db';
 
+/** SQLSTATE ошибки драйвера: тот же хелпер, что использует серверный код (маппинг 409). */
+export { sqlStateOf } from '../../src/shared/db';
+
 /**
  * Общие помощники интеграционных тестов БД.
  * Персональные данные вымышленные: ни телефоны, ни почты не существуют.
@@ -30,14 +33,6 @@ export async function captureError(promise: Promise<unknown>): Promise<unknown> 
   );
 }
 
-/** SQLSTATE из ошибки драйвера: Prisma прокидывает код Postgres в meta.driverAdapterError. */
-export function sqlStateOf(error: unknown): string | undefined {
-  const meta = (error as { meta?: { driverAdapterError?: { cause?: unknown } } } | undefined)?.meta;
-  const cause = meta?.driverAdapterError?.cause as
-    { originalCode?: string; code?: string; kind?: string } | undefined;
-  return cause?.originalCode ?? cause?.code;
-}
-
 interface Fixture {
   /** Создаёт мастера и возвращает его id. */
   master: (fullName?: string) => Promise<string>;
@@ -59,6 +54,31 @@ interface Fixture {
   }) => Promise<string>;
   /** Связывает мастера и услугу (m-n). */
   link: (masterId: string, serviceId: string) => Promise<void>;
+  /**
+   * Рабочие часы мастера: день недели (0 — воскресенье) и минуты от полуночи в TZ салона.
+   * Удаляются каскадом вместе с мастером.
+   */
+  workingHours: (
+    masterId: string,
+    dayOfWeek: number,
+    startMinute: number,
+    endMinute: number,
+  ) => Promise<void>;
+  /** Исключение расписания (отпуск, больничный): абсолютный интервал UTC. */
+  exception: (
+    masterId: string,
+    startsAt: string,
+    endsAt: string,
+    kind?: 'vacation' | 'sick' | 'personal' | 'other',
+  ) => Promise<void>;
+  /** Запись в расписании мастера, созданная в обход HTTP: проверка занятых слотов. */
+  appointment: (
+    masterId: string,
+    serviceId: string,
+    startsAt: string,
+    endsAt: string,
+    overrides?: { idempotencyKey?: string },
+  ) => Promise<string>;
   /** Удаляет только созданные в тесте строки (в порядке зависимостей). */
   cleanup: () => Promise<void>;
 }
@@ -97,6 +117,41 @@ export function createFixture(db: Db): Fixture {
 
     async link(masterId: string, serviceId: string) {
       await db.masterService.create({ data: { masterId, serviceId } });
+    },
+
+    async workingHours(
+      masterId: string,
+      dayOfWeek: number,
+      startMinute: number,
+      endMinute: number,
+    ) {
+      await db.masterWorkingHours.create({
+        data: { masterId, dayOfWeek, startMinute, endMinute },
+      });
+    },
+
+    async exception(
+      masterId: string,
+      startsAt: string,
+      endsAt: string,
+      kind: 'vacation' | 'sick' | 'personal' | 'other' = 'vacation',
+    ) {
+      await db.scheduleException.create({
+        data: { masterId, startsAt: new Date(startsAt), endsAt: new Date(endsAt), kind },
+      });
+    },
+
+    async appointment(
+      masterId: string,
+      serviceId: string,
+      startsAt: string,
+      endsAt: string,
+      overrides: { idempotencyKey?: string } = {},
+    ) {
+      const created = await db.appointment.create({
+        data: appointmentData(masterId, serviceId, startsAt, endsAt, overrides),
+      });
+      return created.id;
     },
 
     async cleanup() {
