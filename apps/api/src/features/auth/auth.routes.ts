@@ -1,13 +1,18 @@
+import { createHash } from 'node:crypto';
 import {
   apiErrorSchema,
   authResponseSchema,
   loginRequestSchema,
+  magicLinkConsumeSchema,
+  magicLinkRequestSchema,
   okResponseSchema,
   registerRequestSchema,
 } from '@hair-lab/contracts';
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import { requireAuth, SESSION_COOKIE_NAME } from '../../shared/auth';
 import { buildError } from '../../shared/http/error-handler';
+import { consumeMagicLink, InvalidMagicLinkError, requestMagicLink } from './magic-link.service';
+import type { TokenDeliveryRegistry } from './token-delivery';
 import {
   EmailTakenError,
   InvalidCredentialsError,
@@ -17,25 +22,29 @@ import {
   registerClient,
 } from './auth.service';
 
-/**
- * Маршруты аккаунта клиента: регистрация, вход, выход, текущий клиент.
- *
- * Сессия выдаётся cookie (`hl_session`, httpOnly), в теле ответа токена нет — клиент
- * его не хранит и не разбирает. Тело запроса содержит пароль: Fastify его не логирует,
- * а мы не пишем в логи ни тело, ни email.
- *
- * Лимиты запросов per-route (плагин `@fastify/rate-limit` регистрируется с `global: false`):
- * регистрация — 5 в час на IP, вход — 10 в минуту на IP. Это защита от перебора пароля
- * и от массового создания аккаунтов; ключ — IP, который приходит от nginx (`trustProxy`).
- */
+export interface AuthRoutesOptions {
+  delivery: TokenDeliveryRegistry;
+}
 
-/** Регистрация: 5 запросов в час на IP. */
+/** Registration: five requests per hour per IP. */
 export const REGISTER_RATE_LIMIT = { max: 5, timeWindow: '1 hour' } as const;
-
-/** Вход: 10 запросов в минуту на IP — перебор пароля должен быть невыгоден. */
+/** Password login: ten requests per minute per IP. */
 export const LOGIN_RATE_LIMIT = { max: 10, timeWindow: '1 minute' } as const;
+/** Link requests: three per hour for each IP/email pair. */
+export const MAGIC_LINK_RATE_LIMIT = {
+  max: 3,
+  timeWindow: '1 hour',
+  hook: 'preHandler',
+  keyGenerator: (request: { ip: string; body: unknown }) => {
+    const parsed = magicLinkRequestSchema.safeParse(request.body);
+    const emailHash = createHash('sha256')
+      .update(parsed.success ? parsed.data.email : '')
+      .digest('hex');
+    return `${request.ip}:${emailHash}`;
+  },
+} as const;
 
-export const authRoutes: FastifyPluginAsyncZod = async (app) => {
+export const authRoutes: FastifyPluginAsyncZod<AuthRoutesOptions> = async (app, options) => {
   app.post(
     '/auth/register',
     {
@@ -44,20 +53,15 @@ export const authRoutes: FastifyPluginAsyncZod = async (app) => {
         tags: ['auth'],
         summary: 'Регистрация клиента (сессия в httpOnly cookie)',
         body: registerRequestSchema,
-        response: {
-          201: authResponseSchema,
-          409: apiErrorSchema,
-          429: apiErrorSchema,
-        },
+        response: { 201: authResponseSchema, 409: apiErrorSchema, 429: apiErrorSchema },
       },
     },
     async (request, reply) => {
       try {
-        const { client, token } = await registerClient(app.db, request.body);
+        const { client, token } = await registerClient(app.db, request.body, options.delivery);
         reply.setSessionCookie(token);
         return reply.status(201).send({ client });
       } catch (error) {
-        // `conflict` не выводится из 409 автоматически с нужным смыслом — тело собираем явно.
         if (error instanceof EmailTakenError) {
           return reply.status(409).send(buildError('conflict', request.id));
         }
@@ -72,13 +76,9 @@ export const authRoutes: FastifyPluginAsyncZod = async (app) => {
       config: { rateLimit: LOGIN_RATE_LIMIT },
       schema: {
         tags: ['auth'],
-        summary: 'Вход клиента по почте и паролю',
+        summary: 'Вход клиента по почте и подтверждённому паролю',
         body: loginRequestSchema,
-        response: {
-          200: authResponseSchema,
-          401: apiErrorSchema,
-          429: apiErrorSchema,
-        },
+        response: { 200: authResponseSchema, 401: apiErrorSchema, 429: apiErrorSchema },
       },
     },
     async (request, reply) => {
@@ -88,6 +88,47 @@ export const authRoutes: FastifyPluginAsyncZod = async (app) => {
         return reply.status(200).send({ client });
       } catch (error) {
         if (error instanceof InvalidCredentialsError) {
+          return reply.status(401).send(buildError('unauthorized', request.id));
+        }
+        throw error;
+      }
+    },
+  );
+
+  app.post(
+    '/auth/magic-link',
+    {
+      config: { rateLimit: MAGIC_LINK_RATE_LIMIT },
+      schema: {
+        tags: ['auth'],
+        summary: 'Запрос одноразовой ссылки для входа и подтверждения почты',
+        body: magicLinkRequestSchema,
+        response: { 202: okResponseSchema, 429: apiErrorSchema },
+      },
+    },
+    async (request, reply) => {
+      await requestMagicLink(app.db, request.body.email, options.delivery);
+      return reply.status(202).send({ ok: true });
+    },
+  );
+
+  app.post(
+    '/auth/magic-link/consume',
+    {
+      schema: {
+        tags: ['auth'],
+        summary: 'Проверка одноразовой ссылки, подтверждение почты и вход',
+        body: magicLinkConsumeSchema,
+        response: { 200: authResponseSchema, 401: apiErrorSchema },
+      },
+    },
+    async (request, reply) => {
+      try {
+        const result = await consumeMagicLink(app.db, request.body, options.delivery);
+        reply.setSessionCookie(result.token);
+        return { client: me(result.client) };
+      } catch (error) {
+        if (error instanceof InvalidMagicLinkError) {
           return reply.status(401).send(buildError('unauthorized', request.id));
         }
         throw error;
@@ -106,10 +147,7 @@ export const authRoutes: FastifyPluginAsyncZod = async (app) => {
     },
     async (request, reply) => {
       const token = request.cookies[SESSION_COOKIE_NAME];
-      if (token !== undefined && token.length > 0) {
-        await logoutClient(app.db, token);
-      }
-      // Cookie чистим всегда: даже если сессии уже нет, браузер не должен её хранить.
+      if (token !== undefined && token.length > 0) await logoutClient(app.db, token);
       reply.clearSessionCookie();
       return { ok: true as const };
     },
@@ -127,10 +165,7 @@ export const authRoutes: FastifyPluginAsyncZod = async (app) => {
     },
     async (request, reply) => {
       const client = request.authClient;
-      // preHandler уже проверил сессию; ветка нужна только для сужения типа.
-      if (client === null) {
-        return reply.status(401).send(buildError('unauthorized', request.id));
-      }
+      if (client === null) return reply.status(401).send(buildError('unauthorized', request.id));
       return { client: me(client) };
     },
   );

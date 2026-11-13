@@ -86,7 +86,7 @@ export function touchedExpiresAt(session: { createdAt: Date; lastUsedAt: Date },
  * так таблица не растёт бесконечно без отдельной джобы очистки.
  */
 export async function createSession(
-  db: Db,
+  db: Pick<Db, 'session'>,
   clientId: string,
   now: Date = new Date(),
 ): Promise<CreatedSession> {

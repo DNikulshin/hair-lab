@@ -87,6 +87,8 @@ interface Fixture {
   session: (clientId: string) => Promise<string>;
   /** Помечает аккаунт, созданный HTTP-маршрутом, для точечной очистки. */
   trackClient: (clientId: string) => void;
+  /** Помечает outbox-сообщение без appointment FK для точечной очистки. */
+  trackOutbox: (id: string) => void;
   /** Удаляет только созданные в тесте строки (в порядке зависимостей). */
   cleanup: () => Promise<void>;
 }
@@ -101,6 +103,7 @@ export function createFixture(db: Db): Fixture {
   const categoryIds: string[] = [];
   const clientIds: string[] = [];
   const sessionClientIds: string[] = [];
+  const outboxIds: string[] = [];
 
   return {
     async master(fullName = 'Тестовый Мастер') {
@@ -168,6 +171,10 @@ export function createFixture(db: Db): Fixture {
       if (!clientIds.includes(clientId)) clientIds.push(clientId);
     },
 
+    trackOutbox(id: string) {
+      if (!outboxIds.includes(id)) outboxIds.push(id);
+    },
+
     async appointment(
       masterId: string,
       serviceId: string,
@@ -182,9 +189,13 @@ export function createFixture(db: Db): Fixture {
     },
 
     async cleanup() {
+      if (outboxIds.length > 0) await db.outboxMessage.deleteMany({ where: { id: { in: outboxIds } } });
       const allSessionClientIds = [...new Set([...sessionClientIds, ...clientIds])];
       if (allSessionClientIds.length > 0) {
         await db.session.deleteMany({ where: { clientId: { in: allSessionClientIds } } });
+      }
+      for (const clientId of clientIds) {
+        await db.$executeRaw`DELETE FROM "login_tokens" WHERE "client_id" = ${clientId}::uuid`;
       }
       if (clientIds.length > 0) await db.client.deleteMany({ where: { id: { in: clientIds } } });
       await db.appointment.deleteMany({
@@ -200,6 +211,7 @@ export function createFixture(db: Db): Fixture {
       categoryIds.length = 0;
       clientIds.length = 0;
       sessionClientIds.length = 0;
+      outboxIds.length = 0;
     },
   };
 }
