@@ -33,6 +33,7 @@
 | Сборка контрактов (обязательно перед типами и тестами) | `pnpm --filter @hair-lab/contracts build`                 |
 | Типы                                                   | `pnpm typecheck`                                          |
 | Линтер                                                 | `pnpm lint`                                               |
+| Форматирование (проверка / автофикс)                   | `pnpm format:check` / `pnpm format`                       |
 | Границы слоёв и пакетов                                | `pnpm check:arch`                                         |
 | Unit-тесты                                             | `pnpm test`                                               |
 | Интеграционные тесты (нужны Postgres и окружение)      | `pnpm test:int`                                           |
@@ -40,9 +41,19 @@
 | Применить миграции                                     | `pnpm --filter @hair-lab/api db:migrate:deploy`           |
 | Запуск в dev                                           | `pnpm dev`                                                |
 
-Порядок проверки после правок: `contracts build` → `typecheck` → `lint` + `check:arch` → затронутые тесты.
+Порядок проверки после правок: `contracts build` → `format:check` → `typecheck` → `lint` +
+`check:arch` → затронутые тесты.
 Проверку, которую нельзя выполнить (нет БД, окружения), помечай «не проверено» и называй причину.
 Не заявляй «проверено» без фактического запуска.
+
+## Pre-commit
+
+Хук `.githooks/pre-commit` запускает `scripts/precommit.mjs` (`pnpm precommit`) по staged-файлам:
+prettier `--write`, eslint `--fix` (исправления возвращаются в индекс) и `pnpm check:arch`, если тронуты
+`apps/*/src` или `packages/*/src`. Полный `typecheck` и тесты остаются в CI: на каждый коммит это слишком
+медленно. Хук подключается автоматически на `pnpm install` (`prepare` → `git config core.hooksPath .githooks`);
+вручную — та же команда. Обход: `git commit --no-verify` (только осознанно). В CI хук не запускается —
+там свои шаги, включая `format:check`.
 
 ## Архитектура (ED small)
 
