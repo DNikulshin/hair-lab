@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vitest/config';
 
 /**
@@ -5,6 +6,7 @@ import { defineConfig } from 'vitest/config';
  * Рендер-тесты не добавляем: нет RTL/jsdom, дизайн не утверждён.
  */
 export default defineConfig({
+  resolve: { alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) } },
   test: {
     environment: 'node',
     include: ['src/**/*.test.ts'],

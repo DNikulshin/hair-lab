@@ -77,7 +77,6 @@ docker compose -f docker-compose.prod.yml up -d
 | `VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY` | доступ по SSH (ключ без passphrase)               |
 | `POSTGRES_PASSWORD`                   | пароль БД                                         |
 | `GHCR_PAT`                            | токен с `read:packages` для `docker login` на VPS |
-| `AUTH_SECRET`                         | подпись токенов входа (≥ 32 символов)             |
 | `YOOKASSA_SECRET_KEY`                 | секретный ключ магазина ЮKassa                    |
 | `SMTP_PASSWORD`                       | пароль приложения почты                           |
 

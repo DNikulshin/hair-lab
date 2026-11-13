@@ -1,9 +1,11 @@
+import rateLimit from '@fastify/rate-limit';
 import Fastify from 'fastify';
 import {
   serializerCompiler,
   validatorCompiler,
   type ZodTypeProvider,
 } from 'fastify-type-provider-zod';
+import { authRoutes } from '../features/auth';
 import {
   bookingRoutes,
   createBookingConfirmationTemplate,
@@ -11,6 +13,7 @@ import {
 } from '../features/bookings';
 import { catalogRoutes } from '../features/catalog';
 import { healthRoutes } from '../features/health/health.routes';
+import { authPlugin, createOriginAllowList } from '../shared/auth';
 import { env } from '../shared/config/env';
 import { dbPlugin } from '../shared/db';
 import {
@@ -30,7 +33,13 @@ import { createLoggerOptions } from '../shared/logging/logger';
  * поэтому плагин почты получает шаблоны опцией.
  */
 export async function buildServer() {
-  const app = Fastify({ logger: createLoggerOptions(env) }).withTypeProvider<ZodTypeProvider>();
+  const app = Fastify({
+    logger: createLoggerOptions(env),
+    // API слушает только loopback, снаружи — nginx: настоящий IP клиента приходит
+    // в X-Forwarded-For. Без доверия прокси rate limit считал бы все запросы одним IP
+    // (адресом nginx), а настоящий адрес клиента терялся бы в логах.
+    trustProxy: true,
+  }).withTypeProvider<ZodTypeProvider>();
 
   app.setValidatorCompiler(validatorCompiler);
   app.setSerializerCompiler(serializerCompiler);
@@ -46,6 +55,12 @@ export async function buildServer() {
   };
 
   await app.register(dbPlugin, { databaseUrl: env.DATABASE_URL });
+  // Аутентификация после БД: плагину нужен `app.db` для резолва сессии из cookie.
+  await app.register(authPlugin, {
+    secureCookies: env.NODE_ENV === 'production',
+    // CSRF-allowlist: сам сайт и источники, которым разрешены запросы к API.
+    allowedOrigins: createOriginAllowList([env.APP_URL, ...env.CORS_ORIGINS.split(',')]),
+  });
   await app.register(emailPlugin, {
     enabled: env.emailEnabled,
     templates: emailTemplates,
@@ -65,6 +80,9 @@ export async function buildServer() {
   await app.register(healthRoutes);
   await app.register(catalogRoutes);
   await app.register(bookingRoutes);
+  // `global: false`: лимиты задаются per-route в конфиге маршрута (см. auth.routes.ts).
+  await app.register(rateLimit, { global: false });
+  await app.register(authRoutes);
 
   return app;
 }

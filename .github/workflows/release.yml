@@ -145,9 +145,6 @@ jobs:
           CORS_ORIGINS=${{ vars.NEXT_PUBLIC_SITE_URL || 'https://strizhlab.ru' }}
           APP_URL=${{ vars.APP_URL || vars.NEXT_PUBLIC_SITE_URL || 'https://strizhlab.ru' }}
 
-          # Аутентификация клиента
-          AUTH_SECRET=${{ secrets.AUTH_SECRET }}
-
           # ЮKassa (тестовый магазин до запуска)
           PAYMENTS_MODE=${{ vars.PAYMENTS_MODE || 'test' }}
           YOOKASSA_SHOP_ID=${{ vars.YOOKASSA_SHOP_ID }}

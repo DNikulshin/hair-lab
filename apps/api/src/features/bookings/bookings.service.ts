@@ -123,8 +123,16 @@ function reuseOrConflict(row: AppointmentRow, dto: CreateBooking): CreateBooking
  * (в том числе неизвестный или отключённый), отсекаются до загрузки расписания — 404.
  * Доступность проверяется той же логикой, что и `GET /slots`, но окончательную гарантию
  * от гонки даёт EXCLUDE-констрейнт (см. обработку `23P01`).
+ *
+ * `clientId` передаёт маршрут, когда запрос пришёл с сессией клиента; гостевые записи
+ * остаются без аккаунта. Контракты запроса и ответа не меняются: клиент не может указать
+ * чужой аккаунт.
  */
-export async function createBooking(db: Db, dto: CreateBooking): Promise<CreateBookingResult> {
+export async function createBooking(
+  db: Db,
+  dto: CreateBooking,
+  clientId?: string,
+): Promise<CreateBookingResult> {
   const tz = env.SALON_TIMEZONE;
 
   const existing = await db.appointment.findUnique({
@@ -174,6 +182,7 @@ export async function createBooking(db: Db, dto: CreateBooking): Promise<CreateB
           clientName: dto.clientName,
           clientPhone: dto.clientPhone,
           ...(dto.clientEmail === undefined ? {} : { clientEmail: dto.clientEmail }),
+          clientId: clientId ?? null,
           startsAt,
           endsAt,
           priceKopecks: service.priceKopecks,
