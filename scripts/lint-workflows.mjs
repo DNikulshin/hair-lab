@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-/* eslint-disable no-console -- CLI-скрипт: вывод линтера — его единственная задача */
 /**
  * Проверка workflow GitHub Actions линтером `actionlint` (issue #65).
  *
