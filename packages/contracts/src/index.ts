@@ -8,6 +8,7 @@
  *
  * Приложения импортируют только `@hair-lab/contracts` (без глубоких путей).
  */
+export * from './catalog/catalog.contract';
 export * from './common/errors';
 export * from './common/ids';
 export * from './common/money';
