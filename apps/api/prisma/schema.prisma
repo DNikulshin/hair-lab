@@ -11,6 +11,21 @@ datasource db {
   provider = "postgresql"
 }
 
+/// Категория услуг каталога. Публично отдаются только активные категории.
+model ServiceCategory {
+  id        String  @id @default(uuid()) @db.Uuid
+  name      String
+  isActive  Boolean @default(true) @map("is_active")
+  sortOrder Int     @default(0) @map("sort_order")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  services Service[]
+
+  @@map("service_categories")
+}
+
 /// Услуга с фиксированным прайсом: цена в копейках, длительность в минутах.
 model Service {
   id           String  @id @default(uuid()) @db.Uuid
@@ -21,12 +36,17 @@ model Service {
   isActive     Boolean @default(true) @map("is_active")
   sortOrder    Int     @default(0) @map("sort_order")
 
+  // Категория необязательна: услуги без категории публичны. NOT NULL — отдельной contract-миграцией.
+  categoryId String?          @map("category_id") @db.Uuid
+  category   ServiceCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   masters      MasterService[]
   appointments Appointment[]
 
+  @@index([categoryId])
   @@map("services")
 }
 
