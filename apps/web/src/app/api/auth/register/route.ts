@@ -18,9 +18,13 @@ export async function POST(request: Request): Promise<Response> {
     }));
     return jsonErrorResponse(400, 'validation_error', 'Проверьте данные формы', details);
   }
-  return proxyToApi('/auth/register', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(parsed.data),
-  }, request);
+  return proxyToApi(
+    '/auth/register',
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(parsed.data),
+    },
+    request,
+  );
 }

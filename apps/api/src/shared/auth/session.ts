@@ -75,10 +75,7 @@ export function shouldTouch(lastUsedAt: Date, now: Date): boolean {
 }
 
 /** Новый срок сессии при обращении: продлеваем idle, но не дальше абсолютного срока. */
-export function touchedExpiresAt(
-  session: { createdAt: Date; lastUsedAt: Date },
-  now: Date,
-): Date {
+export function touchedExpiresAt(session: { createdAt: Date; lastUsedAt: Date }, now: Date): Date {
   const idle = idleExpiresAt(now).getTime();
   const absolute = absoluteDeadline(session.createdAt).getTime();
   return new Date(Math.min(idle, absolute));

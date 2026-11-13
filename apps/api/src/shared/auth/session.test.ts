@@ -25,9 +25,19 @@ describe('session expiration and touch policy', () => {
 
   it('expires on idle or absolute deadline and touches no more than hourly', () => {
     const createdAt = new Date(now.getTime() - 59 * 24 * 60 * 60 * 1000);
-    expect(isSessionExpired({ createdAt, expiresAt: new Date(now.getTime() + 1) }, now)).toBe(false);
+    expect(isSessionExpired({ createdAt, expiresAt: new Date(now.getTime() + 1) }, now)).toBe(
+      false,
+    );
     expect(isSessionExpired({ createdAt, expiresAt: now }, now)).toBe(true);
-    expect(isSessionExpired({ createdAt: new Date(now.getTime() - SESSION_ABSOLUTE_TTL_MS), expiresAt: new Date(now.getTime() + 1) }, now)).toBe(true);
+    expect(
+      isSessionExpired(
+        {
+          createdAt: new Date(now.getTime() - SESSION_ABSOLUTE_TTL_MS),
+          expiresAt: new Date(now.getTime() + 1),
+        },
+        now,
+      ),
+    ).toBe(true);
     expect(SESSION_TOUCH_INTERVAL_MS).toBe(60 * 60 * 1000);
     expect(shouldTouch(new Date(now.getTime() - 59 * 60 * 1000), now)).toBe(false);
     expect(shouldTouch(new Date(now.getTime() - SESSION_TOUCH_INTERVAL_MS), now)).toBe(true);
@@ -35,7 +45,9 @@ describe('session expiration and touch policy', () => {
 
   it('limits a touch to the absolute deadline', () => {
     const createdAt = new Date(now.getTime() - 59 * 24 * 60 * 60 * 1000);
-    expect(touchedExpiresAt({ createdAt, lastUsedAt: now }, now)).toEqual(absoluteDeadline(createdAt));
+    expect(touchedExpiresAt({ createdAt, lastUsedAt: now }, now)).toEqual(
+      absoluteDeadline(createdAt),
+    );
   });
 
   it('touches a live session and deletes a revoked or expired session', async () => {

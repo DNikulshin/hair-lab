@@ -229,7 +229,10 @@ describe('POST /bookings', () => {
     // ПДн: ни телефона, ни почты в ответе нет.
     expect(raw).not.toContain(fakeClient.phone);
     expect(raw).not.toContain(fakeClient.email);
-    const stored = await db.appointment.findFirst({ where: { masterId }, select: { clientId: true } });
+    const stored = await db.appointment.findFirst({
+      where: { masterId },
+      select: { clientId: true },
+    });
     expect(stored?.clientId).toBeNull();
   });
 
@@ -243,11 +246,19 @@ describe('POST /bookings', () => {
       method: 'POST',
       url: '/bookings',
       headers: { cookie: `hl_session=${token}` },
-      payload: bookingBody({ masterId, serviceId, startsAt: slot.startsAt, idempotencyKey: nextKey() }),
+      payload: bookingBody({
+        masterId,
+        serviceId,
+        startsAt: slot.startsAt,
+        idempotencyKey: nextKey(),
+      }),
     });
 
     expect(response.statusCode).toBe(201);
-    const stored = await db.appointment.findFirst({ where: { masterId }, select: { clientId: true } });
+    const stored = await db.appointment.findFirst({
+      where: { masterId },
+      select: { clientId: true },
+    });
     expect(stored?.clientId).toBe(clientId);
   });
 

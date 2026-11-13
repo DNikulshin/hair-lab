@@ -30,9 +30,13 @@ export async function POST(request: Request): Promise<Response> {
     return jsonErrorResponse(400, 'validation_error', 'Проверьте данные записи', details);
   }
 
-  return proxyToApi('/bookings', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(parsed.data),
-  }, request);
+  return proxyToApi(
+    '/bookings',
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(parsed.data),
+    },
+    request,
+  );
 }

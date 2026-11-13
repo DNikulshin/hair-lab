@@ -33,23 +33,56 @@ export function RegisterForm() {
   return (
     <form onSubmit={submit} className="flex flex-col gap-4">
       <div className="flex flex-col gap-1">
-        <label htmlFor="register-email" className="text-sm font-medium">Электронная почта</label>
-        <input id="register-email" name="email" type="email" autoComplete="email" required
-          maxLength={254} value={email} onChange={(event) => setEmail(event.target.value)}
-          className={INPUT_CLASS} />
+        <label htmlFor="register-email" className="text-sm font-medium">
+          Электронная почта
+        </label>
+        <input
+          id="register-email"
+          name="email"
+          type="email"
+          autoComplete="email"
+          required
+          maxLength={254}
+          value={email}
+          onChange={(event) => setEmail(event.target.value)}
+          className={INPUT_CLASS}
+        />
       </div>
       <div className="flex flex-col gap-1">
-        <label htmlFor="register-password" className="text-sm font-medium">Пароль (не менее 10 символов)</label>
-        <input id="register-password" name="password" type="password" autoComplete="new-password"
-          required minLength={10} maxLength={128} value={password}
-          onChange={(event) => setPassword(event.target.value)} className={INPUT_CLASS} />
+        <label htmlFor="register-password" className="text-sm font-medium">
+          Пароль (не менее 10 символов)
+        </label>
+        <input
+          id="register-password"
+          name="password"
+          type="password"
+          autoComplete="new-password"
+          required
+          minLength={10}
+          maxLength={128}
+          value={password}
+          onChange={(event) => setPassword(event.target.value)}
+          className={INPUT_CLASS}
+        />
       </div>
-      {error !== null ? <p role="alert" className="text-sm text-red-600">{error}</p> : null}
-      <button type="submit" disabled={pending}
-        className="w-fit rounded-card bg-accent px-4 py-2 text-sm font-medium text-surface disabled:opacity-60">
+      {error !== null ? (
+        <p role="alert" className="text-sm text-red-600">
+          {error}
+        </p>
+      ) : null}
+      <button
+        type="submit"
+        disabled={pending}
+        className="w-fit rounded-card bg-accent px-4 py-2 text-sm font-medium text-surface disabled:opacity-60"
+      >
         {pending ? 'Создаём аккаунт…' : 'Зарегистрироваться'}
       </button>
-      <p className="text-sm text-muted">Уже есть аккаунт? <Link href="/login" className="underline">Войти</Link></p>
+      <p className="text-sm text-muted">
+        Уже есть аккаунт?{' '}
+        <Link href="/login" className="underline">
+          Войти
+        </Link>
+      </p>
     </form>
   );
 }

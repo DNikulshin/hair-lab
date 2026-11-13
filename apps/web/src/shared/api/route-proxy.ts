@@ -113,7 +113,8 @@ export async function proxyToApi(
     upstream.headers.get('content-type') ?? 'application/json; charset=utf-8',
   );
   // Нужны все Set-Cookie заголовки (не склеивать через запятую: Expires содержит запятую).
-  for (const cookie of upstream.headers.getSetCookie()) responseHeaders.append('Set-Cookie', cookie);
+  for (const cookie of upstream.headers.getSetCookie())
+    responseHeaders.append('Set-Cookie', cookie);
   const relay = (body: BodyInit | null): Response =>
     new Response(body, { status: upstream.status, headers: responseHeaders });
 

@@ -11,7 +11,9 @@ export default function RegisterPage() {
         <section className="flex flex-col gap-6 rounded-card border border-border bg-surface-raised p-6">
           <div className="flex flex-col gap-2">
             <h1 className="text-2xl font-semibold">Создать аккаунт</h1>
-            <p className="text-sm text-muted">Зарегистрируйтесь по электронной почте и задайте пароль.</p>
+            <p className="text-sm text-muted">
+              Зарегистрируйтесь по электронной почте и задайте пароль.
+            </p>
           </div>
           <RegisterForm />
         </section>

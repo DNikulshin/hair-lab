@@ -10,7 +10,7 @@ const app = await buildServer();
 let ipNumber = 10;
 function nextIp(): string {
   ipNumber += 1;
-  return `10.0.${Math.floor(ipNumber / 250)}.${ipNumber % 250 + 1}`;
+  return `10.0.${Math.floor(ipNumber / 250)}.${(ipNumber % 250) + 1}`;
 }
 const headers = (ip = nextIp()) => ({ 'x-forwarded-for': ip });
 const email = () => `client-${randomUUID()}@example.invalid`;
@@ -60,17 +60,28 @@ describe('client authentication API', () => {
     expect(registered.body).not.toContain('token');
 
     const cookie = sessionCookie(registered);
-    const me = await app.inject({ method: 'GET', url: '/auth/me', headers: { ...headers(), cookie } });
+    const me = await app.inject({
+      method: 'GET',
+      url: '/auth/me',
+      headers: { ...headers(), cookie },
+    });
     expect(me.statusCode).toBe(200);
     expect(accountId(me.json())).toBe(id);
 
     const login = await app.inject({
-      method: 'POST', url: '/auth/login', headers: headers(), payload: { email: address, password },
+      method: 'POST',
+      url: '/auth/login',
+      headers: headers(),
+      payload: { email: address, password },
     });
     expect(login.statusCode).toBe(200);
     expect(accountId(login.json())).toBe(id);
     const loginCookie = sessionCookie(login);
-    const logout = await app.inject({ method: 'POST', url: '/auth/logout', headers: { ...headers(), cookie: loginCookie } });
+    const logout = await app.inject({
+      method: 'POST',
+      url: '/auth/logout',
+      headers: { ...headers(), cookie: loginCookie },
+    });
     expect(logout.statusCode).toBe(200);
     expect(logout.headers['set-cookie']).toContain('Max-Age=0');
     const unauthorized = await app.inject({ method: 'GET', url: '/auth/me', headers: headers() });
@@ -87,8 +98,18 @@ describe('client authentication API', () => {
     expect(apiErrorSchema.parse(duplicate.json()).error.code).toBe('conflict');
     expect(duplicate.body.toLowerCase()).not.toContain('email');
 
-    const wrong = await app.inject({ method: 'POST', url: '/auth/login', headers: headers(), payload: { email: address, password: 'wrong password sample' } });
-    const unknown = await app.inject({ method: 'POST', url: '/auth/login', headers: headers(), payload: { email: email(), password } });
+    const wrong = await app.inject({
+      method: 'POST',
+      url: '/auth/login',
+      headers: headers(),
+      payload: { email: address, password: 'wrong password sample' },
+    });
+    const unknown = await app.inject({
+      method: 'POST',
+      url: '/auth/login',
+      headers: headers(),
+      payload: { email: email(), password },
+    });
     expect(wrong.statusCode).toBe(401);
     expect(unknown.statusCode).toBe(401);
     expect(apiErrorSchema.parse(wrong.json()).error.code).toBe('unauthorized');
