@@ -11,6 +11,13 @@ const envSchema = z.object({
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
   SALON_TIMEZONE: z.string().min(1).default('Europe/Moscow'),
   CORS_ORIGINS: z.string().default('http://localhost:3000'),
+  // Строка подключения к PostgreSQL. В тексте ошибки — только имя поля, без значения.
+  DATABASE_URL: z
+    .string()
+    .min(1)
+    .refine((value) => value.startsWith('postgresql://'), {
+      message: 'ожидается строка подключения postgresql://',
+    }),
 });
 
 export type Env = z.infer<typeof envSchema>;

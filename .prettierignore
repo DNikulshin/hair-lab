@@ -5,3 +5,4 @@ dist
 coverage
 pnpm-lock.yaml
 .pi
+apps/api/src/generated

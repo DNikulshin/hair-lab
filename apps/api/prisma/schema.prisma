@@ -1,0 +1,151 @@
+// Схема БД салона: услуги, мастера, расписание и записи.
+// Время хранится в UTC (timestamptz); часовой пояс салона — только в конфиге (SALON_TIMEZONE).
+// Ограничения, которые Prisma не выражает (EXCLUDE, CHECK), добавляются в SQL-миграции.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+/// Услуга с фиксированным прайсом: цена в копейках, длительность в минутах.
+model Service {
+  id           String  @id @default(uuid()) @db.Uuid
+  name         String
+  description  String?
+  durationMin  Int     @map("duration_min")
+  priceKopecks Int     @map("price_kopecks")
+  isActive     Boolean @default(true) @map("is_active")
+  sortOrder    Int     @default(0) @map("sort_order")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  masters      MasterService[]
+  appointments Appointment[]
+
+  @@map("services")
+}
+
+/// Мастер. Удаление не физическое: isActive = false сохраняет историю записей.
+model Master {
+  id       String  @id @default(uuid()) @db.Uuid
+  fullName String  @map("full_name")
+  bio      String?
+  photoUrl String? @map("photo_url")
+  isActive Boolean @default(true) @map("is_active")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  services     MasterService[]
+  workingTime  MasterWorkingHours[]
+  exceptions   ScheduleException[]
+  appointments Appointment[]
+
+  @@map("masters")
+}
+
+/// Какие услуги оказывает мастер (m-n).
+model MasterService {
+  masterId  String @map("master_id") @db.Uuid
+  serviceId String @map("service_id") @db.Uuid
+
+  master  Master  @relation(fields: [masterId], references: [id], onDelete: Cascade)
+  service Service @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+
+  @@id([masterId, serviceId])
+  @@index([serviceId])
+  @@map("master_services")
+}
+
+/// Еженедельный шаблон рабочих часов: день недели и минуты от полуночи в TZ салона.
+/// Абсолютное время не хранится — переход на летнее/зимнее время учитывается при генерации слотов.
+model MasterWorkingHours {
+  id          String @id @default(uuid()) @db.Uuid
+  masterId    String @map("master_id") @db.Uuid
+  dayOfWeek   Int    @map("day_of_week")
+  startMinute Int    @map("start_minute")
+  endMinute   Int    @map("end_minute")
+
+  master Master @relation(fields: [masterId], references: [id], onDelete: Cascade)
+
+  @@unique([masterId, dayOfWeek, startMinute])
+  @@map("master_working_hours")
+}
+
+/// Исключение из расписания: отпуск, больничный и т. п. Абсолютный интервал в UTC.
+model ScheduleException {
+  id       String                @id @default(uuid()) @db.Uuid
+  masterId String                @map("master_id") @db.Uuid
+  kind     ScheduleExceptionKind
+  startsAt DateTime              @map("starts_at") @db.Timestamptz(3)
+  endsAt   DateTime              @map("ends_at") @db.Timestamptz(3)
+  note     String?
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  master Master @relation(fields: [masterId], references: [id], onDelete: Cascade)
+
+  @@index([masterId, startsAt])
+  @@map("schedule_exceptions")
+}
+
+enum ScheduleExceptionKind {
+  vacation
+  sick
+  personal
+  other
+
+  @@map("schedule_exception_kind")
+}
+
+/// Гостевая запись на услугу. Персональные данные клиента маскируются в логах.
+/// Непересечение слотов одного мастера обеспечивает EXCLUDE-констрейнт (см. миграцию).
+model Appointment {
+  id        String @id @default(uuid()) @db.Uuid
+  masterId  String @map("master_id") @db.Uuid
+  serviceId String @map("service_id") @db.Uuid
+
+  clientName  String  @map("client_name")
+  clientPhone String  @map("client_phone")
+  clientEmail String? @map("client_email")
+
+  startsAt DateTime @map("starts_at") @db.Timestamptz(3)
+  endsAt   DateTime @map("ends_at") @db.Timestamptz(3)
+
+  status AppointmentStatus @default(pending)
+
+  // Снимки условий на момент записи: изменение прайса не переписывает историю.
+  priceKopecks Int @map("price_kopecks")
+  durationMin  Int @map("duration_min")
+
+  // Ключ идемпотентности от клиента: повтор запроса не создаёт дубль.
+  idempotencyKey String? @unique @map("idempotency_key")
+
+  cancelReason String? @map("cancel_reason")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  master  Master  @relation(fields: [masterId], references: [id], onDelete: Restrict)
+  service Service @relation(fields: [serviceId], references: [id], onDelete: Restrict)
+
+  @@index([masterId, startsAt])
+  @@index([serviceId])
+  @@map("appointments")
+}
+
+enum AppointmentStatus {
+  pending
+  confirmed
+  cancelled
+  completed
+  no_show
+
+  @@map("appointment_status")
+}

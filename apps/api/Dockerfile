@@ -10,6 +10,7 @@ COPY . .
 RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
     pnpm install --frozen-lockfile
 RUN pnpm --filter @hair-lab/contracts build \
+ && pnpm --filter @hair-lab/api db:generate \
  && pnpm --filter @hair-lab/api build \
  && pnpm --filter @hair-lab/api deploy --prod /out
 
