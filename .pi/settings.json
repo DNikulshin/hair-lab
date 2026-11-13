@@ -1,9 +1,11 @@
 {
   "$schema": "https://pi.dev/schemas/settings.schema.json",
   "defaultProvider": "polza-ai",
-  "defaultModel": "deepseek/deepseek-v4.1-flash",
+  "defaultModel": "openai/gpt-6-luna-pro",
+  "defaultThinkingLevel": "medium",
   "subagents": {
     "defaultModel": "polza-ai/deepseek/deepseek-v4.1-flash",
+    "defaultThinking": "low",
     "maxSubagentSpawnsPerRun": 12
   }
 }
