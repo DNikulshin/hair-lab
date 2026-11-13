@@ -155,6 +155,8 @@ model Appointment {
   master  Master  @relation(fields: [masterId], references: [id], onDelete: Restrict)
   service Service @relation(fields: [serviceId], references: [id], onDelete: Restrict)
 
+  outboxMessages OutboxMessage[]
+
   @@index([masterId, startsAt])
   @@index([serviceId])
   @@map("appointments")
@@ -168,4 +170,47 @@ enum AppointmentStatus {
   no_show
 
   @@map("appointment_status")
+}
+
+/// Очередь исходящих писем (transactional outbox).
+/// Строка создаётся в одной транзакции с бизнес-событием (например, записью на услугу),
+/// поэтому сбой отправки не ломает создание записи. Письма отправляет фоновый диспетчер.
+/// Персональные данные (email, имя клиента, тело письма) лежат только в `payload` и в БД,
+/// в логи попадают id записи/сообщения, `type` и код SMTP-ответа.
+model OutboxMessage {
+  id String @id @default(uuid()) @db.Uuid
+
+  /// Тип письма (`booking_confirmation` и т. п.). Не enum: новый тип не требует миграции.
+  type    String
+  /// Снимок данных для рендера шаблона на момент события.
+  payload Json
+  status  OutboxStatus @default(pending)
+
+  /// Число неудачных попыток отправки: по нему считается пауза перед повтором.
+  attempts      Int       @default(0)
+  nextAttemptAt DateTime  @default(now()) @map("next_attempt_at") @db.Timestamptz(3)
+  /// Текст последней ошибки (код SMTP, без содержимого письма). В логи не выводится.
+  lastError     String?   @map("last_error")
+  sentAt        DateTime? @map("sent_at") @db.Timestamptz(3)
+
+  appointmentId String?      @map("appointment_id") @db.Uuid
+  appointment   Appointment? @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  // Выборка диспетчера: pending с наступившим `next_attempt_at`.
+  @@index([status, nextAttemptAt])
+  // Лимиты отправки (30/мин, 200/сутки) считаются по `sent_at`.
+  @@index([sentAt])
+  @@map("outbox_messages")
+}
+
+enum OutboxStatus {
+  pending
+  sent
+  failed
+  suppressed
+
+  @@map("outbox_status")
 }
