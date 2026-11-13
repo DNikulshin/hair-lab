@@ -96,7 +96,10 @@ export async function loginClient(db: Db, dto: LoginRequest): Promise<AuthResult
     await verifyDummyPassword(dto.password);
     throw new InvalidCredentialsError();
   }
-  if (!(await verifyPassword(client.passwordHash, dto.password)) || client.emailVerifiedAt === null) {
+  if (
+    !(await verifyPassword(client.passwordHash, dto.password)) ||
+    client.emailVerifiedAt === null
+  ) {
     throw new InvalidCredentialsError();
   }
 

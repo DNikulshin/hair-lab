@@ -6,10 +6,12 @@ import type { TokenDeliveryRegistry } from './token-delivery';
 export const MAGIC_LINK_TYPE = 'magic_link';
 
 /** Outbox payload intentionally excludes the raw one-time token. */
-export const magicLinkPayloadSchema = z.object({
-  email: z.email().max(254),
-  loginTokenId: z.uuid(),
-}).strict();
+export const magicLinkPayloadSchema = z
+  .object({
+    email: z.email().max(254),
+    loginTokenId: z.uuid(),
+  })
+  .strict();
 export type MagicLinkPayload = z.infer<typeof magicLinkPayloadSchema>;
 
 export interface MagicLinkEmailContext {

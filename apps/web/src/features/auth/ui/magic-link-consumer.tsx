@@ -31,7 +31,11 @@ export function MagicLinkConsumer({ token }: { token: string | null }) {
   }, [router, token]);
 
   if (state === 'pending') {
-    return <p role="status" className="text-sm text-muted">Проверяем ссылку…</p>;
+    return (
+      <p role="status" className="text-sm text-muted">
+        Проверяем ссылку…
+      </p>
+    );
   }
 
   return (

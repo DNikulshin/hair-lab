@@ -189,7 +189,8 @@ export function createFixture(db: Db): Fixture {
     },
 
     async cleanup() {
-      if (outboxIds.length > 0) await db.outboxMessage.deleteMany({ where: { id: { in: outboxIds } } });
+      if (outboxIds.length > 0)
+        await db.outboxMessage.deleteMany({ where: { id: { in: outboxIds } } });
       const allSessionClientIds = [...new Set([...sessionClientIds, ...clientIds])];
       if (allSessionClientIds.length > 0) {
         await db.session.deleteMany({ where: { clientId: { in: allSessionClientIds } } });

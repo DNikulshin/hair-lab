@@ -22,7 +22,9 @@ describe('magic link email', () => {
 
     const rendered = template.render(payload);
     expect(rendered.to).toBe(payload.email);
-    expect(rendered.text).toContain('https://example.invalid/login/magic?token=synthetic-magic-token');
+    expect(rendered.text).toContain(
+      'https://example.invalid/login/magic?token=synthetic-magic-token',
+    );
     expect(rendered.startsAt).toEqual(expiresAt);
     expect(magicLinkPayloadSchema.parse(payload)).toEqual(payload);
     expect(template.render(payload).text).toBe(rendered.text);
