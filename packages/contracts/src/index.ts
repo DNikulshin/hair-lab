@@ -14,5 +14,6 @@ export * from './common/errors';
 export * from './common/ids';
 export * from './common/money';
 export * from './common/pagination';
+export * from './common/phone';
 export * from './common/time';
 export * from './health/health.contract';

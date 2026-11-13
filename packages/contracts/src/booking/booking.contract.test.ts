@@ -90,6 +90,30 @@ describe('createBookingSchema', () => {
     ).toThrow();
   });
 
+  it('приводит телефон к E.164, принимая свободную запись российского номера', () => {
+    expect(createBookingSchema.parse(createBody).clientPhone).toBe('+70000000000');
+    expect(
+      createBookingSchema.parse({ ...createBody, clientPhone: '8 (912) 345-67-89' }).clientPhone,
+    ).toBe('+79123456789');
+    expect(
+      createBookingSchema.parse({ ...createBody, clientPhone: '+7 912 345 67 89' }).clientPhone,
+    ).toBe('+79123456789');
+  });
+
+  it('принимает международный номер и приводит его к E.164', () => {
+    const parsed = createBookingSchema.parse({ ...createBody, clientPhone: '+1 202 555 0143' });
+    expect(parsed.clientPhone).toBe('+12025550143');
+  });
+
+  it('на не-телефон указывает поле и не повторяет значение в тексте ошибки', () => {
+    const result = createBookingSchema.safeParse({ ...createBody, clientPhone: '+1 202 555 01' });
+    expect(result.success).toBe(false);
+
+    const issue = result.success ? undefined : result.error.issues[0];
+    expect(issue?.path).toEqual(['clientPhone']);
+    expect(issue?.message ?? '').not.toContain('202');
+  });
+
   it('отклоняет время без зоны, битый uuid и короткий idempotencyKey', () => {
     expect(() =>
       createBookingSchema.parse({ ...createBody, startsAt: '2030-03-04T09:00:00' }),
@@ -109,6 +133,13 @@ describe('bookingResponseSchema', () => {
     const parsed = bookingSchema.parse(booking);
     expect(Object.keys(parsed)).not.toContain('clientPhone');
     expect(Object.keys(parsed)).not.toContain('clientEmail');
+  });
+
+  it('принимает аддитивную маску телефона и остаётся валидной без неё', () => {
+    const masked = bookingSchema.parse({ ...booking, clientPhoneMasked: '+7 (***) ***-**-89' });
+    expect(masked.clientPhoneMasked).toBe('+7 (***) ***-**-89');
+    expect(bookingSchema.parse(booking).clientPhoneMasked).toBeUndefined();
+    expect(() => bookingSchema.parse({ ...booking, clientPhoneMasked: '' })).toThrow();
   });
 
   it('отклоняет неизвестный статус и неположительную длительность', () => {
