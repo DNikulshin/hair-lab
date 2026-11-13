@@ -23,7 +23,9 @@ on:
 
 permissions:
   contents: read
-  packages: delete
+  # Значения permissions: read|write|none — `delete` GitHub не принимает.
+  # Удаление версий пакета покрывается `packages: write`.
+  packages: write
 
 jobs:
   cleanup:
