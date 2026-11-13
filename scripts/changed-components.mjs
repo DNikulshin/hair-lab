@@ -15,7 +15,7 @@
  * для всего репозитория (обе сборки), ничего не пишет в выходные файлы.
  */
 import { execFileSync } from 'node:child_process';
-import { appendFileSync } from 'node:fs';
+import { appendFileSync, readFileSync } from 'node:fs';
 
 /** Пути, которые не влияют ни на один образ. */
 const IGNORED = [
@@ -84,12 +84,28 @@ function isEmptyRevision(sha) {
   return sha === '' || /^0+$/.test(sha);
 }
 
-/** @returns {{ base: string, head: string } | null} null — дифф вычислить нельзя */
-function resolveRange() {
-  const event = process.env.GITHUB_EVENT_NAME ?? '';
+/**
+ * Полезная нагрузка события из `GITHUB_EVENT_PATH`.
+ * Именно там лежат `before`/`after` и данные PR: отдельных переменных окружения
+ * для `github.event.before` и `github.event.pull_request` GitHub не предоставляет.
+ * @returns {any} null — файла нет или он нечитаем
+ */
+function readEventPayload() {
+  const eventPath = process.env.GITHUB_EVENT_PATH;
+  if (eventPath === undefined || eventPath === '') return null;
+  try {
+    return JSON.parse(readFileSync(eventPath, 'utf8'));
+  } catch {
+    return null;
+  }
+}
 
-  if (event === 'pull_request' || event === 'pull_request_target') {
-    const baseRef = process.env.GITHUB_BASE_REF ?? '';
+/** @returns {{ base: string, head: string } | null} null — дифф вычислить нельзя */
+function resolveRange(payload) {
+  const eventName = process.env.GITHUB_EVENT_NAME ?? '';
+
+  if (eventName === 'pull_request' || eventName === 'pull_request_target') {
+    const baseRef = payload?.pull_request?.base?.ref ?? process.env.GITHUB_BASE_REF ?? '';
     if (baseRef === '') return null;
     try {
       // fetch-depth: 0 в job'е даёт полную историю, но ref базовой ветки может отсутствовать.
@@ -103,14 +119,15 @@ function resolveRange() {
     } catch {
       return null;
     }
+    // HEAD в pull_request — merge-коммит базы и PR; дифф от базы даёт изменения PR.
     return { base: `origin/${baseRef}`, head: 'HEAD' };
   }
 
-  if (event === 'push') {
+  if (eventName === 'push') {
     // Тег всегда собирает оба образа: релиз не должен зависеть от диффа.
     if (process.env.GITHUB_REF_TYPE === 'tag') return null;
-    const before = process.env.GITHUB_EVENT_BEFORE ?? '';
-    const head = process.env.GITHUB_SHA ?? 'HEAD';
+    const before = payload?.before ?? process.env.GITHUB_EVENT_BEFORE ?? '';
+    const head = payload?.after ?? process.env.GITHUB_SHA ?? 'HEAD';
     if (isEmptyRevision(before)) return null;
     return { base: before, head };
   }
@@ -119,7 +136,7 @@ function resolveRange() {
 }
 
 function main() {
-  const range = resolveRange();
+  const range = resolveRange(readEventPayload());
   let files = null;
 
   if (range !== null) {

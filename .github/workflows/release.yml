@@ -73,6 +73,12 @@ jobs:
     needs: [verify-tag, changes]
     # Для push в main verify-tag пропускается — образы собираются как обычно.
     # Пустая матрица (docs-only push) не запускает ни одной сборки.
+    #
+    # Здесь job-level `if` оставлен сознательно: эти чеки НЕ являются required в branch
+    # protection, поэтому пропуск никого не блокирует. Если `images` когда-нибудь попадёт
+    # в required checks — перейти на статическую матрицу со step-level gate, как в ci.yml
+    # (job `docker`): у пропущенного job'а не создаются чеки с именами вида
+    # `images (api, …)`, и PR/деплой навсегда получит «Expected — Waiting for status».
     if: always() && needs.changes.result == 'success' && needs.changes.outputs.any == 'true' && (needs.verify-tag.result == 'success' || needs.verify-tag.result == 'skipped')
     runs-on: ubuntu-latest
     strategy:
