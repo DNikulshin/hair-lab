@@ -33,8 +33,8 @@ export function RegisterForm() {
       <div className="flex flex-col gap-3" role="status">
         <h2 className="text-lg font-semibold">Проверьте почту</h2>
         <p className="text-sm text-muted">
-          Если для этого адреса можно создать аккаунт или выполнить вход, мы отправили ссылку для
-          подтверждения и входа.
+          Аккаунт создан. Мы отправили письмо со ссылкой для подтверждения адреса и входа — она
+          действует 15 минут.
         </p>
         <Link href="/" className="w-fit text-sm underline">
           На главную
