@@ -20,3 +20,6 @@ coverage/
 
 # генерируется Next.js
 next-env.d.ts
+
+# генерируется Prisma Client (`pnpm --filter @hair-lab/api db:generate`)
+apps/api/src/generated/

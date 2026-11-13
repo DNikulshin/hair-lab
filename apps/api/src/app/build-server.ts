@@ -6,6 +6,7 @@ import {
 } from 'fastify-type-provider-zod';
 import { healthRoutes } from '../features/health/health.routes';
 import { env } from '../shared/config/env';
+import { dbPlugin } from '../shared/db';
 import { registerErrorHandler } from '../shared/http/error-handler';
 import { createLoggerOptions } from '../shared/logging/logger';
 
@@ -21,6 +22,7 @@ export async function buildServer() {
 
   registerErrorHandler(app);
 
+  await app.register(dbPlugin, { databaseUrl: env.DATABASE_URL });
   await app.register(healthRoutes);
 
   return app;

@@ -30,6 +30,10 @@ jobs:
 
       # Контракты собираются первыми: от них зависят типы приложений.
       - run: pnpm --filter @hair-lab/contracts build
+
+      # Prisma Client генерируется из schema.prisma и нужен для типизации api.
+      - run: pnpm --filter @hair-lab/api db:generate
+
       - run: pnpm typecheck
       - run: pnpm lint
       - run: pnpm check:arch
@@ -62,5 +66,39 @@ jobs:
           cache-from: type=gha,scope=${{ matrix.component }}
           cache-to: type=gha,mode=max,scope=${{ matrix.component }}
 
-  # Интеграционные тесты добавляются отдельной job, когда появится схема БД:
-  # service-контейнер postgres + `pnpm test:int`.
+  # Интеграционные тесты на реальном PostgreSQL: проверяют ограничения схемы
+  # (EXCLUDE на пересечение слотов, FK, CHECK, unique).
+  integration:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: hair_lab
+          POSTGRES_PASSWORD: change_me
+          POSTGRES_DB: hair_lab
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U hair_lab -d hair_lab"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://hair_lab:change_me@localhost:5432/hair_lab?schema=public
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm --filter @hair-lab/contracts build
+      - run: pnpm --filter @hair-lab/api db:generate
+      - run: pnpm --filter @hair-lab/api db:migrate:deploy
+      - run: pnpm test:int

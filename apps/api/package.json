@@ -8,18 +8,25 @@
     "dist"
   ],
   "scripts": {
-    "dev": "node --env-file-if-exists=.env --watch --import tsx src/app/main.ts",
+    "dev": "tsx watch --env-file-if-exists=../../.env --env-file-if-exists=.env src/app/main.ts",
     "build": "tsup",
-    "start": "node --env-file-if-exists=.env dist/main.js",
+    "start": "node --env-file-if-exists=../../.env --env-file-if-exists=.env dist/main.js",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "test": "vitest run",
-    "test:int": "vitest run --config vitest.int.config.ts"
+    "test:int": "vitest run --config vitest.int.config.ts",
+    "db:generate": "prisma generate",
+    "db:migrate:dev": "prisma migrate dev",
+    "db:migrate:deploy": "prisma migrate deploy"
   },
   "dependencies": {
     "@hair-lab/contracts": "workspace:*",
+    "@prisma/adapter-pg": "^7.10.1",
+    "@prisma/client": "^7.10.1",
     "fastify": "^5.12.8",
+    "fastify-plugin": "^5.1.0",
     "fastify-type-provider-zod": "^7.0.0",
+    "pg": "^8.16.3",
     "pino": "^10.4.0",
     "zod": "^4.6.7"
   },
@@ -27,6 +34,7 @@
     "@hair-lab/tsconfig": "workspace:*",
     "@types/node": "^22.13.0",
     "pino-pretty": "^13.2.0",
+    "prisma": "^7.10.1",
     "tsx": "^4.23.15"
   }
 }

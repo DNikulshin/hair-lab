@@ -16,6 +16,8 @@ export const baseConfig = tseslint.config(
       '**/.turbo/**',
       '**/coverage/**',
       '**/*.d.ts',
+      // Сгенерированный Prisma Client не линтуем.
+      '**/src/generated/**',
     ],
   },
   js.configs.recommended,
