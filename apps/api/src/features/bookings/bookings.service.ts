@@ -2,6 +2,7 @@ import type { Booking, BookingStatus, CreateBooking } from '@hair-lab/contracts'
 import { maskPhone } from '@hair-lab/contracts';
 import { env } from '../../shared/config/env';
 import { sqlStateOf, type Db } from '../../shared/db';
+import { BOOKING_CONFIRMATION_TYPE } from './booking-confirmation.email';
 import { isSlotBookable, loadSchedules, salonDateOf } from './slots.service';
 
 /**
@@ -133,7 +134,7 @@ export async function createBooking(db: Db, dto: CreateBooking): Promise<CreateB
 
   const service = await db.service.findFirst({
     where: { id: dto.serviceId, isActive: true },
-    select: { id: true, durationMin: true, priceKopecks: true },
+    select: { id: true, name: true, durationMin: true, priceKopecks: true },
   });
   if (service === null) throw new ServiceNotFoundError();
 
@@ -142,7 +143,7 @@ export async function createBooking(db: Db, dto: CreateBooking): Promise<CreateB
   // дают одинаковый 404: `GET /slots` таких мастеров не предлагает.
   const master = await db.master.findFirst({
     where: { id: dto.masterId, isActive: true, services: { some: { serviceId: service.id } } },
-    select: { id: true },
+    select: { id: true, fullName: true },
   });
   if (master === null) throw new MasterNotFoundError();
 
@@ -162,20 +163,49 @@ export async function createBooking(db: Db, dto: CreateBooking): Promise<CreateB
   }
 
   try {
-    const created = await db.appointment.create({
-      data: {
-        masterId: dto.masterId,
-        serviceId: service.id,
-        clientName: dto.clientName,
-        clientPhone: dto.clientPhone,
-        ...(dto.clientEmail === undefined ? {} : { clientEmail: dto.clientEmail }),
-        startsAt,
-        endsAt,
-        priceKopecks: service.priceKopecks,
-        durationMin: service.durationMin,
-        idempotencyKey: dto.idempotencyKey,
-      },
+    // Запись и письмо в очередь — одной транзакцией (transactional outbox):
+    // нет строки outbox без записи и наоборот. Отправкой занимается фоновый диспетчер,
+    // поэтому недоступный SMTP не ломает создание записи (AGENTS.md, «Данные и надёжность»).
+    const created = await db.$transaction(async (tx) => {
+      const appointment = await tx.appointment.create({
+        data: {
+          masterId: dto.masterId,
+          serviceId: service.id,
+          clientName: dto.clientName,
+          clientPhone: dto.clientPhone,
+          ...(dto.clientEmail === undefined ? {} : { clientEmail: dto.clientEmail }),
+          startsAt,
+          endsAt,
+          priceKopecks: service.priceKopecks,
+          durationMin: service.durationMin,
+          idempotencyKey: dto.idempotencyKey,
+        },
+      });
+
+      // Письмо нужно только когда клиент оставил почту. Снимок фиксируем здесь:
+      // правка услуги или мастера позже не меняет уже созданное письмо.
+      if (dto.clientEmail !== undefined) {
+        await tx.outboxMessage.create({
+          data: {
+            type: BOOKING_CONFIRMATION_TYPE,
+            appointmentId: appointment.id,
+            payload: {
+              clientName: dto.clientName,
+              clientEmail: dto.clientEmail,
+              serviceName: service.name,
+              masterName: master.fullName,
+              startsAt: startsAt.toISOString(),
+              endsAt: endsAt.toISOString(),
+              priceKopecks: service.priceKopecks,
+              durationMin: service.durationMin,
+            },
+          },
+        });
+      }
+
+      return appointment;
     });
+
     return { status: 201, booking: toBookingDto(created) };
   } catch (error) {
     const sqlState = sqlStateOf(error);
