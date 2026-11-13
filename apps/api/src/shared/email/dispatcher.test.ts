@@ -164,6 +164,49 @@ function runTick(
 }
 
 describe('диспетчер: результат отправки', () => {
+  it('вызывает afterSent только после успешной доставки', async () => {
+    let afterSentCalls = 0;
+    const callbackTemplates: EmailTemplateRegistry = {
+      booking_confirmation: {
+        render: () => ({
+          to: CLIENT_EMAIL,
+          subject: 'Тест',
+          text: 'Тест',
+          html: '<p>Тест</p>',
+          startsAt: FUTURE,
+          afterSent: () => {
+            afterSentCalls += 1;
+          },
+        }),
+      },
+    };
+    const { store } = createStore({ messages: [message()] });
+    const { transport } = createTransport({ outcome: 'retry', responseCode: 421 });
+    const { logger } = createLogger();
+    const dispatcher = createDispatcher({
+      store,
+      transport,
+      templates: callbackTemplates,
+      logger,
+      now: fixedNow,
+    });
+
+    await dispatcher.tick();
+    expect(afterSentCalls).toBe(0);
+
+    const successStore = createStore({ messages: [message()] }).store;
+    const { transport: successTransport } = createTransport({ outcome: 'sent', responseCode: 250 });
+    const successDispatcher = createDispatcher({
+      store: successStore,
+      transport: successTransport,
+      templates: callbackTemplates,
+      logger,
+      now: fixedNow,
+    });
+    await successDispatcher.tick();
+    expect(afterSentCalls).toBe(1);
+  });
+
   it('успех — статус sent и время отправки', async () => {
     const { dispatcher, calls, sent } = runTick({ messages: [message()] });
 

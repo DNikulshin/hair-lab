@@ -8,7 +8,7 @@ import { errorDetailOf, type EmailTransport, type SendResult } from './transport
  * Правила (issue #9):
  * - паузы перед повтором 1, 5, 15, 60 и 240 минут; после пяти повторов — `failed`;
  * - постоянный отказ получателя (5xx на `RCPT TO`) — `suppressed`, повторов нет;
- * - письмо о событии, которое уже началось, не отправляется — `failed('expired')`;
+ * - письмо после своего deadline (событие началось или одноразовая ссылка истекла) не отправляется — `failed('expired')`;
  * - неизвестный `type` и невалидный снимок `payload` — `failed`, без ретраев;
  * - лимиты отправки: 30 писем в минуту и 200 в сутки (по фактическому `sent_at`).
  *
@@ -123,7 +123,7 @@ export function createDispatcher(deps: DispatcherDeps): Dispatcher {
       await store.markFailed(message.id, 'expired');
       logger.info(
         { outboxId: message.id, type: message.type },
-        'событие прошло, письмо не отправлено',
+        'срок письма истёк, отправка пропущена',
       );
       return { outcome: 'failed' };
     }
@@ -147,6 +147,9 @@ export function createDispatcher(deps: DispatcherDeps): Dispatcher {
       // Фактическое время после `send`, а не начало тика: по нему считаются лимиты.
       const sentAt = now();
       await store.markSent(message.id, sentAt);
+      // Удаляем краткоживущий секрет после фиксации успешной отправки. При временной ошибке
+      // транспорта/хранилища outbox повторится, а шаблон должен снова собрать ту же ссылку.
+      email.afterSent?.();
       logger.info(
         {
           outboxId: message.id,
