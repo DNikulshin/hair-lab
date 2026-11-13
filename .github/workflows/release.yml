@@ -197,8 +197,12 @@ jobs:
           VPS_USER: ${{ secrets.VPS_USER }}
           APP_DIR: ${{ vars.VPS_APP_DIR || '/opt/hair-lab' }}
         run: |
+          # Подстановка локальных переменных в ssh/scp намеренная: на VPS уходят значения.
+          # shellcheck disable=SC2029
           ssh "$VPS_USER@$VPS_HOST" "mkdir -p '$APP_DIR'"
+          # shellcheck disable=SC2029
           scp docker-compose.prod.yml .env.prod "$VPS_USER@$VPS_HOST:$APP_DIR/"
+          # shellcheck disable=SC2029
           ssh "$VPS_USER@$VPS_HOST" "mv '$APP_DIR/.env.prod' '$APP_DIR/.env'"
 
       - name: Обновить контейнеры
@@ -209,6 +213,8 @@ jobs:
           GHCR_PAT: ${{ secrets.GHCR_PAT }}
           GHCR_USER: ${{ github.repository_owner }}
         run: |
+          # Переменные подставляются локально: на VPS уходят значения, не имена.
+          # shellcheck disable=SC2029
           ssh "$VPS_USER@$VPS_HOST" \
             "APP_DIR='$APP_DIR' GHCR_PAT='$GHCR_PAT' GHCR_USER='$GHCR_USER' bash -s" <<'REMOTE'
           set -euo pipefail

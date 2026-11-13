@@ -34,6 +34,7 @@
 | Типы                                                   | `pnpm typecheck`                                          |
 | Линтер                                                 | `pnpm lint`                                               |
 | Форматирование (проверка / автофикс)                   | `pnpm format:check` / `pnpm format`                       |
+| Workflow GitHub Actions                                | `pnpm lint:workflows`                                     |
 | Границы слоёв и пакетов                                | `pnpm check:arch`                                         |
 | Unit-тесты                                             | `pnpm test`                                               |
 | Интеграционные тесты (нужны Postgres и окружение)      | `pnpm test:int`                                           |
@@ -42,15 +43,16 @@
 | Запуск в dev                                           | `pnpm dev`                                                |
 
 Порядок проверки после правок: `contracts build` → `format:check` → `typecheck` → `lint` +
-`check:arch` → затронутые тесты.
+`check:arch` → `lint:workflows` → затронутые тесты.
 Проверку, которую нельзя выполнить (нет БД, окружения), помечай «не проверено» и называй причину.
 Не заявляй «проверено» без фактического запуска.
 
 ## Pre-commit
 
 Хук `.githooks/pre-commit` запускает `scripts/precommit.mjs` (`pnpm precommit`) по staged-файлам:
-prettier `--write`, eslint `--fix` (исправления возвращаются в индекс) и `pnpm check:arch`, если тронуты
-`apps/*/src` или `packages/*/src`. Полный `typecheck` и тесты остаются в CI: на каждый коммит это слишком
+prettier `--write`, eslint `--fix` (исправления возвращаются в индекс), `pnpm check:arch`, если тронуты
+`apps/*/src` или `packages/*/src`, и `pnpm lint:workflows` (`actionlint`), если тронуты
+`.github/workflows/*.yml`. Полный `typecheck` и тесты остаются в CI: на каждый коммит это слишком
 медленно. Хук подключается автоматически на `pnpm install` (`prepare` → `git config core.hooksPath .githooks`);
 вручную — та же команда. Обход: `git commit --no-verify` (только осознанно). В CI хук не запускается —
 там свои шаги, включая `format:check`.

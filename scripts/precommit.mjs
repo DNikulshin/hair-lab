@@ -11,6 +11,7 @@
  * - prettier и eslint запускаются с `--write`/`--fix`, исправленные файлы возвращаются в индекс;
  * - `.prettierignore` и `ignores` из eslint-конфига действуют как обычно (сгенерированное не трогаем);
  * - `check:arch` — только если тронуты `apps/<app>/src` или `packages/<pkg>/src`;
+ * - `actionlint` — только если тронуты `.github/workflows/*.yml`;
  * - полный `typecheck` и тесты осознанно не запускаем: это делает CI, иначе коммит станет медленным.
  *
  * Хук обходится `git commit --no-verify`; правки не теряются — они уже в рабочем дереве.
@@ -22,6 +23,7 @@ import { resolve } from 'node:path';
 const PRETTIER_FILES = /\.(?:md|mdx|json|jsonc|ya?ml|ts|tsx|mts|cts|js|jsx|mjs|cjs|css)$/;
 const ESLINT_FILES = /\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs)$/;
 const ARCH_FILES = /^(?:apps|packages)\/[^/]+\/src\//;
+const WORKFLOW_FILES = /^\.github\/workflows\/.*\.ya?ml$/;
 
 /** @param {string[]} args */
 function git(args) {
@@ -95,6 +97,12 @@ function main() {
     run(step.command, [...step.args, '--', ...step.files]);
     // Prettier и ESLint правят файлы на месте: возвращаем исправления в индекс.
     restage(step.files);
+  }
+
+  const workflows = staged.filter((file) => WORKFLOW_FILES.test(file));
+  if (workflows.length > 0) {
+    console.log(`pre-commit: actionlint — ${workflows.length} файл(ов)`);
+    run('node', ['scripts/lint-workflows.mjs', ...workflows]);
   }
 
   const arch = staged.filter((file) => ARCH_FILES.test(file));

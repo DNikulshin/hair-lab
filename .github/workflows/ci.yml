@@ -55,6 +55,9 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm lint
       - run: pnpm check:arch
+      # Схемные ошибки workflow (например, недопустимое значение permissions) GitHub
+      # находит только при запуске; actionlint ловит их до мержа. Docker есть на runner.
+      - run: pnpm lint:workflows
       - run: pnpm test
       - run: pnpm format:check
 
