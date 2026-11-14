@@ -380,7 +380,7 @@ describe('service worker: границы перехвата', () => {
 });
 
 describe('service worker: офлайн-поведение навигации', () => {
-  it.each(['/account', '/account/bookings/42', '/login/magic'])(
+  it.each(['/account', '/account/bookings/42', '/login/magic', '/booking/payment'])(
     'приватный HTML %s при падении сети отдаёт /offline и не пишет в кэш',
     async (path) => {
       const sw = createHarness({
