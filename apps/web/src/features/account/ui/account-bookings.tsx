@@ -6,6 +6,7 @@ import { useEffect, useState } from 'react';
 import type { AccountBooking } from '@hair-lab/contracts';
 import { formatSlotDateTime } from '@/features/booking';
 import { formatDuration, formatPrice } from '@/features/catalog';
+import { paymentPagePath, readPaymentDraft } from '@/features/payment';
 import { cancelBooking, fetchAccountBookings, fetchCurrentClient } from '../api/account-api';
 import { bookingStatusLabel, isActiveStatus } from '../model/account-status';
 import { mapAccountError } from '../model/map-account-error';
@@ -25,6 +26,18 @@ import { mapAccountError } from '../model/map-account-error';
  *
  * ПДн: имя и маска телефона приходят с сервера, полного номера и почты в ответе нет;
  * ничего не пишем в `localStorage` и не логируем.
+ *
+ * Оплата: у предстоящей записи со статусом `pending` показываем ссылку на страницу оплаты
+ * только если в этой вкладке лежит черновик именно этой записи (`sessionStorage`) — иначе
+ * страница оплаты откроется, но кнопки провайдера на ней не будет: ссылка живёт в черновике
+ * вкладки, где оформляли запись. Без черновика строка говорит, что запись ещё не подтверждена,
+ * и ссылку не обещает: её может не быть вовсе (`PAYMENTS_MODE=off`), а черновик вкладки мог быть
+ * перезаписан другой записью. Навигация остаётся только «Отменить». Черновик читаем после
+ * монтирования: `sessionStorage` есть только в браузере, а первый клиентский рендер должен
+ * совпасть с серверным.
+ * Текст нейтральный, потому что `pending` значит разное: при включённой оплате — «ждёт
+ * предоплаты», при `PAYMENTS_MODE=off` — «ждёт подтверждения салона» (DTO кабинета платежей
+ * не различает).
  */
 
 type Scope = 'upcoming' | 'past';
@@ -51,6 +64,13 @@ export function AccountBookings({ timeZone }: AccountBookingsProps) {
   const [reloadToken, setReloadToken] = useState(0);
   const [confirmId, setConfirmId] = useState<string | null>(null);
   const [cancellingId, setCancellingId] = useState<string | null>(null);
+  // id записи из черновика оплаты этой вкладки: `sessionStorage` читаем только после
+  // монтирования, поэтому стартовое значение — `null` «черновика нет» (и на сервере, и в браузере).
+  const [paymentDraftId, setPaymentDraftId] = useState<string | null>(null);
+
+  useEffect(() => {
+    setPaymentDraftId(readPaymentDraft()?.appointmentId ?? null);
+  }, []);
 
   // Сессия проверяется при каждой загрузке списка: так истёкшая сессия сразу уводит
   // на вход, а не превращается в «нет записей».
@@ -192,6 +212,28 @@ export function AccountBookings({ timeZone }: AccountBookingsProps) {
     );
   }
 
+  function renderPaymentAction(booking: AccountBooking) {
+    // Без черновика ссылку не показываем и не обещаем: её может не быть вовсе
+    // (`PAYMENTS_MODE=off`), а черновик вкладки мог быть перезаписан другой записью.
+    if (paymentDraftId !== booking.id) {
+      return (
+        <p className="text-sm">
+          Запись ещё не подтверждена. Ссылка на оплату — в той вкладке, где вы записывались (если
+          оплата включена).
+        </p>
+      );
+    }
+
+    return (
+      <div className="flex flex-col gap-1">
+        <p className="text-sm">Запись ещё не подтверждена.</p>
+        <Link href={paymentPagePath(booking.id)} className="w-fit text-sm underline">
+          Перейти к оплате
+        </Link>
+      </div>
+    );
+  }
+
   function renderList() {
     if (state === 'loading') {
       return (
@@ -259,6 +301,9 @@ export function AccountBookings({ timeZone }: AccountBookingsProps) {
             {booking.clientPhoneMasked === undefined ? null : (
               <p className="text-xs text-muted">Телефон для связи: {booking.clientPhoneMasked}</p>
             )}
+            {scope === 'upcoming' && booking.status === 'pending'
+              ? renderPaymentAction(booking)
+              : null}
             {renderCancelAction(booking)}
           </li>
         ))}
