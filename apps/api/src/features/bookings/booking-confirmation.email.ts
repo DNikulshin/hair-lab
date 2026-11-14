@@ -78,8 +78,11 @@ export function escapeHtml(value: string): string {
     .replaceAll("'", '&#39;');
 }
 
-/** Ответы клиентов идут на общий ящик салона в том же домене, что и отправитель. */
-function replyToOf(fromEmail: string): string | undefined {
+/**
+ * Ответы клиентов идут на общий ящик салона в том же домене, что и отправитель.
+ * Экспортируется для письма об отмене: домен `Reply-To` считается одинаково.
+ */
+export function replyToOf(fromEmail: string): string | undefined {
   const at = fromEmail.lastIndexOf('@');
   if (at <= 0 || at === fromEmail.length - 1) return undefined;
   return `hello@${fromEmail.slice(at + 1)}`;

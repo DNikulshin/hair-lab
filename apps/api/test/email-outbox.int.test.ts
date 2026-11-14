@@ -2,9 +2,13 @@ import { bookingResponseSchema, slotsResponseSchema, type Slot } from '@hair-lab
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import { buildServer } from '../src/app/build-server';
 import {
+  BOOKING_CANCELLATION_TYPE,
   BOOKING_CONFIRMATION_TYPE,
+  cancelAccountBooking,
+  createBookingCancellationTemplate,
   createBookingConfirmationTemplate,
 } from '../src/features/bookings';
+import { createBooking } from '../src/features/bookings/bookings.service';
 import { env } from '../src/shared/config/env';
 import {
   createDispatcher,
@@ -43,7 +47,16 @@ const template = createBookingConfirmationTemplate({
   fromEmail: 'no-reply@example.invalid',
 });
 
-const templates = { [BOOKING_CONFIRMATION_TYPE]: template };
+const cancellationTemplate = createBookingCancellationTemplate({
+  timezone: env.SALON_TIMEZONE,
+  fromName: 'Стриж Lab',
+  fromEmail: 'no-reply@example.invalid',
+});
+
+const templates = {
+  [BOOKING_CONFIRMATION_TYPE]: template,
+  [BOOKING_CANCELLATION_TYPE]: cancellationTemplate,
+};
 
 afterEach(async () => {
   await fixture.cleanup();
@@ -391,5 +404,68 @@ describe('outbox: диспетчер на реальном хранилище', 
     const row = await db.outboxMessage.findUniqueOrThrow({ where: { id: orphan.id } });
     expect(row.status).toBe('failed');
     expect(row.lastError).toBe('unknown_type');
+  });
+
+  it('отмена: suppressed-подтверждение не забирается, письмо об отмене уходит один раз', async () => {
+    // Запись и подтверждение — через сервис записи (production-снимок), отмена — через сервис
+    // кабинета: отмену без сессии клиента проверяем на том же коде, что и маршрут.
+    const { masterId, serviceId, date } = await setupSalon();
+    const slot = await firstSlot(serviceId, date);
+    const clientId = await fixture.client();
+    const created = await createBooking(
+      db,
+      {
+        masterId,
+        serviceId,
+        startsAt: slot.startsAt,
+        clientName: fakeClient.name,
+        clientPhone: fakeClient.phone,
+        clientEmail: fakeClient.email,
+        idempotencyKey: nextKey(),
+      },
+      clientId,
+    );
+    expect(created.status).toBe(201);
+    const appointmentId = created.booking.id;
+
+    expect((await cancelAccountBooking(db, clientId, appointmentId)).status).toBe('cancelled');
+
+    const beforeTick = await db.outboxMessage.findMany({
+      where: { appointmentId },
+      select: { id: true, type: true, status: true },
+    });
+    expect(beforeTick).toHaveLength(2);
+    const confirmationId = beforeTick.find((row) => row.type === BOOKING_CONFIRMATION_TYPE)?.id;
+    expect(beforeTick.find((row) => row.id === confirmationId)?.status).toBe('suppressed');
+
+    const { transport, sent } = createFakeTransport();
+    await runTick(transport);
+
+    // Тик может забрать и чужие pending-строки dev-БД (issue #80), поэтому фильтруем по теме.
+    const cancellations = sent.filter((message) => message.subject.includes('Запись отменена'));
+    expect(cancellations).toHaveLength(1);
+    expect(cancellations[0]?.to).toBe(fakeClient.email);
+    // Тело письма без ПДн, которых нет в снимке: телефона клиента в нём нет.
+    expect(cancellations[0]?.text).not.toContain(fakeClient.phone);
+    expect(cancellations[0]?.html).not.toContain(fakeClient.phone);
+
+    // Подавленное подтверждение осталось нетронутым: тик его не забирал и не переотправлял.
+    const confirmation = await db.outboxMessage.findUniqueOrThrow({
+      where: { id: confirmationId ?? '' },
+    });
+    expect(confirmation.status).toBe('suppressed');
+    expect(confirmation.attempts).toBe(0);
+    expect(confirmation.sentAt).toBeNull();
+
+    // Второй тик не дублирует письмо об отмене.
+    await runTick(transport);
+    expect(sent.filter((message) => message.subject.includes('Запись отменена'))).toHaveLength(1);
+    const again = await db.outboxMessage.findMany({
+      where: { appointmentId, type: BOOKING_CANCELLATION_TYPE },
+      select: { status: true, sentAt: true },
+    });
+    expect(again).toHaveLength(1);
+    expect(again[0]?.status).toBe('sent');
+    expect(again[0]?.sentAt).not.toBeNull();
   });
 });

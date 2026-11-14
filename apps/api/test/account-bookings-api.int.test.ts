@@ -7,7 +7,11 @@ import {
 } from '@hair-lab/contracts';
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import { buildServer } from '../src/app/build-server';
-import { CANCEL_REASON } from '../src/features/bookings';
+import {
+  BOOKING_CANCELLATION_TYPE,
+  BOOKING_CONFIRMATION_TYPE,
+  CANCEL_REASON,
+} from '../src/features/bookings';
 import { env } from '../src/shared/config/env';
 import { appointmentData, createFixture, createTestDb, fakeClient } from './db/helpers';
 
@@ -73,6 +77,8 @@ async function setup() {
 
 interface BookingOptions {
   status?: Status;
+  /** `null` — запись без почты: письмо об отмене ставить некуда. */
+  clientEmail?: string | null;
 }
 
 /**
@@ -92,8 +98,37 @@ async function addBooking(
       ...appointmentData(masterId, serviceId, startsAt.toISOString(), endsAt.toISOString()),
       clientId,
       ...(options.status === undefined ? {} : { status: options.status }),
+      ...(options.clientEmail === undefined ? {} : { clientEmail: options.clientEmail }),
     },
   });
+}
+
+/**
+ * Подтверждение, которое поставил бы `POST /bookings`: нужно, чтобы проверить подавление
+ * при отмене. Снимок повторяет production-поля; строки удаляются каскадом вместе с записью.
+ */
+async function pendingConfirmation(booking: { id: string; startsAt: Date; endsAt: Date }) {
+  return db.outboxMessage.create({
+    data: {
+      type: BOOKING_CONFIRMATION_TYPE,
+      appointmentId: booking.id,
+      payload: {
+        clientName: fakeClient.name,
+        clientEmail: fakeClient.email,
+        serviceName: 'Стрижка',
+        masterName: 'Тестовый Мастер',
+        startsAt: booking.startsAt.toISOString(),
+        endsAt: booking.endsAt.toISOString(),
+        priceKopecks: 350_000,
+        durationMin: 60,
+      },
+    },
+  });
+}
+
+/** Строки outbox записи: считаем только по фикстуре, не глобально (issue #80). */
+function outboxOf(appointmentId: string) {
+  return db.outboxMessage.findMany({ where: { appointmentId } });
 }
 
 async function listBookings(
@@ -428,5 +463,113 @@ describe('DELETE /account/bookings/:id', () => {
     expect(cancelled.statusCode).toBe(404);
     const stored = await db.appointment.findUniqueOrThrow({ where: { id: guest.id } });
     expect(stored.status).toBe('pending');
+  });
+});
+
+describe('DELETE /account/bookings/:id: письма в outbox', () => {
+  it('отмена снимает pending-подтверждение и ставит одно письмо об отмене', async () => {
+    const { masterId, serviceId, clientId, cookie } = await setup();
+    const booking = await addBooking(masterId, serviceId, fromNow(5 * DAY_MS), clientId);
+    const confirmation = await pendingConfirmation(booking);
+
+    const cancelled = await cancelBooking(cookie, booking.id);
+
+    expect(cancelled.statusCode).toBe(200);
+    // В ответе только маска: почта клиента наружу не выходит, хотя она прочитана для письма.
+    expect(cancelled.raw).not.toContain(fakeClient.email);
+
+    const rows = await outboxOf(booking.id);
+    expect(rows).toHaveLength(2);
+
+    const suppressed = rows.find((row) => row.id === confirmation.id);
+    expect(suppressed?.status).toBe('suppressed');
+    expect(suppressed?.lastError).toBe('cancelled');
+
+    const cancellations = rows.filter((row) => row.type === BOOKING_CANCELLATION_TYPE);
+    expect(cancellations).toHaveLength(1);
+    const email = cancellations[0]!;
+    expect(email.status).toBe('pending');
+    expect(email.attempts).toBe(0);
+    expect(email.sentAt).toBeNull();
+    expect(email.lastError).toBeNull();
+    expect(email.payload).toEqual({
+      clientName: fakeClient.name,
+      clientEmail: fakeClient.email,
+      serviceName: 'Стрижка',
+      masterName: 'Тестовый Мастер',
+      startsAt: booking.startsAt.toISOString(),
+      endsAt: booking.endsAt.toISOString(),
+      priceKopecks: 350_000,
+      durationMin: 60,
+    });
+    // ПДн в снимке — только имя и почта; телефона нет.
+    expect(JSON.stringify(email.payload)).not.toContain(fakeClient.phone);
+  });
+
+  it('повторная отмена не ставит второе письмо и не трогает существующие', async () => {
+    const { masterId, serviceId, clientId, cookie } = await setup();
+    const booking = await addBooking(masterId, serviceId, fromNow(5 * DAY_MS), clientId);
+    const confirmation = await pendingConfirmation(booking);
+
+    expect((await cancelBooking(cookie, booking.id)).statusCode).toBe(200);
+    const before = await outboxOf(booking.id);
+
+    expect((await cancelBooking(cookie, booking.id)).statusCode).toBe(200);
+
+    const after = await outboxOf(booking.id);
+    expect(after.map((row) => row.id).sort()).toEqual(before.map((row) => row.id).sort());
+    expect(after.filter((row) => row.type === BOOKING_CANCELLATION_TYPE)).toHaveLength(1);
+    const suppressed = after.find((row) => row.id === confirmation.id);
+    expect(suppressed?.status).toBe('suppressed');
+    expect(suppressed?.lastError).toBe('cancelled');
+  });
+
+  it('409 (срок вышел) не трогает outbox: подтверждение остаётся pending, письма нет', async () => {
+    const { masterId, serviceId, clientId, cookie } = await setup();
+    const booking = await addBooking(masterId, serviceId, fromNow(60 * MINUTE_MS), clientId);
+    const confirmation = await pendingConfirmation(booking);
+
+    const cancelled = await cancelBooking(cookie, booking.id);
+
+    expect(cancelled.statusCode).toBe(409);
+    const rows = await outboxOf(booking.id);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.id).toBe(confirmation.id);
+    expect(rows[0]?.status).toBe('pending');
+    expect(rows[0]?.lastError).toBeNull();
+  });
+
+  it('404 (чужая запись) не трогает outbox', async () => {
+    const { masterId, serviceId, cookie } = await setup();
+    const foreignClientId = await fixture.client();
+    const foreign = await addBooking(masterId, serviceId, fromNow(5 * DAY_MS), foreignClientId);
+    const confirmation = await pendingConfirmation(foreign);
+
+    const cancelled = await cancelBooking(cookie, foreign.id);
+
+    expect(cancelled.statusCode).toBe(404);
+    const rows = await outboxOf(foreign.id);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.id).toBe(confirmation.id);
+    expect(rows[0]?.status).toBe('pending');
+    expect(rows.filter((row) => row.type === BOOKING_CANCELLATION_TYPE)).toHaveLength(0);
+  });
+
+  it('без почты клиента подтверждение снимается, письма об отмене нет', async () => {
+    const { masterId, serviceId, clientId, cookie } = await setup();
+    const booking = await addBooking(masterId, serviceId, fromNow(5 * DAY_MS), clientId, {
+      clientEmail: null,
+    });
+    const confirmation = await pendingConfirmation(booking);
+
+    const cancelled = await cancelBooking(cookie, booking.id);
+
+    expect(cancelled.statusCode).toBe(200);
+    const rows = await outboxOf(booking.id);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.id).toBe(confirmation.id);
+    expect(rows[0]?.status).toBe('suppressed');
+    expect(rows[0]?.lastError).toBe('cancelled');
+    expect(rows.filter((row) => row.type === BOOKING_CANCELLATION_TYPE)).toHaveLength(0);
   });
 });
