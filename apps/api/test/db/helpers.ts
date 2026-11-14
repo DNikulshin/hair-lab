@@ -35,6 +35,16 @@ export async function captureError(promise: Promise<unknown>): Promise<unknown> 
   );
 }
 
+/**
+ * Число строк outbox одной записи.
+ *
+ * Подсчёт всегда привязан к фикстуре теста: dev-БД не чистится (там остаются письма ручной
+ * проверки), поэтому глобальный `outboxMessage.count()` давал ложные падения (issue #80).
+ */
+export function countOutboxFor(db: Db, appointmentId: string): Promise<number> {
+  return db.outboxMessage.count({ where: { appointmentId } });
+}
+
 interface Fixture {
   /** Создаёт мастера и возвращает его id. */
   master: (fullName?: string) => Promise<string>;
