@@ -6,6 +6,7 @@ import type {
   CreateRefundInput,
   GatewayPayment,
   GatewayPaymentStatus,
+  GatewayRefundStatus,
   PaymentGateway,
 } from './payment-gateway';
 
@@ -21,7 +22,9 @@ import type {
  *   целочисленной арифметикой, без float;
  * - персональные данные клиента не отправляются: `metadata` — только id записи;
  * - таймаут на каждый запрос (`AbortSignal`), чтобы зависший провайдер не держал обработчик;
- * - идемпотентность — заголовок `Idempotence-Key` от вызывающего.
+ * - идемпотентность — заголовок `Idempotence-Key` от вызывающего;
+ * - статус возврата маппится в закрытый тип домена (`GatewayRefundStatus`), неизвестное значение
+ *   становится `unknown`, а не «выполненным возвратом»: деньги возвращает только `succeeded`.
  */
 
 /** Валюта расчётов: салон один, мультивалютности нет. */
@@ -117,6 +120,17 @@ function statusOf(raw: string): GatewayPaymentStatus | null {
   if (raw === 'canceled') return 'canceled';
   if (raw === 'pending' || raw === 'waiting_for_capture') return 'pending';
   return null;
+}
+
+/**
+ * Статус возврата ЮKassa → статус домена. В отличие от платежа неизвестное значение — не ошибка:
+ * деньги уже отправлены, и потерять ответ дороже, чем оставить возврат незавершённым.
+ * Всё, кроме явно распознанного `succeeded`/`pending`/`canceled`, — `unknown`: такой возврат
+ * не считается завершённым и повторяется вызывающим.
+ */
+function refundStatusOf(raw: string): GatewayRefundStatus {
+  if (raw === 'succeeded' || raw === 'pending' || raw === 'canceled') return raw;
+  return 'unknown';
 }
 
 /**
@@ -271,11 +285,11 @@ export function createYookassaClient(options: YookassaClientOptions): PaymentGat
       });
 
       const refundId = stringField(payload, 'id');
-      const status = stringField(payload, 'status');
-      if (refundId === null || status === null)
+      const statusRaw = stringField(payload, 'status');
+      if (refundId === null || statusRaw === null)
         throw invalidResponse('нет id или статуса возврата');
 
-      return { refundId, status };
+      return { refundId, status: refundStatusOf(statusRaw) };
     },
   };
 }

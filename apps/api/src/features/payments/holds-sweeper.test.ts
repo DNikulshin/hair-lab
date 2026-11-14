@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Db } from '../../shared/db';
 import { createHoldsSweeper, type HoldsSweeperLogger } from './holds-sweeper';
-import type { CreateRefundInput, PaymentGateway } from './payment-gateway';
+import type { CreateRefundInput, GatewayRefundStatus, PaymentGateway } from './payment-gateway';
 import { PAYMENT_EXPIRED_REASON } from './payments.service';
 
 /**
@@ -182,16 +182,20 @@ function createFakeDb(options: FakeOptions = {}): { db: Db; state: FakeState } {
 interface FakeGateway {
   gateway: PaymentGateway;
   calls: CreateRefundInput[];
+  /** Статус, который отдаёт `createRefund`: по умолчанию возврат завершён. */
+  status: GatewayRefundStatus;
 }
 
 /**
- * Поддельный шлюз: `createRefund` падает для платежей, перечисленных в `failFor`.
- * `createPayment` и `getPayment` свипером не используются.
+ * Поддельный шлюз: `createRefund` падает для платежей, перечисленных в `failFor`, и возвращает
+ * статус из `status` (по умолчанию — `succeeded`). `createPayment` и `getPayment` свипером
+ * не используются.
  */
 function createFakeGateway(failFor: string[] = []): FakeGateway {
   const calls: CreateRefundInput[] = [];
-  return {
+  const fake: FakeGateway = {
     calls,
+    status: 'succeeded',
     gateway: {
       createPayment: async () => {
         throw new Error('createPayment в свипере не используется');
@@ -202,10 +206,11 @@ function createFakeGateway(failFor: string[] = []): FakeGateway {
       createRefund: async (input) => {
         calls.push(input);
         if (failFor.includes(input.yookassaPaymentId)) throw new Error('шлюз недоступен');
-        return { refundId: `refund-${calls.length}`, status: 'ok' };
+        return { refundId: `refund-${calls.length}`, status: fake.status };
       },
     },
   };
+  return fake;
 }
 
 describe('createHoldsSweeper', () => {
@@ -401,6 +406,69 @@ describe('createHoldsSweeper', () => {
     expect(refunded?.status).toBe('refunded');
     expect(refunded?.refundRequired).toBe(false);
     expect(entries.some((entry) => entry.obj['refundId'] === 'refund-1')).toBe(true);
+  });
+
+  it('незавершённый возврат не снимает флаг и повторяется следующим тиком', async () => {
+    // Статусы, которые не значат «деньги вернулись»: `pending` — в пути, `canceled` — отказ,
+    // `unknown` — нераспознанный ответ. Ни один не должен перевести платёж в `refunded`.
+    for (const status of ['pending', 'canceled', 'unknown'] as const) {
+      const { db, state } = createFakeDb({
+        appointments: [
+          {
+            id: FUTURE_ID,
+            status: 'pending',
+            cancelReason: null,
+            paymentDeadlineAt: FUTURE_DEADLINE,
+          },
+        ],
+        payments: [
+          payment({
+            id: PAYMENT_REFUND_ID,
+            appointmentId: FUTURE_ID,
+            status: 'succeeded',
+            yookassaPaymentId: YOOKASSA_REFUND_ID,
+            refundRequired: true,
+          }),
+        ],
+      });
+      const { logger, entries } = createLogger();
+      const fake = createFakeGateway();
+      fake.status = status;
+      const sweeper = createHoldsSweeper({
+        db,
+        gateway: fake.gateway,
+        intervalMs: 30_000,
+        logger,
+      });
+
+      const result = await sweeper.tick(NOW);
+
+      // Попытка была, но завершённого возврата нет: деньги клиенту не вернулись.
+      expect(result, status).toEqual({
+        expired: 0,
+        paymentsCanceled: 0,
+        refundsRetried: 1,
+        refundsCompleted: 0,
+      });
+      expect(fake.calls, status).toHaveLength(1);
+      expect(fake.calls[0]?.idempotenceKey, status).toBe(`refund-${PAYMENT_REFUND_ID}`);
+
+      // Флаг остаётся: следующий тик повторит возврат с тем же ключом идемпотентности.
+      const row = state.payments.find((item) => item.id === PAYMENT_REFUND_ID);
+      expect(row?.status, status).toBe('succeeded');
+      expect(row?.refundRequired, status).toBe(true);
+
+      const failure = entries.find((entry) => entry.level === 'error');
+      expect(failure?.obj, status).toEqual({
+        paymentId: PAYMENT_REFUND_ID,
+        refundId: 'refund-1',
+        refundStatus: status,
+      });
+      // Адрес отказа ищет человек, остальное добивает свипер.
+      expect(failure?.msg, status).toContain(
+        status === 'canceled' ? 'ручная проверка' : 'повторим',
+      );
+    }
   });
 
   it('ошибка возврата не мешает следующему и не роняет тик', async () => {

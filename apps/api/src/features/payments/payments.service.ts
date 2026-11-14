@@ -315,6 +315,22 @@ async function ensureBookingConfirmation(
 }
 
 /**
+ * Фактический статус записи в той же транзакции: снимок, прочитанный до `updateMany`, мог
+ * устареть (запись отменили свипером или клиентом между чтением и условным `UPDATE`).
+ * Снимок остаётся запасным значением — строки нет только теоретически (FK держит её на месте).
+ */
+async function actualAppointmentStatus(
+  tx: Prisma.TransactionClient,
+  payment: PaymentSnapshotRow,
+): Promise<BookingStatus> {
+  const current = await tx.appointment.findUnique({
+    where: { id: payment.appointmentId },
+    select: { status: true },
+  });
+  return current?.status ?? payment.appointment.status;
+}
+
+/**
  * `payment.succeeded`: платёж `succeeded`, запись `confirmed`, письмо-подтверждение в outbox.
  *
  * `null` — платежа с таким id нет (уведомление не про нас): вызывающий отвечает 200 и пишет
@@ -323,6 +339,9 @@ async function ensureBookingConfirmation(
  * Оплата после отмены записи (холд истёк, запись `cancelled`): запись не подтверждается,
  * возвращается `needsRefund: true` — деньги возвращает вызывающий, а платёж сначала
  * фиксируется как `succeeded`: это факт, который нельзя терять.
+ *
+ * Отмена может произойти и после чтения снимка: тогда условный `UPDATE` записи даёт `count === 0`,
+ * и статус перечитывается в той же транзакции — `needsRefund` выставляется по факту, а не по снимку.
  */
 export async function applyPaymentSucceeded(
   db: Db,
@@ -368,15 +387,16 @@ export async function applyPaymentSucceeded(
     }
 
     // Подтверждаем только запись, которая ещё ждёт оплаты. Условие в WHERE — вместо проверки
-    // до записи: если между чтением и обновлением запись отменили, `count === 0` и статус
-    // остаётся фактическим.
+    // до записи: если между чтением и обновлением запись отменили, `count === 0` и снимок
+    // устарел — фактический статус перечитываем в той же транзакции, иначе возврат
+    // по уже отменённой (свипером) записи не запустится.
     const confirmed = await tx.appointment.updateMany({
       where: { id: payment.appointmentId, status: 'pending' },
       // Дедлайн холда больше не нужен: свипер смотрит только `pending`.
       data: { status: 'confirmed', paymentDeadlineAt: null },
     });
     const appointmentStatus: BookingStatus =
-      confirmed.count === 1 ? 'confirmed' : payment.appointment.status;
+      confirmed.count === 1 ? 'confirmed' : await actualAppointmentStatus(tx, payment);
 
     // Письмо-подтверждение — только для подтверждённой записи и только если его ещё нет.
     if (appointmentStatus === 'confirmed') {
@@ -389,7 +409,9 @@ export async function applyPaymentSucceeded(
       status: 'succeeded',
       appointmentStatus,
       changed: true,
-      needsRefund: false,
+      // Оплата пришла по записи, которую уже отменили: подтвердить её нельзя —
+      // деньги обязан вернуть вызывающий.
+      needsRefund: appointmentStatus === 'cancelled',
     };
   });
 }

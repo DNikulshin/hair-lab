@@ -10,6 +10,16 @@
 /** Статус платежа в терминах домена: `waiting_for_capture` и прочие состояния — `pending`. */
 export type GatewayPaymentStatus = 'pending' | 'succeeded' | 'canceled';
 
+/**
+ * Статус возврата в терминах домена.
+ *
+ * `succeeded` — деньги вернулись клиенту; `pending` — возврат в процессе (провайдер ещё
+ * не подтвердил его завершение); `canceled` — провайдер отказал в возврате; `unknown` — ответ
+ * не распознан. Завершённым считается только `succeeded`: остальные статусы оставляют
+ * обязанность вернуть деньги в БД, иначе флаг снимался бы при несостоявшемся возврате.
+ */
+export type GatewayRefundStatus = 'succeeded' | 'pending' | 'canceled' | 'unknown';
+
 export interface CreatePaymentInput {
   /** Внутренний id записи: уходит только в `metadata`, ПДн клиента в шлюз не передаются. */
   appointmentId: string;
@@ -53,8 +63,8 @@ export interface CreateRefundInput {
 
 export interface CreatedRefund {
   refundId: string;
-  /** Статус возврата в терминах провайдера (`pending`, `succeeded`, …). */
-  status: string;
+  /** Статус возврата в терминах домена: завершённым считается только `succeeded`. */
+  status: GatewayRefundStatus;
 }
 
 /**

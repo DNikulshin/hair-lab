@@ -28,9 +28,12 @@ import { isYookassaIp } from './yookassa-ip';
  * - уведомление не доверяется: IP отправителя проверяется по allowlist (`isYookassaIp`),
  *   а состояние платежа перезапрашивается у провайдера своими ключами (`gateway.getPayment`);
  *   сумме из тела не верим — сверяем с `payments.amount_kopecks`;
- * - ответ 200 для адресов из allowlist: ЮKassa повторяет уведомления до 24 часов, а состояние
- *   должно измениться ровно один раз — повтор идемпотентен. Неизвестное событие, чужой платёж
- *   и расхождение суммы тоже дают 200 без изменений;
+ * - отвечаем 200 только когда уведомление заведомо ничего не меняет: «не про нас» (ЮKassa не должна
+ *   повторять его сутки), «платёж ещё не завершён» и «сумма не совпала»;
+ * - если перезапрос состояния упал (сеть, 5xx провайдера), отвечаем 5xx: 200 здесь значил бы
+ *   «уведомление обработано», провайдер бы его больше не повторил, а оплаченная запись осталась бы
+ *   `pending` — свипер отменил бы её без возврата денег. 5xx заставляет ЮKassa повторить доставку;
+ * - ответ 403 — адрес отправителя вне allowlist: уведомление не наше и не повторяется;
  * - персональные данные не читаются и не логируются: в лог идут только id платежей;
  * - rate limit не ставим: уведомления приходят пачками с адресов провайдера, а лимит превратил
  *   бы всплеск в отказы и повторные доставки.
@@ -64,6 +67,10 @@ function errorNameOf(error: unknown): string {
  * и уже не содержит требования возврата (`applyPaymentSucceeded` — no-op), а сам вызов шлюза
  * удлинял бы ответ, пока он недоступен. Поэтому возврат добивает свипер: он видит флаг и шлёт
  * тот же ключ идемпотентности `refund-<paymentId>`, так что деньги не вернутся дважды.
+ *
+ * Завершённым возврат считается только при `succeeded`: `pending` (деньги ещё в пути),
+ * `canceled` (провайдер отказал) и `unknown` (ответ не распознан) оставляют флаг в БД —
+ * иначе обязанность вернуть деньги потерялась бы вместе с флагом.
  */
 async function applySucceeded(
   request: FastifyRequest,
@@ -100,10 +107,25 @@ async function applySucceeded(
       amountKopecks: input.amountKopecks,
       idempotenceKey: refundIdempotenceKey(input.paymentId),
     });
-    await markRefunded(db, input.paymentId, refund.refundId);
-    request.log.info(
-      { paymentId: input.paymentId, refundId: refund.refundId },
-      'деньги по неактуальной оплате возвращены клиенту',
+
+    // Возврат завершён только при `succeeded`: `pending`/`canceled`/`unknown` деньгами не являются.
+    if (refund.status === 'succeeded') {
+      await markRefunded(db, input.paymentId, refund.refundId);
+      request.log.info(
+        { paymentId: input.paymentId, refundId: refund.refundId },
+        'деньги по неактуальной оплате возвращены клиенту',
+      );
+      return;
+    }
+
+    // Флаг возврата не снимаем: обязанность вернуть деньги переживёт этот ответ, а свипер
+    // повторит возврат с тем же ключом идемпотентности — второй раз деньги не уйдут.
+    await markRefundRequired(db, input.paymentId);
+    request.log.error(
+      { paymentId: input.paymentId, refundId: refund.refundId, refundStatus: refund.status },
+      refund.status === 'canceled'
+        ? 'возврат отклонён провайдером, нужна ручная проверка'
+        : 'возврат не завершён, повторим',
     );
   } catch (error) {
     // Флаг вместо ретрая: обязанность вернуть деньги переживёт сбой шлюза и перезапуск API.
@@ -130,7 +152,7 @@ export const paymentsRoutes: FastifyPluginAsyncZod<PaymentsRoutesOptions> = asyn
         tags: ['payments'],
         summary: 'HTTP-уведомление ЮKassa об изменении статуса платежа',
         body: yookassaWebhookSchema,
-        response: { 200: okResponseSchema, 403: apiErrorSchema },
+        response: { 200: okResponseSchema, 403: apiErrorSchema, 500: apiErrorSchema },
       },
     },
     async (request, reply) => {
@@ -162,11 +184,13 @@ export const paymentsRoutes: FastifyPluginAsyncZod<PaymentsRoutesOptions> = asyn
       try {
         actual = await gateway.getPayment(yookassaPaymentId);
       } catch (error) {
+        // 500, а не 200: уведомление не обработано. С ответом 200 ЮKassa больше не повторит его,
+        // а оплаченная запись останется `pending` — свипер отменит её без возврата денег.
         request.log.error(
           { yookassaPaymentId, paymentId: payment.paymentId, errorName: errorNameOf(error) },
-          'не удалось перезапросить платёж у ЮKassa: уведомление пропущено',
+          'не удалось перезапросить платёж у ЮKassa: просим провайдера повторить уведомление',
         );
-        return { ok: true as const };
+        return reply.status(500).send(buildError('internal_error', request.id));
       }
 
       // Сумма — только наша: расхождение значит, что деньги приняты не по нашему расчёту.

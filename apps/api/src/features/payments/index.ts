@@ -13,6 +13,7 @@ export type {
   CreateRefundInput,
   GatewayPayment,
   GatewayPaymentStatus,
+  GatewayRefundStatus,
   PaymentGateway,
 } from './payment-gateway';
 export { paymentsPlugin, type PaymentsPluginOptions } from './payments.plugin';

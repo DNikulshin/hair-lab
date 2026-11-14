@@ -26,6 +26,9 @@ import {
  * - обязательные возвраты (`payments.refund_required`) повторяются тем же тиком: сбой шлюза
  *   в момент уведомления не теряет деньги клиента. Ключ идемпотентности тот же, что в маршруте
  *   (`refund-<paymentId>`), поэтому повтор не возвращает деньги дважды;
+ * - возврат считается завершённым только при `succeeded`: `pending` (деньги ещё в пути),
+ *   `canceled` (провайдер отказал) и `unknown` оставляют флаг в БД. Такой возврат посчитан
+ *   попытанным, но не `refundsCompleted`, и будет повторён следующим тиком;
  * - тик не бросает исключений наружу: недоступная БД лечится следующим тиком, процесс живёт;
  * - в лог попадают только количества, id платежей и имена ошибок: ни сумм, ни персональных данных.
  */
@@ -53,7 +56,7 @@ export interface HoldsSweeperTickResult {
   paymentsCanceled: number;
   /** Сколько обязательных возвратов попытались повторить (включая неудачные). */
   refundsRetried: number;
-  /** Сколько возвратов завершилось: платёж `refunded`, флаг снят. */
+  /** Сколько возвратов завершилось подтверждённым `succeeded`: платёж `refunded`, флаг снят. */
   refundsCompleted: number;
 }
 
@@ -119,6 +122,10 @@ async function expireHolds(
  *
  * Ошибка одного возврата не ломает тик и не мешает остальным: неудача остаётся флагом
  * в БД, и следующий тик повторит возврат с тем же ключом идемпотентности.
+ *
+ * Завершённым считается только `succeeded`: `pending`/`canceled`/`unknown` флаг не снимает
+ * и в `refundsCompleted` не попадает — иначе обязанность вернуть деньги потерялась бы,
+ * хотя деньги клиенту ещё не вернулись.
  */
 async function retryPendingRefunds(
   db: Db,
@@ -137,6 +144,21 @@ async function retryPendingRefunds(
         // Тот же ключ, что в маршруте уведомления: повтор не вернёт деньги дважды.
         idempotenceKey: refundIdempotenceKey(item.paymentId),
       });
+      if (refund.status !== 'succeeded') {
+        // Флаг в БД не трогаем: возврат не завершён, следующий тик повторит его.
+        logger.error(
+          {
+            paymentId: item.paymentId,
+            refundId: refund.refundId,
+            refundStatus: refund.status,
+          },
+          refund.status === 'canceled'
+            ? 'возврат отклонён провайдером, нужна ручная проверка'
+            : 'возврат не завершён, повторим',
+        );
+        continue;
+      }
+
       await markRefunded(db, item.paymentId, refund.refundId);
       completed += 1;
       logger.info(

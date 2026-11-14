@@ -92,6 +92,11 @@ interface FakeOptions {
   payments?: PaymentRow[];
   appointment?: Partial<AppointmentRow>;
   outbox?: OutboxRow[];
+  /**
+   * Гонка: запись отменяется между снимком платежа и условным `UPDATE` записи — `updateMany`
+   * не находит строку (`count: 0`), а повторное чтение в той же транзакции отдаёт `cancelled`.
+   */
+  appointmentCancelledAfterSnapshot?: boolean;
 }
 
 function createFakeDb(options: FakeOptions = {}): { db: Db; state: FakeState } {
@@ -179,8 +184,19 @@ function createFakeDb(options: FakeOptions = {}): { db: Db; state: FakeState } {
       },
     },
     appointment: {
+      findUnique: async ({ where }: { where: Row }) => {
+        const appointment = state.appointments.find((row) => matches({ ...row }, where));
+        // Сервис читает только статус: остальные поля наружу не отдаются.
+        return appointment === undefined ? null : { status: appointment.status };
+      },
       updateMany: async ({ where, data }: { where: Row; data: Row }) => {
         state.updates.push({ model: 'appointment', where, data });
+        // Гонка: запись отменили после чтения снимка — условие `status: 'pending'` уже не совпадёт.
+        if (options.appointmentCancelledAfterSnapshot === true) {
+          for (const appointment of state.appointments) {
+            if (matches({ ...appointment }, { id: where['id'] })) appointment.status = 'cancelled';
+          }
+        }
         let count = 0;
         for (const appointment of state.appointments) {
           if (!matches({ ...appointment }, where)) continue;
@@ -303,6 +319,29 @@ describe('applyPaymentSucceeded', () => {
     // Факт получения денег фиксируется: возврат делает вызывающий.
     expect(state.payments[0]?.status).toBe('succeeded');
     expect(state.appointments[0]?.status).toBe('cancelled');
+    expect(state.outbox).toHaveLength(0);
+  });
+
+  it('гонка: запись отменили между снимком и UPDATE — needsRefund по фактическому статусу', async () => {
+    // Снимок платежа прочитан, когда запись была `pending`; свипер отменил холд до нашего
+    // условного `UPDATE`, поэтому `count === 0`. Статус обязан быть перечитан, иначе возврат
+    // по оплаченной отменённой записи не запустится — деньги спишутся без возврата.
+    const { db, state } = createFakeDb({ appointmentCancelledAfterSnapshot: true });
+
+    const transition = await applyPaymentSucceeded(db, PAYMENT_ID, { amountKopecks: AMOUNT });
+
+    expect(transition).toEqual({
+      paymentId: PAYMENT_ID,
+      appointmentId: APPOINTMENT_ID,
+      status: 'succeeded',
+      appointmentStatus: 'cancelled',
+      changed: true,
+      needsRefund: true,
+    });
+    // Деньги действительно получены — это факт, его фиксируем; возврат делает вызывающий.
+    expect(state.payments[0]?.status).toBe('succeeded');
+    expect(state.appointments[0]?.status).toBe('cancelled');
+    // Отменённая запись письма-подтверждения не получает.
     expect(state.outbox).toHaveLength(0);
   });
 

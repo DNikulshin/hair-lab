@@ -340,6 +340,62 @@ describe('createRefund', () => {
     });
     expect(refund).toEqual({ refundId: 'refund-1', status: 'pending' });
   });
+
+  it('маппит статус возврата в закрытый тип домена', async () => {
+    // Только `succeeded` значит «деньги вернулись»; `pending` — в процессе, `canceled` — отказ.
+    for (const status of ['succeeded', 'pending', 'canceled'] as const) {
+      const { client } = createClient({
+        status: 200,
+        body: JSON.stringify({ id: 'refund-1', status }),
+      });
+
+      await expect(
+        client.createRefund({
+          yookassaPaymentId: YOOKASSA_PAYMENT_ID,
+          amountKopecks: 350_000,
+          idempotenceKey: 'refund-1',
+        }),
+        status,
+      ).resolves.toEqual({ refundId: 'refund-1', status });
+    }
+  });
+
+  it('нераспознанный статус возврата — unknown, а не выдуманный «выполнен»', async () => {
+    const statuses = ['refunded', 'ok', 'SUCCEEDED'];
+
+    for (const raw of statuses) {
+      const { client } = createClient({
+        status: 200,
+        body: JSON.stringify({ id: 'refund-1', status: raw }),
+      });
+
+      await expect(
+        client.createRefund({
+          yookassaPaymentId: YOOKASSA_PAYMENT_ID,
+          amountKopecks: 350_000,
+          idempotenceKey: 'refund-1',
+        }),
+        raw,
+      ).resolves.toEqual({ refundId: 'refund-1', status: 'unknown' });
+    }
+  });
+
+  it('пустой или отсутствующий статус — некорректный ответ', async () => {
+    for (const body of [
+      JSON.stringify({ id: 'refund-1' }),
+      JSON.stringify({ id: '', status: '' }),
+    ]) {
+      const { client } = createClient({ status: 200, body });
+
+      await expect(
+        client.createRefund({
+          yookassaPaymentId: YOOKASSA_PAYMENT_ID,
+          amountKopecks: 350_000,
+          idempotenceKey: 'refund-1',
+        }),
+      ).rejects.toThrow(/Некорректный ответ/);
+    }
+  });
 });
 
 describe('базовый адрес API', () => {
