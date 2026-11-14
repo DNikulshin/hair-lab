@@ -201,7 +201,13 @@ deploy` завершился ошибкой, шаг краснеет, `up -d` н
 слушается и не проброшен). Конфиг nginx: `deploy/nginx/hair-lab.staging.dnikulshin.ru.conf`
 (wildcard-сертификат, `X-Robots-Tag: noindex`); установка — по разделу 6.
 
-- каталог `/opt/hair-lab-staging`: `docker-compose.prod.yml` + свой `.env` (не в git);
+- каталог `/root/hair-lab-staging`: `docker-compose.prod.yml` + свой `.env` (не в git). Не `/opt`:
+  из `/opt` `docker compose` под snap-докером падает с `compose file ... is invalid` (виден только
+  путь `/var/lib/snapd/void/...`: snap-конфайнмент не видит `/opt`), из `/root` работает;
+- проект compose — `hair-lab-staging`: команды запускаются с `-p hair-lab-staging`. Имя `hair-lab`
+  из `name:` в compose-файле занято прошлой попыткой, и её том `hair-lab_db-data` инициализирован
+  другим паролем (`prisma migrate deploy` падал с `P1000: Authentication failed`); со своим
+  проектом staging живёт в отдельном томе `hair-lab-staging_db-data`;
 - порты `127.0.0.1:3010` (web) и `127.0.0.1:3011` (api) — через `API_PORT`/`WEB_PORT`; 3000/3001
   остаются для `pnpm dev`;
 - `APP_URL` и `CORS_ORIGINS` — `https://hair-lab.dnikulshin.ru:8443` (порт обязателен);
@@ -209,7 +215,7 @@ deploy` завершился ошибкой, шаг краснеет, `up -d` н
   `https://hair-lab.dnikulshin.ru:8443/api/payments/webhooks/yookassa`
   (`PAYMENTS_MODE=test` — когда ключи лежат в `.env` на хосте).
 
-Файл `/opt/hair-lab-staging/.env` (не в git). Образы локальные, поэтому `GHCR_IMAGE_*` —
+Файл `/root/hair-lab-staging/.env` (не в git). Образы локальные, поэтому `GHCR_IMAGE_*` —
 локальные имена, а `IMAGE_TAG=local`; секретов нет, кроме пароля БД:
 
 ```bash
@@ -246,11 +252,23 @@ compose подтянет сам при `up`. `pull` нужен только в �
 Порядок запуска — миграции, затем контейнеры:
 
 ```bash
-cd /opt/hair-lab-staging
-docker compose -f docker-compose.prod.yml run --rm -T migrations
-docker compose -f docker-compose.prod.yml up -d --remove-orphans
+cd /root/hair-lab-staging
+docker compose -p hair-lab-staging -f docker-compose.prod.yml run --rm -T migrations
+docker compose -p hair-lab-staging -f docker-compose.prod.yml up -d --remove-orphans
 curl -sS https://hair-lab.dnikulshin.ru:8443/api/health   # {"status":"ok",...}
 ```
+
+**Демо-данные.** Каталог услуг, мастера, их услуги и недельное расписание для staging —
+`scripts/seed-staging.sql` (те же фиксированные UUID, что в dev, поэтому интерфейс и ручные
+проверки совпадают с локальной разработкой). Из корня репозитория:
+
+```bash
+sudo bash -c 'cd /root/hair-lab-staging && docker compose -p hair-lab-staging -f docker-compose.prod.yml exec -T db psql -U hair_lab -d hair_lab' \
+  < scripts/seed-staging.sql
+```
+
+Сид идемпотентен (повторный запуск ничего не дублирует и не падает), содержит только вымышленные
+данные, персональных данных клиентов не создаёт. Для прода не применять.
 
 ## 6. nginx и TLS
 
