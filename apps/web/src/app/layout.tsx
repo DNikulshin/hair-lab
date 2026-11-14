@@ -49,6 +49,9 @@ export default function RootLayout({ children }: { children: ReactNode }) {
                   <Link href="/masters">Мастера</Link>
                 </li>
                 <li>
+                  <Link href="/account">Кабинет</Link>
+                </li>
+                <li>
                   <Link href="/login">Войти</Link>
                 </li>
               </ul>
