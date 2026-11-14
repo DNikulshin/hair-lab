@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
+import { defaultPageSize, maxPageSize } from '../common/pagination';
 import {
+  accountBookingResponseSchema,
+  accountBookingsQuerySchema,
+  accountBookingsResponseSchema,
+  accountBookingSchema,
   bookingResponseSchema,
   bookingSchema,
   createBookingSchema,
@@ -32,6 +37,21 @@ const booking = {
   price: { amountMinor: 350_000, currency: 'RUB' as const },
   durationMin: 60,
   clientName: 'Тестовая Клиентка',
+};
+
+/** Запись в кабинете: те же снимки, что и у `booking`, плюс имена мастера и услуги. */
+const accountBooking = {
+  id: bookingId,
+  startsAt: '2030-03-04T06:00:00.000Z',
+  endsAt: '2030-03-04T07:00:00.000Z',
+  status: 'confirmed' as const,
+  price: { amountMinor: 350_000, currency: 'RUB' as const },
+  durationMin: 60,
+  serviceName: 'Стрижка',
+  masterName: 'Тестовый Мастер',
+  clientName: 'Тестовая Клиентка',
+  clientPhoneMasked: '+7 (***) ***-**-89',
+  cancellable: true,
 };
 
 describe('slotsQuerySchema', () => {
@@ -145,5 +165,84 @@ describe('bookingResponseSchema', () => {
   it('отклоняет неизвестный статус и неположительную длительность', () => {
     expect(() => bookingSchema.parse({ ...booking, status: 'new' })).toThrow();
     expect(() => bookingSchema.parse({ ...booking, durationMin: 0 })).toThrow();
+  });
+});
+
+describe('accountBookingSchema', () => {
+  it('принимает запись кабинета со всеми полями и без маски телефона', () => {
+    const parsed = accountBookingSchema.parse(accountBooking);
+    expect(parsed.masterName).toBe('Тестовый Мастер');
+    expect(parsed.serviceName).toBe('Стрижка');
+    expect(parsed.cancellable).toBe(true);
+    expect(parsed.clientPhoneMasked).toBe('+7 (***) ***-**-89');
+
+    const { clientPhoneMasked: _mask, ...withoutMask } = accountBooking;
+    expect(accountBookingSchema.parse(withoutMask).clientPhoneMasked).toBeUndefined();
+  });
+
+  it('не содержит контактов клиента целиком и требует булев cancellable', () => {
+    const parsed = accountBookingSchema.parse(accountBooking);
+    expect(Object.keys(parsed)).not.toContain('clientPhone');
+    expect(Object.keys(parsed)).not.toContain('clientEmail');
+    expect(() => accountBookingSchema.parse({ ...accountBooking, cancellable: 'yes' })).toThrow();
+
+    const { cancellable: _cancellable, ...withoutCancellable } = accountBooking;
+    expect(() => accountBookingSchema.parse(withoutCancellable)).toThrow();
+  });
+
+  it('отклоняет время без зоны, пустые имена и неизвестный статус', () => {
+    expect(() =>
+      accountBookingSchema.parse({ ...accountBooking, startsAt: '2030-03-04 06:00' }),
+    ).toThrow();
+    expect(() => accountBookingSchema.parse({ ...accountBooking, masterName: '' })).toThrow();
+    expect(() => accountBookingSchema.parse({ ...accountBooking, serviceName: '' })).toThrow();
+    expect(() => accountBookingSchema.parse({ ...accountBooking, status: 'new' })).toThrow();
+  });
+});
+
+describe('accountBookingsQuerySchema', () => {
+  it('по умолчанию отдаёт upcoming с лимитом пагинации', () => {
+    const parsed = accountBookingsQuerySchema.parse({});
+    expect(parsed.scope).toBe('upcoming');
+    expect(parsed.limit).toBe(defaultPageSize);
+    expect(parsed.cursor).toBeUndefined();
+  });
+
+  it('принимает scope, limit и cursor и приводит limit из строки', () => {
+    const parsed = accountBookingsQuerySchema.parse({ scope: 'past', limit: '5', cursor: 'abc' });
+    expect(parsed.scope).toBe('past');
+    expect(parsed.limit).toBe(5);
+    expect(parsed.cursor).toBe('abc');
+  });
+
+  it('отклоняет неизвестный scope и limit вне допустимого диапазона', () => {
+    expect(() => accountBookingsQuerySchema.parse({ scope: 'all' })).toThrow();
+    expect(() => accountBookingsQuerySchema.parse({ limit: 0 })).toThrow();
+    expect(() => accountBookingsQuerySchema.parse({ limit: maxPageSize + 1 })).toThrow();
+    expect(() => accountBookingsQuerySchema.parse({ cursor: '' })).toThrow();
+  });
+});
+
+describe('accountBookingsResponseSchema / accountBookingResponseSchema', () => {
+  it('отдаёт список в обёртке {items, nextCursor}', () => {
+    const parsed = accountBookingsResponseSchema.parse({
+      items: [accountBooking],
+      nextCursor: '2030-03-04T06:00:00.000Z|33333333-3333-4333-8333-333333333333',
+    });
+    expect(parsed.items).toHaveLength(1);
+    expect(parsed.nextCursor).toContain('|');
+    expect(
+      accountBookingsResponseSchema.parse({ items: [], nextCursor: null }).nextCursor,
+    ).toBeNull();
+    expect(() => accountBookingsResponseSchema.parse({ items: [accountBooking] })).toThrow();
+  });
+
+  it('возвращает отменённую запись в обёртке {booking}', () => {
+    const parsed = accountBookingResponseSchema.parse({
+      booking: { ...accountBooking, status: 'cancelled', cancellable: false },
+    });
+    expect(parsed.booking.status).toBe('cancelled');
+    expect(parsed.booking.cancellable).toBe(false);
+    expect(() => accountBookingResponseSchema.parse(accountBooking)).toThrow();
   });
 });

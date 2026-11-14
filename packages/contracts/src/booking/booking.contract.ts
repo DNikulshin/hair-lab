@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { idempotencyKeySchema, idSchema } from '../common/ids';
 import { moneySchema } from '../common/money';
+import { paginatedSchema, paginationQuerySchema } from '../common/pagination';
 import { phoneSchema } from '../common/phone';
 import { isoDateTimeSchema } from '../common/time';
 
@@ -98,3 +99,48 @@ export const bookingResponseSchema = z.object({
   booking: bookingSchema,
 });
 export type BookingResponse = z.infer<typeof bookingResponseSchema>;
+
+/**
+ * Запись в кабинете клиента (`GET /account/bookings`, `DELETE /account/bookings/:id`).
+ *
+ * Инварианты, которые обеспечивает API (в схеме не выражаются):
+ * - клиент видит и отменяет только свои записи; чужая и несуществующая запись дают
+ *   одинаковый 404, потому что наличие чужих записей не раскрывается;
+ * - `cancellable` считает сервер по правилу салона (статус `pending`/`confirmed`
+ *   и до начала приёма осталось не меньше двух часов). Клиент это правило не дублирует:
+ *   изменившееся правило не потребует обновления приложения, а UI читает только `cancellable`;
+ * - контактов клиента в ответе нет: только имя и маска телефона (`clientPhoneMasked`).
+ */
+export const accountBookingSchema = z.object({
+  id: idSchema,
+  startsAt: isoDateTimeSchema,
+  endsAt: isoDateTimeSchema,
+  status: bookingStatusSchema,
+  price: moneySchema,
+  durationMin: z.number().int().positive(),
+  serviceName: z.string().min(1),
+  masterName: z.string().min(1),
+  clientName: z.string().min(1),
+  clientPhoneMasked: z.string().min(1).optional(),
+  cancellable: z.boolean(),
+});
+export type AccountBooking = z.infer<typeof accountBookingSchema>;
+
+/**
+ * Параметры `GET /account/bookings`: та же курсорная пагинация, что и у остальных списков.
+ * `upcoming` — активные записи с началом не раньше текущего момента (по возрастанию времени),
+ * `past` — всё остальное: прошедшие, отменённые, завершённые и неявки (по убыванию времени).
+ */
+export const accountBookingsQuerySchema = paginationQuerySchema.extend({
+  scope: z.enum(['upcoming', 'past']).default('upcoming'),
+});
+export type AccountBookingsQuery = z.infer<typeof accountBookingsQuerySchema>;
+
+export const accountBookingsResponseSchema = paginatedSchema(accountBookingSchema);
+export type AccountBookingsResponse = z.infer<typeof accountBookingsResponseSchema>;
+
+/** Ответ отмены: обновлённая запись, чтобы клиент поправил экран без повторного запроса. */
+export const accountBookingResponseSchema = z.object({
+  booking: accountBookingSchema,
+});
+export type AccountBookingResponse = z.infer<typeof accountBookingResponseSchema>;
