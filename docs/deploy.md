@@ -25,6 +25,11 @@ docker build -f apps/web/Dockerfile -t hair-lab-web:local \
 docker run --rm -p 3201:3001 hair-lab-api:local   # curl localhost:3201/health
 ```
 
+Образы собираются из контекста, где локальные env-файлы исключены (`**/.env` / `**/.env.*`
+в `.dockerignore`), поэтому dev-окружение в слой сборки не попадает. Если после локальной сборки
+приложение отдаёт 404 на `/` или живёт под неожиданным префиксом — искать `NEXT_BASE_PATH`
+в `apps/web/.env.local` (его вшивает `next build`) и пересобрать образ.
+
 ## 2. CI
 
 `ci.yml` на каждый PR: `contracts build` → `typecheck` → `lint` → `check:arch` → `test` →
