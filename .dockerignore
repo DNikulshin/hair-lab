@@ -9,8 +9,12 @@
 .pi
 docs
 *.log
-.env
-.env.*
+# env-файлы в любом каталоге контекста. Без `**/` шаблон действует только на корень, и
+# `apps/web/.env.local` (dev-окружение, в git его нет) попадал в слой сборки: `next build` вшивал
+# NEXT_BASE_PATH из него, и образ отдавал 404 на `/` (issue #96).
+**/.env
+**/.env.*
+!**/.env.example
 !.env.example
 README.md
 AGENTS.md
