@@ -121,6 +121,20 @@ jobs:
           cache-from: type=gha,scope=${{ matrix.component }}
           cache-to: type=gha,mode=max,scope=${{ matrix.component }}
 
+      # Стадия миграций ловится на PR: именно её образ выполняется на VPS перед `up -d`.
+      # Шаг под тем же gate, что и сборка api; названия required-чеков не меняются.
+      - name: Собрать образ миграций
+        if: steps.gate.outputs.run == 'true' && matrix.component == 'api'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          target: migrations
+          push: false
+          tags: hair-lab-api-migrations:ci
+          cache-from: type=gha,scope=api-migrations
+          cache-to: type=gha,mode=max,scope=api-migrations
+
   # Интеграционные тесты на реальном PostgreSQL: проверяют ограничения схемы
   # (EXCLUDE на пересечение слотов, FK, CHECK, unique).
   integration:

@@ -33,7 +33,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        package: [hair-lab-api, hair-lab-web]
+        package: [hair-lab-api, hair-lab-web, hair-lab-api-migrations]
     steps:
       - name: Удалить старые версии ${{ matrix.package }}
         uses: actions/delete-package-versions@v5

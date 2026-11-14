@@ -35,6 +35,18 @@ RUN pnpm --filter @hair-lab/contracts build \
  && pnpm --filter @hair-lab/api build \
  && pnpm --filter @hair-lab/api deploy --prod /out
 
+# Стадия миграций: отдельный образ из того же коммита, что и api.
+# В `runner` нет ни prisma CLI (это devDependency), ни `prisma/`, ни `prisma.config.ts`, поэтому
+# `prisma migrate deploy` оттуда выполнить нельзя. Копируем в `deps` только конфиг и миграции:
+# образ миграций — короткоживущий job (`docker compose run --rm migrations`), а не сервис.
+# Один sha-тег у api и миграций гарантирует, что версия схемы совпадает с версией кода.
+FROM deps AS migrations
+WORKDIR /repo
+COPY apps/api/prisma.config.ts apps/api/
+COPY apps/api/prisma apps/api/prisma
+USER node
+CMD ["pnpm", "--filter", "@hair-lab/api", "db:migrate:deploy"]
+
 FROM node:26-alpine AS runner
 ENV NODE_ENV=production
 ENV API_HOST=0.0.0.0
