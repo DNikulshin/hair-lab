@@ -8,7 +8,7 @@ import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import { buildServer } from '../src/app/build-server';
 import { createBooking } from '../src/features/bookings/bookings.service';
 import { env } from '../src/shared/config/env';
-import { createFixture, createTestDb, fakeClient } from './db/helpers';
+import { countOutboxFor, createFixture, createTestDb, fakeClient } from './db/helpers';
 
 /**
  * Онлайн-запись через HTTP: `GET /slots` и `POST /bookings` на реальной БД.
@@ -406,7 +406,7 @@ describe('POST /bookings', () => {
     expect(secondId).toBe(firstId);
 
     expect(await db.appointment.count({ where: { masterId } })).toBe(1);
-    expect(await db.outboxMessage.count({ where: { appointmentId: firstId } })).toBe(1);
+    expect(await countOutboxFor(db, firstId)).toBe(1);
   });
 
   it('повтор, когда слот занят нашей же записью: 200, а не 409 slot_unavailable', async () => {

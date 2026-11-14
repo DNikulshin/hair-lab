@@ -18,7 +18,7 @@ import {
   type EmailTransport,
   type SendResult,
 } from '../src/shared/email';
-import { createFixture, createTestDb, fakeClient } from './db/helpers';
+import { createFixture, countOutboxFor, createTestDb, fakeClient } from './db/helpers';
 
 /**
  * Outbox писем на реальной БД: атомарность записи (запись + строка outbox одной транзакцией),
@@ -119,6 +119,23 @@ let keyCounter = 0;
 function nextKey(): string {
   keyCounter += 1;
   return `outbox-test-key-${keyCounter}`;
+}
+
+let emailCounter = 0;
+
+/**
+ * Уникальный адрес на тест: диспетчер забирает пачку из общей очереди, и в dev-БД могут
+ * лежать чужие `pending`-строки, письма по которым попадают в тот же поддельный транспорт.
+ * Поэтому все утверждения про отправку смотрим по своему адресу (issue #80).
+ */
+function uniqueEmail(): string {
+  emailCounter += 1;
+  return `outbox-${emailCounter}@example.invalid`;
+}
+
+/** Письма, ушедшие только на адрес теста. */
+function sentTo(sent: EmailMessage[], email: string): EmailMessage[] {
+  return sent.filter((message) => message.to === email);
 }
 
 /** Мастер «Тестовый Мастер» с услугой «Стрижка» (60 мин, 3500 ₽) и сменой 09:00–12:00. */
@@ -297,17 +314,29 @@ describe('outbox: запись в одной транзакции с запис�
       select: { id: true },
     });
     expect(appointments).toHaveLength(1);
-    expect(await db.outboxMessage.count()).toBe(1);
+    // Подсчёт по своей записи, а не по всей таблице: в dev-БД есть письма ручной проверки.
+    expect(await countOutboxFor(db, appointments[0]!.id)).toBe(1);
   });
 });
 
 describe('outbox: диспетчер на реальном хранилище', () => {
-  /** Запись через API: возвращает id записи и id созданной строки outbox. */
-  async function bookWithEmail(): Promise<{ appointmentId: string; outboxId: string }> {
+  /** Запись через API: id записи, id строки outbox и адрес, на который уйдёт письмо. */
+  async function bookWithEmail(): Promise<{
+    appointmentId: string;
+    outboxId: string;
+    email: string;
+  }> {
     const { masterId, serviceId, date } = await setupSalon();
     const slot = await firstSlot(serviceId, date);
+    const email = uniqueEmail();
     const { statusCode, body } = await postBooking(
-      bookingBody({ masterId, serviceId, startsAt: slot.startsAt, idempotencyKey: nextKey() }),
+      bookingBody({
+        masterId,
+        serviceId,
+        startsAt: slot.startsAt,
+        idempotencyKey: nextKey(),
+        clientEmail: email,
+      }),
     );
     expect(statusCode).toBe(201);
     const { booking } = bookingResponseSchema.parse(body);
@@ -315,25 +344,25 @@ describe('outbox: диспетчер на реальном хранилище', 
       where: { appointmentId: booking.id },
       select: { id: true },
     });
-    return { appointmentId: booking.id, outboxId: row.id };
+    return { appointmentId: booking.id, outboxId: row.id, email };
   }
 
   it('успешная отправка переводит строку в sent и второй тик её не повторяет', async () => {
-    const { outboxId } = await bookWithEmail();
+    const { outboxId, email } = await bookWithEmail();
     const { transport, sent } = createFakeTransport();
 
     const first = await runTick(transport);
     expect(first.sent).toBeGreaterThanOrEqual(1);
-    expect(sent).toHaveLength(1);
-    expect(sent[0]?.to).toBe(fakeClient.email);
-    expect(sent[0]?.subject).toBeTruthy();
+    const ours = sentTo(sent, email);
+    expect(ours).toHaveLength(1);
+    expect(ours[0]?.subject).toBeTruthy();
 
     const row = await db.outboxMessage.findUniqueOrThrow({ where: { id: outboxId } });
     expect(row.status).toBe('sent');
     expect(row.sentAt).not.toBeNull();
 
     await runTick(transport);
-    expect(sent).toHaveLength(1);
+    expect(sentTo(sent, email)).toHaveLength(1);
   });
 
   it('временная ошибка — attempts + 1 и пауза 1 минута', async () => {
@@ -364,12 +393,13 @@ describe('outbox: диспетчер на реальном хранилище', 
 
   it('просроченное событие — failed(expired), письмо не отправляется', async () => {
     const pastStartsAt = new Date(Date.now() - MINUTE_MS);
+    const email = uniqueEmail();
     const orphan = await db.outboxMessage.create({
       data: {
         type: BOOKING_CONFIRMATION_TYPE,
         payload: {
           clientName: fakeClient.name,
-          clientEmail: fakeClient.email,
+          clientEmail: email,
           serviceName: 'Стрижка',
           masterName: 'Тестовый Мастер',
           startsAt: pastStartsAt.toISOString(),
@@ -388,7 +418,7 @@ describe('outbox: диспетчер на реальном хранилище', 
     const row = await db.outboxMessage.findUniqueOrThrow({ where: { id: orphan.id } });
     expect(row.status).toBe('failed');
     expect(row.lastError).toBe('expired');
-    expect(sent).toHaveLength(0);
+    expect(sentTo(sent, email)).toHaveLength(0);
   });
 
   it('неизвестный тип письма — failed(unknown_type)', async () => {
@@ -412,6 +442,7 @@ describe('outbox: диспетчер на реальном хранилище', 
     const { masterId, serviceId, date } = await setupSalon();
     const slot = await firstSlot(serviceId, date);
     const clientId = await fixture.client();
+    const clientEmail = uniqueEmail();
     const created = await createBooking(
       db,
       {
@@ -420,7 +451,7 @@ describe('outbox: диспетчер на реальном хранилище', 
         startsAt: slot.startsAt,
         clientName: fakeClient.name,
         clientPhone: fakeClient.phone,
-        clientEmail: fakeClient.email,
+        clientEmail,
         idempotencyKey: nextKey(),
       },
       clientId,
@@ -441,10 +472,11 @@ describe('outbox: диспетчер на реальном хранилище', 
     const { transport, sent } = createFakeTransport();
     await runTick(transport);
 
-    // Тик может забрать и чужие pending-строки dev-БД (issue #80), поэтому фильтруем по теме.
-    const cancellations = sent.filter((message) => message.subject.includes('Запись отменена'));
+    // Тик может забрать и чужие pending-строки dev-БД (issue #80), поэтому смотрим
+    // только письма на адрес этого теста.
+    const cancellations = sentTo(sent, clientEmail);
     expect(cancellations).toHaveLength(1);
-    expect(cancellations[0]?.to).toBe(fakeClient.email);
+    expect(cancellations[0]?.subject).toContain('Запись отменена');
     // Тело письма без ПДн, которых нет в снимке: телефона клиента в нём нет.
     expect(cancellations[0]?.text).not.toContain(fakeClient.phone);
     expect(cancellations[0]?.html).not.toContain(fakeClient.phone);
@@ -459,7 +491,7 @@ describe('outbox: диспетчер на реальном хранилище', 
 
     // Второй тик не дублирует письмо об отмене.
     await runTick(transport);
-    expect(sent.filter((message) => message.subject.includes('Запись отменена'))).toHaveLength(1);
+    expect(sentTo(sent, clientEmail)).toHaveLength(1);
     const again = await db.outboxMessage.findMany({
       where: { appointmentId, type: BOOKING_CANCELLATION_TYPE },
       select: { status: true, sentAt: true },
