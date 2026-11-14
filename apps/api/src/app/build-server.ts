@@ -12,6 +12,7 @@ import {
   MAGIC_LINK_TYPE,
 } from '../features/auth';
 import {
+  accountBookingsRoutes,
   bookingRoutes,
   createBookingConfirmationTemplate,
   BOOKING_CONFIRMATION_TYPE,
@@ -91,6 +92,7 @@ export async function buildServer() {
   await app.register(healthRoutes);
   await app.register(catalogRoutes);
   await app.register(bookingRoutes);
+  await app.register(accountBookingsRoutes);
   // `global: false`: лимиты задаются per-route в конфиге маршрута (см. auth.routes.ts).
   await app.register(rateLimit, { global: false });
   await app.register(authRoutes, { delivery: tokenDelivery });
