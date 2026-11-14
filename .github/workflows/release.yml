@@ -110,6 +110,18 @@ jobs:
           fi
           echo "list=${TAGS}" >> "$GITHUB_OUTPUT"
 
+          # Миграции — тот же Dockerfile, стадия `migrations`, тот же набор тегов.
+          # Теги читаются шагом сборки образа миграций ниже.
+          if [[ "${{ matrix.component }}" == api ]]; then
+            MIG_IMAGE="${REGISTRY}/${IMAGE_BASE}-api-migrations"
+            MIG_TAGS="${MIG_IMAGE}:${{ github.sha }}"
+            MIG_TAGS="${MIG_TAGS},${MIG_IMAGE}:latest"
+            if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+              MIG_TAGS="${MIG_TAGS},${MIG_IMAGE}:${GITHUB_REF_NAME}"
+            fi
+            echo "mig-list=${MIG_TAGS}" >> "$GITHUB_OUTPUT"
+          fi
+
       # NEXT_PUBLIC_* встраиваются в бандл на сборке, поэтому бренд передаётся build-arg'ами.
       # Для api шаг не выполняется — там `BUILD_ARGS` пустой.
       - name: Подготовить build-args (web)
@@ -136,6 +148,20 @@ jobs:
           build-args: ${{ env.BUILD_ARGS }}
           cache-from: type=gha,scope=${{ matrix.component }}
           cache-to: type=gha,mode=max,scope=${{ matrix.component }}
+
+      # Образ миграций собирается только вместе с api (`prisma migrate deploy`): стадия
+      # `migrations` того же Dockerfile. Builder уже прогрет предыдущим шагом — сборка дёшева.
+      - name: Собрать и опубликовать образ миграций
+        if: matrix.component == 'api'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          target: migrations
+          push: true
+          tags: ${{ steps.tags.outputs.mig-list }}
+          cache-from: type=gha,scope=api-migrations
+          cache-to: type=gha,mode=max,scope=api-migrations
 
   deploy:
     needs: [images, changes]
@@ -166,6 +192,7 @@ jobs:
           POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}
           POSTGRES_DB=${{ vars.POSTGRES_DB || 'hair_lab' }}
           GHCR_IMAGE_API=${{ env.REGISTRY }}/${{ env.IMAGE_BASE }}-api
+          GHCR_IMAGE_MIGRATIONS=${{ env.REGISTRY }}/${{ env.IMAGE_BASE }}-api-migrations
           GHCR_IMAGE_WEB=${{ env.REGISTRY }}/${{ env.IMAGE_BASE }}-web
           IMAGE_TAG=${{ github.sha }}
           LOG_LEVEL=${{ vars.LOG_LEVEL || 'info' }}
@@ -223,6 +250,11 @@ jobs:
             printf '%s' "$GHCR_PAT" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
           fi
           docker compose -f docker-compose.prod.yml pull
+          # Миграции до запуска новых контейнеров: `run` сам поднимет db и дождётся
+          # healthcheck (`depends_on: service_healthy`). `-T` — без TTY, в CI его нет.
+          # `set -euo pipefail` останавливает скрипт при падении миграции:
+          # до `up -d` дело не доходит, старые контейнеры продолжают работать.
+          docker compose -f docker-compose.prod.yml run --rm -T migrations
           docker compose -f docker-compose.prod.yml up -d --remove-orphans
           docker image prune -f
           REMOTE

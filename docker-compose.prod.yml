@@ -1,6 +1,17 @@
 # Прод-развёртывание на одном VPS: те же образы, что выпускает CI в GHCR.
-# Локальная проверка: GHCR_IMAGE_API=... GHCR_IMAGE_WEB=... IMAGE_TAG=<sha> \
+#
+# Локальная проверка с миграциями (образы из GHCR, порядок как в деплое):
+#   export GHCR_IMAGE_API=ghcr.io/<owner>/hair-lab-api
+#   export GHCR_IMAGE_WEB=ghcr.io/<owner>/hair-lab-web
+#   export GHCR_IMAGE_MIGRATIONS=ghcr.io/<owner>/hair-lab-api-migrations
+#   export IMAGE_TAG=<sha>
+#   docker compose -f docker-compose.prod.yml pull
+#   docker compose -f docker-compose.prod.yml run --rm -T migrations
 #   docker compose -f docker-compose.prod.yml up -d
+#
+# GHCR_IMAGE_MIGRATIONS обязателен при образах из GHCR. Локально его можно не экспортировать,
+# если образ миграций собран под именем `hair-lab-api-migrations` (см. комментарий к сервису
+# `migrations`).
 name: hair-lab
 
 services:
@@ -18,6 +29,27 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+
+  # Миграции схемы: короткоживущий job из стадии `migrations` того же Dockerfile и с тем же
+  # тегом, что api. Профиль `migrations` держит сервис вне обычных `pull`/`up -d`; он поднимается
+  # только при явном упоминании (`run --rm -T migrations`).
+  #
+  # Имя образа задаёт деплой: `GHCR_IMAGE_MIGRATIONS` пишется в `.env` на VPS из `release.yml`.
+  # В локальной проверке переменную экспортировать не обязательно, если образ собран локально
+  # под именем `hair-lab-api-migrations` (`docker build -f apps/api/Dockerfile --target
+  # migrations -t hair-lab-api-migrations .`) — по умолчанию подставляется оно.
+  # `:?` здесь намеренно нет: compose интерполирует переменные до фильтрации по профилям, и
+  # обязательная переменная требовалась бы даже обычным `up -d`, который этот сервис не запускает.
+  migrations:
+    image: ${GHCR_IMAGE_MIGRATIONS:-hair-lab-api-migrations}:${IMAGE_TAG:-latest}
+    profiles: ['migrations']
+    # Перезапуск бессмысленен: упавшая миграция останавливает деплой, а не крутится в цикле.
+    restart: 'no'
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-hair_lab}?schema=public
+    depends_on:
+      db:
+        condition: service_healthy
 
   api:
     image: ${GHCR_IMAGE_API:?задайте GHCR_IMAGE_API}:${IMAGE_TAG:-latest}
