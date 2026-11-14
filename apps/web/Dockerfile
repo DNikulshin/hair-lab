@@ -8,7 +8,9 @@
 FROM node:26-alpine AS base
 ENV PNPM_HOME=/pnpm
 ENV PATH=$PNPM_HOME:$PATH
-RUN corepack enable
+# В Node 25+ Corepack больше не входит в дистрибутив, поэтому pnpm ставим через npm.
+# Версия должна совпадать с `packageManager` в корневом package.json.
+RUN npm install -g pnpm@9.15.0
 WORKDIR /repo
 
 FROM base AS deps
