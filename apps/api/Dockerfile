@@ -37,11 +37,23 @@ RUN pnpm --filter @hair-lab/contracts build \
 
 # Стадия миграций: отдельный образ из того же коммита, что и api.
 # В `runner` нет ни prisma CLI (это devDependency), ни `prisma/`, ни `prisma.config.ts`, поэтому
-# `prisma migrate deploy` оттуда выполнить нельзя. Копируем в `deps` только конфиг и миграции:
-# образ миграций — короткоживущий job (`docker compose run --rm migrations`), а не сервис.
-# Один sha-тег у api и миграций гарантирует, что версия схемы совпадает с версией кода.
-FROM deps AS migrations
+# `prisma migrate deploy` оттуда выполнить нельзя — конфиг и миграции копируются здесь.
+# Образ миграций — короткоживущий job (`docker compose run --rm migrations`), а не сервис;
+# один sha-тег у api и миграций гарантирует, что версия схемы совпадает с версией кода.
+#
+# Стадия НЕ наследует `deps` намеренно: там `pnpm install` без фильтра тянет devDependencies
+# всего воркспейса (web, tooling), а образу миграций нужен только prisma CLI + `prisma/` + конфиг.
+# Наследование `deps` давало образ ~1.72 ГБ. Здесь манифесты копируются только те, без которых
+# не обойтись: pnpm резолвит workspace по `pnpm-workspace.yaml`, поэтому манифест contracts нужен
+# (api зависит от него), а их исходники и сборка — нет: prisma CLI читает только схему и миграции.
+# Безопасно, потому что prisma — devDependency `@hair-lab/api` и попадает в фильтр установки.
+FROM base AS migrations
 WORKDIR /repo
+COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
+COPY apps/api/package.json apps/api/
+COPY packages/contracts/package.json packages/contracts/
+RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
+    pnpm install --frozen-lockfile --filter @hair-lab/api --filter @hair-lab/contracts
 COPY apps/api/prisma.config.ts apps/api/
 COPY apps/api/prisma apps/api/prisma
 USER node
