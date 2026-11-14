@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from 'next';
 import Link from 'next/link';
 import type { ReactNode } from 'react';
+import { SwRegister } from '@/features/pwa';
 import { siteConfig } from '@/shared/config/site';
 import { Container } from '@/shared/ui/container';
 import './globals.css';
@@ -19,6 +20,19 @@ export const metadata: Metadata = {
     title: siteConfig.name,
     description: siteConfig.description,
   },
+  // PWA: установка на домашний экран iOS. Ссылку на manifest Next добавляет сам
+  // (файл `app/manifest.ts`), `themeColor` живёт здесь ниже в `viewport`.
+  appleWebApp: {
+    capable: true,
+    title: siteConfig.shortName,
+  },
+  icons: {
+    icon: [
+      { url: '/icons/icon-192.png', sizes: '192x192', type: 'image/png' },
+      { url: '/icons/icon-512.png', sizes: '512x512', type: 'image/png' },
+    ],
+    apple: [{ url: '/icons/apple-touch-icon.png', sizes: '180x180', type: 'image/png' }],
+  },
 };
 
 export const viewport: Viewport = {
@@ -32,6 +46,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="ru">
       <body>
+        <SwRegister />
         <header className="border-b border-border">
           <Container className="flex flex-wrap items-center justify-between gap-3 py-4">
             <Link href="/" className="font-semibold tracking-tight">
