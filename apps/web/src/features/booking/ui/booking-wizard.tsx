@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import {
   useCallback,
   useEffect,
@@ -12,6 +13,7 @@ import {
 } from 'react';
 import type { Booking, CreateBooking, Master, Service, Slot } from '@hair-lab/contracts';
 import { formatDuration, formatPrice } from '@/features/catalog';
+import { paymentHandoff, savePaymentDraft } from '@/features/payment';
 import { fetchSlots, submitBooking } from '../api/booking-api';
 import { createIdempotencyKey } from '../model/idempotency-key';
 import {
@@ -42,6 +44,11 @@ import {
  *
  * ПДн: телефон не пишется в `console`, не попадает в URL и `localStorage`.
  * Ключ идемпотентности создаётся один раз на выбранный слот и переиспользуется при повторе.
+ *
+ * Оплата: если сервер вернул `booking.payment` (оплата включена), клиент уходит на
+ * `/booking/payment`, а данные ссылки кладём в черновик `sessionStorage` этой вкладки
+ * (`return_url` ЮKassa статичен и id не содержит). Поля `payment` нет (режим `off`) —
+ * показываем прежний экран «Запись создана» без редиректа.
  */
 
 type BookingWizardProps = {
@@ -145,6 +152,10 @@ export function BookingWizard({
   const [errors, setErrors] = useState<BookingErrorState>(EMPTY_BOOKING_ERRORS);
   const [submitting, setSubmitting] = useState(false);
   const [booking, setBooking] = useState<Booking | null>(null);
+  const [redirecting, setRedirecting] = useState(false);
+  const [paymentFallbackUrl, setPaymentFallbackUrl] = useState<string | null>(null);
+
+  const router = useRouter();
 
   const attemptKeyRef = useRef('');
   const nameRef = useRef<HTMLInputElement>(null);
@@ -274,8 +285,21 @@ export function BookingWizard({
     setSubmitting(false);
 
     if (result.ok) {
-      setBooking(result.booking);
       attemptKeyRef.current = '';
+
+      const handoff = paymentHandoff(result.booking);
+      if (handoff !== null) {
+        // Черновик нужен, чтобы после возврата с платёжной страницы страница оплаты
+        // опознала запись. Не сохранился (приватный режим) — даём прямую ссылку провайдера.
+        if (savePaymentDraft(handoff.draft)) {
+          setRedirecting(true);
+          router.replace(handoff.path);
+          return;
+        }
+        setPaymentFallbackUrl(handoff.draft.confirmationUrl);
+      }
+
+      setBooking(result.booking);
       return;
     }
 
@@ -362,6 +386,18 @@ export function BookingWizard({
     );
   }
 
+  if (redirecting) {
+    return (
+      <section className="flex flex-col gap-4 rounded-card border border-border bg-surface-raised p-6">
+        <h2 className="text-xl font-semibold">Переходим к оплате…</h2>
+        <p role="status" className="text-sm text-muted">
+          Открываем страницу оплаты. Черновик записи останется в этой вкладке — по нему страница
+          поймёт, какую запись оплачивать.
+        </p>
+      </section>
+    );
+  }
+
   if (booking !== null) {
     return (
       <section className="flex flex-col gap-4 rounded-card border border-border bg-surface-raised p-6">
@@ -393,6 +429,14 @@ export function BookingWizard({
             </div>
           ) : null}
         </dl>
+        {paymentFallbackUrl === null ? null : (
+          <p className="text-sm">
+            Чтобы запись подтвердили, её нужно оплатить.{' '}
+            <a href={paymentFallbackUrl} rel="noopener noreferrer" className="underline">
+              Перейти к оплате
+            </a>
+          </p>
+        )}
         <p className="text-sm text-muted">
           Аккаунт не нужен: запись оформлена как гостевая. Кабинет клиента с историей визитов
           появится позже — тогда записью можно будет управлять самостоятельно.

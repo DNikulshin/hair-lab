@@ -35,6 +35,8 @@ describe('classify: приватный HTML', () => {
     '/login/magic',
     '/login/magic/',
     '/register',
+    '/booking/payment',
+    '/booking/payment/',
   ])('%s → private-html (только сеть)', (path) => {
     expect(classify(url(path), '')).toBe('private-html');
   });
@@ -43,6 +45,10 @@ describe('classify: приватный HTML', () => {
     expect(classify(url('/registration'), '')).toBe('other');
     expect(classify(url('/accounts'), '')).toBe('other');
     expect(classify(url('/login-help'), '')).toBe('other');
+    // Страница оплаты приватна, а сам визард записи — публичная навигация.
+    expect(classify(url('/book'), '')).toBe('other');
+    expect(classify(url('/booking'), '')).toBe('other');
+    expect(classify(url('/booking/payment-help'), '')).toBe('other');
   });
 });
 
@@ -69,7 +75,7 @@ describe('classify: статика и картинки', () => {
 });
 
 describe('classify: публичные навигации', () => {
-  it.each(['/', '/services', '/masters', '/book', '/offline'])('%s → other', (path) => {
+  it.each(['/', '/services', '/masters', '/book', '/booking', '/offline'])('%s → other', (path) => {
     expect(classify(url(path), '')).toBe('other');
   });
 });
@@ -80,6 +86,7 @@ describe('classify: база приложения', () => {
   it('база отрезается перед разбором пути', () => {
     expect(classify(url(`${base}/api/slots`), base)).toBe('api');
     expect(classify(url(`${base}/account`), base)).toBe('private-html');
+    expect(classify(url(`${base}/booking/payment`), base)).toBe('private-html');
     expect(classify(url(`${base}/_next/static/chunks/a.js`), base)).toBe('next-static');
     expect(classify(url(`${base}/icons/icon-512.png`), base)).toBe('asset');
     expect(classify(url(`${base}/services`), base)).toBe('other');
