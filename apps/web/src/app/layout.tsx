@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from 'next';
 import Link from 'next/link';
 import type { ReactNode } from 'react';
 import { SwRegister } from '@/features/pwa';
+import { withBasePath } from '@/shared/config/api';
 import { siteConfig } from '@/shared/config/site';
 import { Container } from '@/shared/ui/container';
 import './globals.css';
@@ -26,12 +27,15 @@ export const metadata: Metadata = {
     capable: true,
     title: siteConfig.shortName,
   },
+  // Next не префиксует иконки метаданных базой — добавляем сами (dev за прокси).
   icons: {
     icon: [
-      { url: '/icons/icon-192.png', sizes: '192x192', type: 'image/png' },
-      { url: '/icons/icon-512.png', sizes: '512x512', type: 'image/png' },
+      { url: withBasePath('/icons/icon-192.png'), sizes: '192x192', type: 'image/png' },
+      { url: withBasePath('/icons/icon-512.png'), sizes: '512x512', type: 'image/png' },
     ],
-    apple: [{ url: '/icons/apple-touch-icon.png', sizes: '180x180', type: 'image/png' }],
+    apple: [
+      { url: withBasePath('/icons/apple-touch-icon.png'), sizes: '180x180', type: 'image/png' },
+    ],
   },
 };
 

@@ -38,7 +38,9 @@ export function renderMagicLinkEmail(
   const delivery = context.delivery.take(data.loginTokenId, now);
   if (delivery === undefined) throw new Error('magic link delivery unavailable');
 
-  const link = new URL('/login/magic', context.appUrl);
+  // `new URL('/login/magic', appUrl)` отбросил бы путь базового адреса (запуск за прокси
+  // под префиксом `/absproxy/<port>/`), поэтому склеиваем явно.
+  const link = new URL(`${context.appUrl.replace(/\/+$/, '')}/login/magic`);
   link.searchParams.set('token', delivery.rawToken);
   const href = link.toString();
   const text = [

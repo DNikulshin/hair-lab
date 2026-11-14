@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect } from 'react';
+import { withBasePath } from '@/shared/config/api';
 
 /**
  * Регистрация service worker. Монтируется в корневом layout, ничего не рендерит.
@@ -18,7 +19,7 @@ export function SwRegister(): null {
     if (process.env.NODE_ENV !== 'production') return;
     if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return;
 
-    navigator.serviceWorker.register('/sw.js').catch((error: unknown) => {
+    navigator.serviceWorker.register(withBasePath('/sw.js')).catch((error: unknown) => {
       console.warn('[pwa] не удалось зарегистрировать service worker', error);
     });
   }, []);

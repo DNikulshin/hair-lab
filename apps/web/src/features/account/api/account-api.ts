@@ -5,6 +5,7 @@ import {
   type AccountBooking,
   type AccountBookingsResponse,
 } from '@hair-lab/contracts';
+import { withBasePath } from '@/shared/config/api';
 
 /**
  * Запросы кабинета клиента из браузера.
@@ -30,7 +31,7 @@ export type AccountResult<T> = { ok: true; data: T } | { ok: false; failure: Acc
 export async function fetchCurrentClient(): Promise<AccountResult<{ id: string }>> {
   let response: Response;
   try {
-    response = await fetch('/api/auth/me', { cache: 'no-store' });
+    response = await fetch(withBasePath('/api/auth/me'), { cache: 'no-store' });
   } catch {
     return { ok: false, failure: { kind: 'network' } };
   }
@@ -61,7 +62,9 @@ export async function fetchAccountBookings(
 
   let response: Response;
   try {
-    response = await fetch(`/api/account/bookings?${search.toString()}`, { cache: 'no-store' });
+    response = await fetch(withBasePath(`/api/account/bookings?${search.toString()}`), {
+      cache: 'no-store',
+    });
   } catch {
     return { ok: false, failure: { kind: 'network' } };
   }
@@ -83,7 +86,7 @@ export async function fetchAccountBookings(
 export async function cancelBooking(id: string): Promise<AccountResult<AccountBooking>> {
   let response: Response;
   try {
-    response = await fetch(`/api/account/bookings/${encodeURIComponent(id)}`, {
+    response = await fetch(withBasePath(`/api/account/bookings/${encodeURIComponent(id)}`), {
       method: 'DELETE',
       cache: 'no-store',
     });

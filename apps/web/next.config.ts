@@ -37,6 +37,9 @@ const allowedDevOrigins = parseOrigins(process.env.NEXT_ALLOWED_DEV_ORIGINS);
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
+  // База доступна клиентскому коду: Next добавляет basePath к <Link> и маршрутам,
+  // но не к произвольным fetch. Значение встраивается в бандл на сборке.
+  env: { NEXT_PUBLIC_BASE_PATH: basePath ?? '' },
   // Контракты поставляются собранными (tsup), поэтому transpilePackages не нужен.
   poweredByHeader: false,
   // Docker-образ: самодостаточная сборка без node_modules в runtime.

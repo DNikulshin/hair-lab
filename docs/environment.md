@@ -65,6 +65,10 @@ POSTGRES_PORT=55432 docker compose up -d db
 Next отдаёт абсолютные пути `/_next/...`, которые прокси не обслуживает: в консоли 404,
 стили не применяются. Лечится переменными в `apps/web/.env.local` (или `NEXT_*` в окружении).
 
+`NEXT_BASE_PATH` влияет и на клиентские запросы: Next добавляет `basePath` к `<Link>` и маршрутам,
+но не к `fetch`, поэтому клиентские модули API используют `withBasePath()` из
+`apps/web/src/shared/config/api.ts`. База встраивается в бандл на сборке через `env` в `next.config.ts`.
+
 **Режим `/absproxy/<port>/` — предпочтительный.** code-server передаёт префикс приложению целиком:
 
 ```bash

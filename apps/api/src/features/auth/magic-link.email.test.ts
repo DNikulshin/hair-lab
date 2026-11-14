@@ -32,6 +32,26 @@ describe('magic link email', () => {
     expect(() => template.render(payload)).toThrow();
   });
 
+  it('keeps the path of APP_URL in the login link (запуск за прокси под префиксом)', () => {
+    const delivery = createTokenDeliveryRegistry();
+    const loginTokenId = '00000000-0000-4000-8000-000000000002';
+    delivery.put(loginTokenId, {
+      rawToken: 'proxy-magic-token',
+      expiresAt: new Date('2030-01-01T00:15:00.000Z'),
+    });
+    const template = createMagicLinkTemplate({
+      appUrl: 'https://example.invalid/absproxy/3002/',
+      fromName: 'Тестовый салон',
+      delivery,
+    });
+
+    const rendered = template.render({ email: 'client@example.invalid', loginTokenId });
+
+    expect(rendered.text).toContain(
+      'https://example.invalid/absproxy/3002/login/magic?token=proxy-magic-token',
+    );
+  });
+
   it('rejects outbox payloads with malformed ids or extra raw-token properties', () => {
     expect(() =>
       magicLinkPayloadSchema.parse({
