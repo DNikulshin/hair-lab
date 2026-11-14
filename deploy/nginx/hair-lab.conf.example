@@ -1,6 +1,16 @@
 # nginx на хосте: единственная точка входа. Контейнеры слушают только 127.0.0.1.
 # Скопировать в /etc/nginx/sites-available/hair-lab и заменить домен и пути к сертификатам.
 # Сертификаты: certbot (Let's Encrypt) или существующие; пример ниже — LE.
+#
+# Файл подключается из /etc/nginx/sites-enabled/, то есть верхнеуровневые директивы внутри
+# http-контекста. Строки, раскомментированные до первого server, действуют как http-директивы.
+
+# Кэш статики на диске (необязательно). proxy_cache_valid имеет смысл только вместе с
+# proxy_cache_path — без него директива молча ничего не делает (так и было раньше).
+# Раскомментировать блок здесь и `proxy_cache` ниже, создать каталог и выдать права:
+#   sudo mkdir -p /var/cache/nginx/hair-lab-static && sudo chown www-data: /var/cache/nginx/hair-lab-static
+# proxy_cache_path /var/cache/nginx/hair-lab-static levels=1:2 keys_zone=hair_lab_static:10m
+#                  max_size=1g inactive=30d use_temp_path=off;
 
 upstream hair_lab_web {
     server 127.0.0.1:3000;
@@ -12,6 +22,19 @@ upstream hair_lab_api {
     keepalive 16;
 }
 
+# WebSocket: `Connection: upgrade` уходит только при апгрейде, в обычных запросах заголовка нет,
+# и keepalive к upstream используется. Без этой переменной в `location /` пришлось бы ставить
+# `Connection "upgrade"` всегда — тогда соединение с upstream не переиспользуется.
+# map объявляется один раз в http-контексте: если на хосте `$connection_upgrade` уже определен
+# (например, в /etc/nginx/conf.d/dev.conf), этот блок нужно удалить — иначе `nginx -t` упадёт
+# с `duplicate map name`.
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    ''      '';
+}
+
+# Порт 80 нужен, только если он опубликован (проброшен) на хост. Если наружу открыт только 443
+# (или нестандартный порт, см. ниже), этот блок не нужен: без слушающего 80 редирект недостижим.
 server {
     listen 80;
     listen [::]:80;
@@ -19,6 +42,9 @@ server {
     return 301 https://strizhlab.ru$request_uri;
 }
 
+# TLS на нестандартном порту — рабочий вариант: ЮKassa принимает адреса уведомлений и return_url
+# по HTTPS на 443 и 8443 (docs/integrations.md). Тогда `listen 443 ssl` остаётся локальным,
+# а наружу публикуется, например, 8443 → 443 (см. deploy/nginx/hair-lab.staging.dnikulshin.ru.conf).
 server {
     listen 443 ssl;
     listen [::]:443 ssl;
@@ -28,10 +54,16 @@ server {
     ssl_certificate     /etc/letsencrypt/live/strizhlab.ru/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/strizhlab.ru/privkey.pem;
     ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_session_cache shared:hair_lab:10m;
+    ssl_session_timeout 1h;
 
     add_header X-Content-Type-Options nosniff always;
     add_header Referrer-Policy strict-origin-when-cross-origin always;
     add_header X-Frame-Options SAMEORIGIN always;
+    add_header Permissions-Policy "geolocation=(), camera=(), microphone=()" always;
+    # HSTS без includeSubDomains: основной домен отдаётся с GitHub Pages, политику на поддомены
+    # отсюда не навязываем.
+    add_header Strict-Transport-Security "max-age=31536000" always;
 
     client_max_body_size 4m;
 
@@ -42,6 +74,9 @@ server {
     location /api/ {
         proxy_pass http://hair_lab_api/;
         proxy_http_version 1.1;
+        # Сброс Connection обязателен: иначе nginx шлёт `Connection: close` и
+        # `keepalive 16` в upstream не используется.
+        proxy_set_header Connection "";
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         # X-Forwarded-For перезаписывается, а не дописывается: api доверяет этому заголовку
@@ -53,10 +88,21 @@ server {
     }
 
     # Статика Next.js кэшируется агрессивно: имена файлов содержат хэш.
+    # add_header в location отменяет унаследованные заголовки сервера, поэтому заголовки
+    # безопасности повторяются здесь вручную.
     location /_next/static/ {
         proxy_pass http://hair_lab_web;
-        proxy_cache_valid 200 30d;
-        add_header Cache-Control "public, max-age=31536000, immutable";
+        # Как в /api/: без HTTP/1.1 и сброса Connection keepalive к upstream не работает.
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        # proxy_cache hair_lab_static;
+        # proxy_cache_valid 200 30d;
+        add_header Cache-Control "public, max-age=31536000, immutable" always;
+        add_header X-Content-Type-Options nosniff always;
+        add_header Referrer-Policy strict-origin-when-cross-origin always;
+        add_header X-Frame-Options SAMEORIGIN always;
+        add_header Permissions-Policy "geolocation=(), camera=(), microphone=()" always;
+        add_header Strict-Transport-Security "max-age=31536000" always;
     }
 
     location / {
@@ -64,9 +110,12 @@ server {
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        # Как и в /api/: единообразно перезаписываем, а не дописываем (ADR-0005).
+        proxy_set_header X-Forwarded-For $remote_addr;
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
+        # $connection_upgrade = upgrade только когда есть Upgrade-заголовок (см. map выше),
+        # иначе заголовок не передаётся и keepalive к upstream работает.
+        proxy_set_header Connection $connection_upgrade;
     }
 }
