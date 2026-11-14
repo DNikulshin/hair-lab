@@ -109,6 +109,11 @@ docker build -f apps/api/Dockerfile --target migrations -t hair-lab-api-migratio
 конфиг: `deploy/nginx/hair-lab.conf.example` (TLS, заголовки безопасности, кэш статики,
 `/api/*` → api с отрезанием префикса).
 
+## Staging
+
+Отдельный контур на этой машине (свой стек, своя БД, публичный адрес `https://hair-lab.dnikulshin.ru:8443`)
+описан в `docs/staging.md` — там же каталог стека, порядок обновления, демо-данные и проверки.
+
 ## 5. Деплой на VPS
 
 Переменные репозитория (Settings → Variables):
