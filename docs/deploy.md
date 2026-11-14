@@ -189,20 +189,125 @@ deploy` завершился ошибкой, шаг краснеет, `up -d` н
    AGENTS.md «никаких ручных правок продовой БД» в силе; штатный инструмент здесь —
    `migrate resolve`.
 
-## 6. nginx и TLS
+## Staging на этой машине
+
+Не прод-контур: отдельный стек на том же хосте. Публичный адрес —
+`https://hair-lab.dnikulshin.ru:8443` (наружу проброшен только 8443 → локальный 443; 80 не
+слушается и не проброшен). Конфиг nginx: `deploy/nginx/hair-lab.staging.dnikulshin.ru.conf`
+(wildcard-сертификат, `X-Robots-Tag: noindex`); установка — по разделу 6.
+
+- каталог `/opt/hair-lab-staging`: `docker-compose.prod.yml` + свой `.env` (не в git);
+- порты `127.0.0.1:3010` (web) и `127.0.0.1:3011` (api) — через `API_PORT`/`WEB_PORT`; 3000/3001
+  остаются для `pnpm dev`;
+- `APP_URL` и `CORS_ORIGINS` — `https://hair-lab.dnikulshin.ru:8443` (порт обязателен);
+- `PAYMENTS_MODE=off` до появления тестовых ключей ЮKassa; адрес уведомлений в кабинете:
+  `https://hair-lab.dnikulshin.ru:8443/api/payments/webhooks/yookassa`
+  (`PAYMENTS_MODE=test` — когда ключи лежат в `.env` на хосте).
+
+Файл `/opt/hair-lab-staging/.env` (не в git). Образы локальные, поэтому `GHCR_IMAGE_*` —
+локальные имена, а `IMAGE_TAG=local`; секретов нет, кроме пароля БД:
 
 ```bash
-sudo cp deploy/nginx/hair-lab.conf.example /etc/nginx/sites-available/hair-lab
-# заменить домен и пути сертификатов, затем
-sudo ln -s /etc/nginx/sites-available/hair-lab /etc/nginx/sites-enabled/
-sudo certbot --nginx -d strizhlab.ru -d www.strizhlab.ru
+GHCR_IMAGE_API=hair-lab-api
+GHCR_IMAGE_WEB=hair-lab-web
+GHCR_IMAGE_MIGRATIONS=hair-lab-api-migrations
+IMAGE_TAG=local
+POSTGRES_USER=hair_lab
+POSTGRES_PASSWORD=<openssl rand -hex 24>
+API_PORT=3011
+WEB_PORT=3010
+APP_URL=https://hair-lab.dnikulshin.ru:8443
+CORS_ORIGINS=https://hair-lab.dnikulshin.ru:8443
+PAYMENTS_MODE=off
+SMTP_HOST=
+SALON_TIMEZONE=Europe/Moscow
+LOG_LEVEL=info
+```
+
+Образы собираются локально, тег `local`. Порт вшивается в `NEXT_PUBLIC_*` на сборке web:
+
+```bash
+docker build -f apps/api/Dockerfile -t hair-lab-api:local .
+docker build -f apps/api/Dockerfile --target migrations -t hair-lab-api-migrations:local .
+docker build -f apps/web/Dockerfile -t hair-lab-web:local \
+  --build-arg NEXT_PUBLIC_SITE_NAME="Стриж Lab" \
+  --build-arg NEXT_PUBLIC_SITE_URL="https://hair-lab.dnikulshin.ru:8443" \
+  --build-arg NEXT_PUBLIC_API_URL="https://hair-lab.dnikulshin.ru:8443/api" .
+```
+
+`docker compose pull` в этом разделе не нужен и только помешал бы: локальные образы
+`hair-lab-*:local` он попытался бы тянуть из Docker Hub. Образ `postgres:17-alpine` (сервис `db`)
+compose подтянет сам при `up`. `pull` нужен только в разделе 5 — там образы приходят из GHCR.
+Порядок запуска — миграции, затем контейнеры:
+
+```bash
+cd /opt/hair-lab-staging
+docker compose -f docker-compose.prod.yml run --rm -T migrations
+docker compose -f docker-compose.prod.yml up -d --remove-orphans
+curl -sS https://hair-lab.dnikulshin.ru:8443/api/health   # {"status":"ok",...}
+```
+
+## 6. nginx и TLS
+
+nginx на хосте — единственная точка входа, контейнеры опубликованы только на loopback.
+Шаблон: `deploy/nginx/hair-lab.conf.example` (плейсхолдеры домена и сертификатов), для этой
+машины — `deploy/nginx/hair-lab.staging.dnikulshin.ru.conf` (копируется без правок).
+
+**Сертификат.** Let's Encrypt: либо wildcard `*.dnikulshin.ru` (на этом хосте —
+`/etc/ssl/dnikulshin/fullchain.pem` и `/etc/ssl/dnikulshin/key.pem`, отдельное имя поддомена уже
+покрыто), либо обычный на конкретное имя (`/etc/letsencrypt/live/<домен>/fullchain.pem` и
+`privkey.pem`, выпуск — `certbot`). Пути в конфиге должны указывать на реальные файлы. На этой
+машине используется только wildcard из `/etc/ssl/dnikulshin/`: `certbot` не установлен,
+`/etc/letsencrypt` отсутствует, поэтому пути `/etc/letsencrypt/...` из шаблона сюда не годятся.
+
+**Установка.**
+
+Staging на этой машине — готовый конфиг `deploy/nginx/hair-lab.staging.dnikulshin.ru.conf`,
+правок не требует (домен, wildcard-сертификат и порты 3010/3011 уже заданы):
+
+```bash
+sudo cp deploy/nginx/hair-lab.staging.dnikulshin.ru.conf \
+        /etc/nginx/sites-available/hair-lab-staging
+sudo ln -sf /etc/nginx/sites-available/hair-lab-staging /etc/nginx/sites-enabled/hair-lab-staging
 sudo nginx -t && sudo systemctl reload nginx
 ```
 
-Проверка: сайт по https, `https://<домен>/api/health` → `{"status":"ok"}`,
-`http://127.0.0.1:3001` снаружи недоступен.
+Прод или другой хост — шаблон с плейсхолдерами: заменить домен и пути к сертификатам
+(`/etc/letsencrypt/...` в примере — образец; для этого варианта сертификат выпускает `certbot`
+или он уже есть), затем включить и проверить:
+
+```bash
+sudo cp deploy/nginx/hair-lab.conf.example /etc/nginx/sites-available/hair-lab
+sudoedit /etc/nginx/sites-available/hair-lab   # server_name + ssl_certificate / ssl_certificate_key
+sudo ln -sf /etc/nginx/sites-available/hair-lab /etc/nginx/sites-enabled/hair-lab
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+**Проверка.** С хоста — с подменой резолва, снаружи — по публичному адресу:
+
+```bash
+curl -sSI --resolve hair-lab.dnikulshin.ru:443:127.0.0.1 https://hair-lab.dnikulshin.ru/ | head
+curl -sS  --resolve hair-lab.dnikulshin.ru:443:127.0.0.1 https://hair-lab.dnikulshin.ru/api/health
+curl -sS https://hair-lab.dnikulshin.ru:8443/api/health   # снаружи, staging
+```
+
+Ожидаемо: 200 на `/`, `{"status":"ok",...}` на `/api/health`, заголовки безопасности в ответе,
+статика из `/_next/static/` — с `Cache-Control: public, max-age=31536000, immutable`.
+`http://127.0.0.1:3001` (api) снаружи недоступен.
+
+**`X-Forwarded-For` перезаписывается, а не дописывается.** api работает с `trustProxy: true`
+и берёт `request.ip` из левого значения заголовка, а по этому адресу проверяется allowlist
+вебхука ЮKassa. С `$proxy_add_x_forwarded_for` клиент подделывает адрес одним заголовком и
+обходит allowlist — поэтому в конфиге `proxy_set_header X-Forwarded-For $remote_addr` и в `/api/`,
+и в `/` (ADR-0005), а сам api не должен быть доступен в обход прокси.
+
+**ЮKassa и порты.** Адрес уведомлений и `return_url` у провайдера — только HTTPS на 443 или 8443.
+Если 443 наружу не проброшен, публикуется 8443 → локальный 443: это штатный для ЮKassa вариант,
+порт при этом входит в `APP_URL`, `CORS_ORIGINS`, `NEXT_PUBLIC_*` и в адрес вебхука.
 
 ## Что ещё не сделано
 
-- Применение nginx-конфига на VPS (файл в репозитории, установка — вручную).
+- Обновление wildcard-сертификата `*.dnikulshin.ru` на этом хосте не автоматизировано: `certbot`
+  не установлен, `/etc/letsencrypt` отсутствует. Где и как сертификат выпускался
+  (DNS-01) — открытый вопрос к владельцу; срок действия текущего — до 2027-01-30.
 - Откат: `IMAGE_TAG=<предыдущий sha> docker compose up -d`; процедура будет описана после первого релиза.
