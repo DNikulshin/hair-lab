@@ -10,6 +10,8 @@ import {
   InvalidCursorError,
   listAccountBookings,
 } from './account-bookings.service';
+import { BOOKING_CANCELLATION_TYPE } from './booking-cancellation.email';
+import { BOOKING_CONFIRMATION_TYPE } from './booking-confirmation.email';
 
 /**
  * Unit-тесты кабинета клиента без PostgreSQL: стаб `Db` реализует ровно те операции,
@@ -44,6 +46,7 @@ interface Row {
   durationMin: number;
   clientName: string;
   clientPhone: string;
+  clientEmail: string | null;
   cancelReason: string | null;
   updatedAt: Date;
   master: { fullName: string };
@@ -61,6 +64,7 @@ function row(overrides: Partial<Row> = {}): Row {
     durationMin: 60,
     clientName: 'Тестовая Клиентка',
     clientPhone: '+79123456789',
+    clientEmail: 'guest@example.invalid',
     cancelReason: null,
     updatedAt: new Date('2030-01-01T00:00:00.000Z'),
     master: { fullName: 'Тестовый Мастер' },
@@ -70,6 +74,16 @@ function row(overrides: Partial<Row> = {}): Row {
 }
 
 type Where = Record<string, unknown>;
+
+/** Строка outbox в стабе: проверяет, какие письма ставит и снимает сервис. */
+interface OutboxRow {
+  id: string;
+  type: string;
+  appointmentId: string | null;
+  status: 'pending' | 'sent' | 'failed' | 'suppressed';
+  lastError: string | null;
+  payload: unknown;
+}
 
 /** Сравнение значений: для дат — по времени, для строк — по порядку (как в Postgres). */
 function compare(actual: unknown, boundary: unknown): number {
@@ -117,10 +131,11 @@ function direction(orders: OrderBy | OrderBy[], key: keyof OrderBy): 1 | -1 {
 }
 
 /**
- * Стаб `Db` над массивом строк. `updatedAt` при отмене двигается — так тест видит,
- * переписывалась ли запись на повторном запросе.
+ * Стаб `Db` над массивами строк. `updatedAt` при отмене двигается — так тест видит,
+ * переписывалась ли запись на повторном запросе. `$transaction` выполняет колбэк над тем же
+ * стабом: транзакция в тесте без БД не нужна, важно, какие запросы делает сервис.
  */
-function createDbStub(rows: Row[]) {
+function createDbStub(rows: Row[], outboxRows: OutboxRow[] = []) {
   const updateMany = vi.fn(async (args: { where: Where; data: Partial<Row> }) => {
     const matched = rows.filter((record) => matches(record, args.where));
     for (const record of matched) Object.assign(record, args.data, { updatedAt: NOW });
@@ -129,6 +144,12 @@ function createDbStub(rows: Row[]) {
 
   const findFirst = vi.fn(async (args: { where: Where }) => {
     return rows.find((record) => matches(record, args.where)) ?? null;
+  });
+
+  const findFirstOrThrow = vi.fn(async (args: { where: Where }) => {
+    const found = rows.find((record) => matches(record, args.where));
+    if (found === undefined) throw new Error('запись не найдена');
+    return found;
   });
 
   const findMany = vi.fn(
@@ -146,8 +167,40 @@ function createDbStub(rows: Row[]) {
     },
   );
 
-  const db = { appointment: { updateMany, findFirst, findMany } } as unknown as Db;
-  return { db, updateMany, findFirst, findMany };
+  const outboxUpdateMany = vi.fn(async (args: { where: Where; data: Partial<OutboxRow> }) => {
+    const matched = outboxRows.filter((record) => matches(record as unknown as Row, args.where));
+    for (const record of matched) Object.assign(record, args.data);
+    return { count: matched.length };
+  });
+
+  // Создание письма: production-код не задаёт `lastError` — его ставит дефолт колонки.
+  const outboxCreate = vi.fn(
+    async (args: { data: { type: string; appointmentId: string | null; payload: unknown } }) => {
+      const created: OutboxRow = {
+        id: `00000000-0000-4000-8000-0000000000${String(outboxRows.length + 1).padStart(2, '0')}`,
+        status: 'pending',
+        lastError: null,
+        ...args.data,
+      };
+      outboxRows.push(created);
+      return created;
+    },
+  );
+
+  const db = {
+    appointment: { updateMany, findFirst, findFirstOrThrow, findMany },
+    outboxMessage: { updateMany: outboxUpdateMany, create: outboxCreate },
+    $transaction: async <T>(fn: (tx: Db) => Promise<T>): Promise<T> => fn(db as unknown as Db),
+  } as unknown as Db;
+  return {
+    db,
+    updateMany,
+    findFirst,
+    findMany,
+    outboxRows,
+    outboxUpdateMany,
+    outboxCreate,
+  };
 }
 
 function query(overrides: Partial<AccountBookingsQuery> = {}): AccountBookingsQuery {
@@ -270,6 +323,163 @@ describe('cancelAccountBooking: DTO отменённой записи', () => {
     });
     expect(Object.keys(booking)).not.toContain('clientPhone');
     expect(Object.keys(booking)).not.toContain('clientEmail');
+  });
+});
+
+describe('cancelAccountBooking: письма об отмене', () => {
+  let outboxSeq = 0;
+
+  /** Строка outbox: по умолчанию pending-подтверждение этой записи. */
+  function outboxRow(overrides: Partial<OutboxRow> = {}): OutboxRow {
+    outboxSeq += 1;
+    return {
+      id: `00000000-0000-4000-8000-0000000001${String(outboxSeq).padStart(2, '0')}`,
+      type: BOOKING_CONFIRMATION_TYPE,
+      appointmentId: BOOKING_ID,
+      status: 'pending',
+      lastError: null,
+      payload: {},
+      ...overrides,
+    };
+  }
+
+  it('отмена ставит booking_cancellation и снимает только pending-подтверждение', async () => {
+    const pendingConfirmation = outboxRow();
+    const alreadySent = outboxRow({ status: 'sent' });
+    const { db, outboxRows, outboxCreate, outboxUpdateMany } = createDbStub(
+      [row()],
+      [pendingConfirmation, alreadySent],
+    );
+
+    const booking = await cancelAccountBooking(db, CLIENT_ID, BOOKING_ID, NOW);
+
+    expect(booking.status).toBe('cancelled');
+
+    // Снято только pending-подтверждение: условие — appointmentId ∧ type ∧ status.
+    expect(outboxUpdateMany).toHaveBeenCalledTimes(1);
+    expect(outboxUpdateMany.mock.calls[0]?.[0]).toEqual({
+      where: {
+        appointmentId: BOOKING_ID,
+        type: BOOKING_CONFIRMATION_TYPE,
+        status: 'pending',
+      },
+      data: { status: 'suppressed', lastError: 'cancelled' },
+    });
+    expect(pendingConfirmation.status).toBe('suppressed');
+    expect(pendingConfirmation.lastError).toBe('cancelled');
+    // Уже отправленное подтверждение не переписываем.
+    expect(alreadySent.status).toBe('sent');
+
+    // Письмо об отмене — одно, со снимком записи и почтой клиента.
+    expect(outboxCreate).toHaveBeenCalledTimes(1);
+    expect(outboxRows).toHaveLength(3);
+    expect(outboxRows[2]).toEqual({
+      id: expect.any(String),
+      type: BOOKING_CANCELLATION_TYPE,
+      appointmentId: BOOKING_ID,
+      status: 'pending',
+      lastError: null,
+      payload: {
+        clientName: 'Тестовая Клиентка',
+        clientEmail: 'guest@example.invalid',
+        serviceName: 'Стрижка',
+        masterName: 'Тестовый Мастер',
+        startsAt: CANCELABLE_STARTS_AT.toISOString(),
+        endsAt: new Date(CANCELABLE_STARTS_AT.getTime() + 60 * MINUTE_MS).toISOString(),
+        priceKopecks: 350_000,
+        durationMin: 60,
+      },
+    });
+  });
+
+  it('без почты клиента подтверждение снимается, письма нет', async () => {
+    const confirmation = outboxRow();
+    const { db, outboxRows, outboxCreate, outboxUpdateMany } = createDbStub(
+      [row({ clientEmail: null })],
+      [confirmation],
+    );
+
+    const booking = await cancelAccountBooking(db, CLIENT_ID, BOOKING_ID, NOW);
+
+    expect(booking.status).toBe('cancelled');
+    expect(confirmation.status).toBe('suppressed');
+    expect(outboxUpdateMany).toHaveBeenCalledTimes(1);
+    expect(outboxCreate).not.toHaveBeenCalled();
+    expect(outboxRows).toHaveLength(1);
+  });
+
+  it('пустая почта клиента не даёт письма', async () => {
+    const { db, outboxCreate } = createDbStub([row({ clientEmail: '   ' })]);
+
+    await cancelAccountBooking(db, CLIENT_ID, BOOKING_ID, NOW);
+
+    expect(outboxCreate).not.toHaveBeenCalled();
+  });
+
+  it('повторная отмена (200) не ставит писем и не трогает существующие', async () => {
+    const confirmation = outboxRow({ status: 'suppressed', lastError: 'cancelled' });
+    const cancellation = outboxRow({
+      type: BOOKING_CANCELLATION_TYPE,
+      payload: { clientEmail: 'guest@example.invalid' },
+    });
+    const { db, outboxRows, outboxCreate, outboxUpdateMany } = createDbStub(
+      [row({ status: 'cancelled', cancelReason: CANCEL_REASON })],
+      [confirmation, cancellation],
+    );
+
+    const booking = await cancelAccountBooking(db, CLIENT_ID, BOOKING_ID, NOW);
+
+    expect(booking.status).toBe('cancelled');
+    expect(outboxUpdateMany).not.toHaveBeenCalled();
+    expect(outboxCreate).not.toHaveBeenCalled();
+    expect(outboxRows).toHaveLength(2);
+    expect(confirmation.status).toBe('suppressed');
+    expect(cancellation.status).toBe('pending');
+  });
+
+  it('409 (дедлайн, прошедшая, completed, no_show) не трогает outbox', async () => {
+    const variants: Array<Partial<Row>> = [
+      { startsAt: new Date(NOW.getTime() + CANCEL_MIN_LEAD_MS - 1) },
+      { startsAt: new Date(NOW.getTime() - DAY_MS) },
+      { status: 'completed' },
+      { status: 'no_show' },
+    ];
+
+    for (const overrides of variants) {
+      const confirmation = outboxRow();
+      const { db, outboxRows, outboxCreate, outboxUpdateMany } = createDbStub(
+        [row(overrides)],
+        [confirmation],
+      );
+
+      await expect(cancelAccountBooking(db, CLIENT_ID, BOOKING_ID, NOW)).rejects.toBeInstanceOf(
+        BookingNotCancellableError,
+      );
+
+      expect(outboxUpdateMany).not.toHaveBeenCalled();
+      expect(outboxCreate).not.toHaveBeenCalled();
+      expect(outboxRows).toHaveLength(1);
+      expect(confirmation.status).toBe('pending');
+    }
+  });
+
+  it('404 (чужая или несуществующая запись) не трогает outbox', async () => {
+    const foreign = outboxRow();
+    const foreignStub = createDbStub([row({ clientId: OTHER_CLIENT_ID })], [foreign]);
+
+    await expect(
+      cancelAccountBooking(foreignStub.db, CLIENT_ID, BOOKING_ID, NOW),
+    ).rejects.toBeInstanceOf(AccountBookingNotFoundError);
+    expect(foreignStub.outboxUpdateMany).not.toHaveBeenCalled();
+    expect(foreignStub.outboxCreate).not.toHaveBeenCalled();
+    expect(foreign.status).toBe('pending');
+
+    const unknownStub = createDbStub([], [outboxRow()]);
+    await expect(
+      cancelAccountBooking(unknownStub.db, CLIENT_ID, BOOKING_ID, NOW),
+    ).rejects.toBeInstanceOf(AccountBookingNotFoundError);
+    expect(unknownStub.outboxUpdateMany).not.toHaveBeenCalled();
+    expect(unknownStub.outboxCreate).not.toHaveBeenCalled();
   });
 });
 

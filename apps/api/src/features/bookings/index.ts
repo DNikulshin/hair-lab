@@ -8,6 +8,11 @@ export {
 } from './account-bookings.service';
 export { bookingRoutes } from './bookings.routes';
 export {
+  BOOKING_CANCELLATION_TYPE,
+  createBookingCancellationTemplate,
+  type BookingCancellationContext,
+} from './booking-cancellation.email';
+export {
   BOOKING_CONFIRMATION_TYPE,
   createBookingConfirmationTemplate,
   type BookingConfirmationContext,

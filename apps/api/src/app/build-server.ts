@@ -14,7 +14,9 @@ import {
 import {
   accountBookingsRoutes,
   bookingRoutes,
+  createBookingCancellationTemplate,
   createBookingConfirmationTemplate,
+  BOOKING_CANCELLATION_TYPE,
   BOOKING_CONFIRMATION_TYPE,
 } from '../features/bookings';
 import { catalogRoutes } from '../features/catalog';
@@ -60,6 +62,11 @@ export async function buildServer() {
       delivery: tokenDelivery,
     }),
     [BOOKING_CONFIRMATION_TYPE]: createBookingConfirmationTemplate({
+      timezone: env.SALON_TIMEZONE,
+      fromName: env.SMTP_FROM_NAME,
+      fromEmail: env.SMTP_FROM_EMAIL,
+    }),
+    [BOOKING_CANCELLATION_TYPE]: createBookingCancellationTemplate({
       timezone: env.SALON_TIMEZONE,
       fromName: env.SMTP_FROM_NAME,
       fromEmail: env.SMTP_FROM_EMAIL,

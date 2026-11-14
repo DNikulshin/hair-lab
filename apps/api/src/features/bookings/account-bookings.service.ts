@@ -6,6 +6,8 @@ import type {
 } from '@hair-lab/contracts';
 import { idSchema, isoDateTimeSchema, maskPhone } from '@hair-lab/contracts';
 import type { Db } from '../../shared/db';
+import { BOOKING_CANCELLATION_TYPE } from './booking-cancellation.email';
+import { BOOKING_CONFIRMATION_TYPE } from './booking-confirmation.email';
 
 /**
  * Кабинет клиента: свои записи и отмена по правилам салона.
@@ -23,7 +25,8 @@ import type { Db } from '../../shared/db';
  * Условия отмены проверяются одним `UPDATE ... WHERE`: гонка между проверкой и записью
  * невозможна, проигравший запрос видит уже актуальное состояние строки.
  *
- * ПДн: телефон клиента в DTO не выходит — только маска; почта не читается вовсе.
+ * ПДн: телефон клиента в DTO не выходит — только маска; почта читается только при состоявшейся
+ * отмене и только для письма (в DTO и в списках её нет).
  */
 
 /** Дедлайн отмены: не позже чем за два часа до начала приёма. */
@@ -31,6 +34,12 @@ export const CANCEL_MIN_LEAD_MS = 2 * 60 * 60_000;
 
 /** Причина отмены, которую ставит сервер: клиент её не присылает. */
 export const CANCEL_REASON = 'cancelled_by_client';
+
+/**
+ * Код причины в `outbox_messages.last_error` для подавлённого подтверждения.
+ * Короткий код без содержимого письма и без ПДн: значение видно в БД и админ-инструментах.
+ */
+const CANCELLATION_SUPPRESS_REASON = 'cancelled';
 
 /** Статусы, в которых запись ещё «живая»: её можно ждать и (по сроку) отменить. */
 const ACTIVE_STATUSES: BookingStatus[] = ['pending', 'confirmed'];
@@ -94,6 +103,15 @@ const accountBookingSelect = {
   clientPhone: true,
   master: { select: { fullName: true } },
   service: { select: { name: true } },
+} as const;
+
+/**
+ * Выборка для состоявшейся отмены: те же поля, что в DTO, плюс почта — она нужна только
+ * письму об отмене. Для классификации 404/200/409 почта не читается (см. `accountBookingSelect`).
+ */
+const cancelledBookingSelect = {
+  ...accountBookingSelect,
+  clientEmail: true,
 } as const;
 
 /** Активная запись с достаточным запасом времени: её можно отменить. */
@@ -213,10 +231,23 @@ export async function listAccountBookings(
  * владелец проверяется в самом `WHERE` (до чтения), поэтому гонка «проверили → отменили»
  * невозможна, а чужая запись не может быть изменена даже теоретически.
  *
+ * Отмена и письма — одной транзакцией. Если `updateMany` обновил строку (`count === 1`),
+ * то `pending`-подтверждение становится `suppressed` (диспетчер берёт только `pending`),
+ * а при непустой почте клиента ставится письмо `booking_cancellation` со снимком записи на
+ * момент отмены. Идемпотентность даёт тот же условный `updateMany`: повторная отмена видит,
+ * что строка уже не активна, обновить её не может и писем не ставит.
+ *
  * Если ни одна строка не обновилась, перечитываем запись по `id`, чтобы объяснить причину:
  * нет записи или другой владелец → 404 (наличие чужих записей не раскрываем);
  * уже `cancelled` → 200 идемпотентно, без перезаписи `cancelReason` и `updatedAt`;
  * иначе (срок вышел, прошедшая, `completed`, `no_show`) → 409 `conflict`.
+ * В этих случаях outbox не трогаем вовсе.
+ *
+ * Известное ограничение (принято, отдельного локинга нет): если фоновый диспетчер уже забрал
+ * `pending`-подтверждение в текущем тике (окно ~10 с, `TICK_INTERVAL_MS`), письмо «запись создана»
+ * может уйти после отмены: `claim` и `markSent` работают по `id` без проверки статуса.
+ * Один экземпляр API и интервал тика делают окно коротким; блокировка строки outbox ради этого
+ * не вводится (AGENTS.md, допущения о развёртывании).
  */
 export async function cancelAccountBooking(
   db: Db,
@@ -224,25 +255,69 @@ export async function cancelAccountBooking(
   id: string,
   now: Date = new Date(),
 ): Promise<AccountBooking> {
-  const updated = await db.appointment.updateMany({
-    where: {
-      id,
-      clientId,
-      status: { in: ACTIVE_STATUSES },
-      startsAt: { gte: new Date(now.getTime() + CANCEL_MIN_LEAD_MS) },
-    },
-    data: { status: 'cancelled', cancelReason: CANCEL_REASON },
+  const row = await db.$transaction(async (tx) => {
+    const updated = await tx.appointment.updateMany({
+      where: {
+        id,
+        clientId,
+        status: { in: ACTIVE_STATUSES },
+        startsAt: { gte: new Date(now.getTime() + CANCEL_MIN_LEAD_MS) },
+      },
+      data: { status: 'cancelled', cancelReason: CANCEL_REASON },
+    });
+
+    if (updated.count === 1) {
+      // Отмена состоялась: читаем снимок для письма (включая почту) — запись уже cancelled,
+      // поэтому повторный запрос в эту ветку не попадёт и дубля письма не будет.
+      const snapshot = await tx.appointment.findFirstOrThrow({
+        where: { id, clientId },
+        select: cancelledBookingSelect,
+      });
+
+      // Подтверждение уже неуместно: `pending` → `suppressed` с коротким кодом причины.
+      // Прочие статусы (sent, failed) не трогаем: письмо либо уже ушло, либо не уйдёт.
+      await tx.outboxMessage.updateMany({
+        where: { appointmentId: id, type: BOOKING_CONFIRMATION_TYPE, status: 'pending' },
+        data: { status: 'suppressed', lastError: CANCELLATION_SUPPRESS_REASON },
+      });
+
+      // Без почты клиента письмо поставить некуда: подтверждение всё равно снято.
+      const clientEmail = snapshot.clientEmail?.trim() ?? '';
+      if (clientEmail !== '') {
+        await tx.outboxMessage.create({
+          data: {
+            type: BOOKING_CANCELLATION_TYPE,
+            appointmentId: id,
+            payload: {
+              clientName: snapshot.clientName,
+              clientEmail,
+              serviceName: snapshot.service.name,
+              masterName: snapshot.master.fullName,
+              startsAt: snapshot.startsAt.toISOString(),
+              endsAt: snapshot.endsAt.toISOString(),
+              priceKopecks: snapshot.priceKopecks,
+              durationMin: snapshot.durationMin,
+            },
+          },
+        });
+      }
+
+      return snapshot;
+    }
+
+    // Строка не обновилась: перечитываем только поля DTO (почта тут не нужна) и объясняем причину.
+    const existing = await tx.appointment.findFirst({
+      where: { id, clientId },
+      select: accountBookingSelect,
+    });
+
+    // Собственную запись не нашли: её нет или она принадлежит другому клиенту.
+    if (existing === null) throw new AccountBookingNotFoundError();
+
+    if (existing.status !== 'cancelled') throw new BookingNotCancellableError();
+
+    return existing;
   });
-
-  const row = await db.appointment.findFirst({
-    where: { id, clientId },
-    select: accountBookingSelect,
-  });
-
-  // Собственную запись не нашли: её нет или она принадлежит другому клиенту.
-  if (row === null) throw new AccountBookingNotFoundError();
-
-  if (updated.count === 0 && row.status !== 'cancelled') throw new BookingNotCancellableError();
 
   return toAccountBookingDto(row, now);
 }
