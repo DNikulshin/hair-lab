@@ -7,6 +7,7 @@ import {
   type LoginRequest,
   type RegisterRequest,
 } from '@hair-lab/contracts';
+import { withBasePath } from '@/shared/config/api';
 
 export type AuthFailure = { kind: 'network' } | { kind: 'http'; status: number; body: unknown };
 export type AuthResult = { ok: true; data: AuthResponse } | { ok: false; failure: AuthFailure };
@@ -14,7 +15,7 @@ export type MagicLinkRequestResult = { ok: true } | { ok: false; failure: AuthFa
 
 async function postJson(path: string, body: unknown): Promise<Response | null> {
   try {
-    return await fetch(path, {
+    return await fetch(withBasePath(path), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),

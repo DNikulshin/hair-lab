@@ -8,7 +8,8 @@ import { siteConfig } from './site';
  * внутренний адрес `http://api:3001`, при локальной разработке — `http://localhost:3001`.
  * Если переменная не задана, используется публичный адрес из `NEXT_PUBLIC_API_URL`.
  *
- * В клиентские компоненты этот модуль не импортируем: браузер ходит на публичный адрес.
+ * Клиентская часть — только `withBasePath` (см. ниже): браузер ходит на относительные пути
+ * внутри своего origin, префикс добавляется по `basePath`.
  */
 function resolveBaseUrl(): string {
   const fromEnv = process.env.API_URL?.trim();
@@ -22,3 +23,27 @@ export const apiConfig = {
 } as const;
 
 export type ApiConfig = typeof apiConfig;
+
+/**
+ * Префикс для **клиентских** запросов к внутренним route handlers: браузерный `fetch`
+ * не знает про `basePath` (Next добавляет его только к `<Link>` и маршрутам).
+ *
+ * Значение встраивается на сборке из `NEXT_BASE_PATH` (см. `next.config.ts`).
+ * Пустая база — путь не меняется: прод и тесты работают как раньше.
+ */
+const CLIENT_BASE_PATH = (process.env.NEXT_PUBLIC_BASE_PATH ?? '').replace(/\/+$/, '');
+
+/**
+ * Чистая функция для тестов: добавляет базу к абсолютному пути.
+ * Относительные пути и `http(s)://` не трогаем — их смысл не зависит от базы.
+ */
+export function applyBasePath(base: string, path: string): string {
+  const normalized = base.replace(/\/+$/, '');
+  if (normalized === '' || !path.startsWith('/')) return path;
+  return `${normalized}${path}`;
+}
+
+/** Добавляет `basePath` к абсолютному пути: `/api/slots` → `/absproxy/3002/api/slots`. */
+export function withBasePath(path: string): string {
+  return applyBasePath(CLIENT_BASE_PATH, path);
+}

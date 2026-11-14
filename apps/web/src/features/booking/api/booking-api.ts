@@ -1,3 +1,4 @@
+import { withBasePath } from '@/shared/config/api';
 import {
   bookingResponseSchema,
   type Booking,
@@ -43,7 +44,10 @@ export async function fetchSlots(params: SlotsRequest, signal?: AbortSignal): Pr
 
   let response: Response;
   try {
-    response = await fetch(`/api/slots?${search.toString()}`, { signal, cache: 'no-store' });
+    response = await fetch(withBasePath(`/api/slots?${search.toString()}`), {
+      signal,
+      cache: 'no-store',
+    });
   } catch {
     return { ok: false, unavailable: true };
   }
@@ -73,7 +77,7 @@ export async function fetchSlots(params: SlotsRequest, signal?: AbortSignal): Pr
 export async function submitBooking(body: CreateBooking): Promise<SubmitBookingResult> {
   let response: Response;
   try {
-    response = await fetch('/api/bookings', {
+    response = await fetch(withBasePath('/api/bookings'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
