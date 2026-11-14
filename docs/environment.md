@@ -4,7 +4,7 @@
 
 | Что        | Версия                  | Откуда                                     |
 | ---------- | ----------------------- | ------------------------------------------ |
-| Node.js    | 22.x (см. `.nvmrc`)     | `engines` в корневом `package.json`        |
+| Node.js    | 26.x (см. `.nvmrc`)     | `engines` в корневом `package.json`        |
 | pnpm       | 9.x                     | `packageManager` в корневом `package.json` |
 | PostgreSQL | 16+ (локально — Docker) | `docker-compose.yml`                       |
 | Docker     | любой с compose         | локальная БД                               |

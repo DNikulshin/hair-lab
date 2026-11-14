@@ -5,10 +5,12 @@
 #
 # Слои разделены намеренно: `deps` копирует только манифесты воркспейса, поэтому слой
 # `pnpm install` переиспользуется, пока не изменились lockfile или package.json пакетов.
-FROM node:22-alpine AS base
+FROM node:26-alpine AS base
 ENV PNPM_HOME=/pnpm
 ENV PATH=$PNPM_HOME:$PATH
-RUN corepack enable
+# В Node 25+ Corepack больше не входит в дистрибутив, поэтому pnpm ставим через npm.
+# Версия должна совпадать с `packageManager` в корневом package.json.
+RUN npm install -g pnpm@9.15.0
 WORKDIR /repo
 
 FROM base AS deps
@@ -48,7 +50,7 @@ COPY apps/web apps/web
 RUN pnpm --filter @hair-lab/contracts build \
  && pnpm --filter @hair-lab/web build
 
-FROM node:22-alpine AS runner
+FROM node:26-alpine AS runner
 ENV NODE_ENV=production
 ENV PORT=3000
 ENV HOSTNAME=0.0.0.0
