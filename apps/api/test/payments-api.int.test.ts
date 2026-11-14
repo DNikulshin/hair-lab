@@ -13,6 +13,7 @@ import {
   type CreatePaymentInput,
   type CreateRefundInput,
   type GatewayPaymentStatus,
+  type GatewayRefundStatus,
   type PaymentGateway,
 } from '../src/features/payments';
 import { env } from '../src/shared/config/env';
@@ -43,10 +44,14 @@ interface FakeGatewayControls {
   status: GatewayPaymentStatus;
   /** Сумма в ответе перезапроса; `null` — сумма из создания платежа. */
   amountKopecks: number | null;
+  /** `getPayment` падает: перезапрос состояния недоступен, уведомление не обработано. */
+  failGetPayment: boolean;
   /** `createPayment` падает: ветка компенсации и ответ 502. */
   failCreatePayment: boolean;
   /** `createRefund` падает: API возвратов недоступен, обязанность фиксируется флагом. */
   failCreateRefund: boolean;
+  /** Статус, который вернёт `createRefund`: по умолчанию возврат завершён. */
+  refundStatus: GatewayRefundStatus;
 }
 
 interface FakeGateway {
@@ -69,8 +74,10 @@ function createFakeGateway(): FakeGateway {
   const controls: FakeGatewayControls = {
     status: 'succeeded',
     amountKopecks: null,
+    failGetPayment: false,
     failCreatePayment: false,
     failCreateRefund: false,
+    refundStatus: 'succeeded',
   };
   const calls: FakeGateway['calls'] = { createPayment: [], getPayment: [], createRefund: [] };
 
@@ -89,6 +96,7 @@ function createFakeGateway(): FakeGateway {
     },
     async getPayment(id) {
       calls.getPayment.push(id);
+      if (controls.failGetPayment) throw new Error('ЮKassa недоступна');
       const status = controls.status;
       return {
         id,
@@ -102,7 +110,7 @@ function createFakeGateway(): FakeGateway {
       if (controls.failCreateRefund) throw new Error('API возвратов недоступен');
       return {
         refundId: `refund-${String(calls.createRefund.length).padStart(4, '0')}`,
-        status: 'ok',
+        status: controls.refundStatus,
       };
     },
   };
@@ -119,8 +127,10 @@ const paidApp = await buildServer({ payments: { enabled: true, gateway: fake.gat
 beforeEach(() => {
   fake.controls.status = 'succeeded';
   fake.controls.amountKopecks = null;
+  fake.controls.failGetPayment = false;
   fake.controls.failCreatePayment = false;
   fake.controls.failCreateRefund = false;
+  fake.controls.refundStatus = 'succeeded';
   fake.calls.createPayment.length = 0;
   fake.calls.getPayment.length = 0;
   fake.calls.createRefund.length = 0;
@@ -524,6 +534,177 @@ describe('POST /payments/webhooks/yookassa', () => {
     expect((await appointmentOf(salon.masterId)).status).toBe('cancelled');
     // Отменённая запись письма не получает.
     expect(await countOutboxFor(db, appointment.id)).toBe(0);
+  });
+
+  it('сбой перезапроса платежа — 500, повторная доставка доводит оплату', async () => {
+    const { salon } = await bookFirstSlot(paidApp);
+    const appointment = await appointmentOf(salon.masterId);
+    const payment = await paymentOf(appointment.id);
+    const yookassaPaymentId = payment.yookassaPaymentId as string;
+
+    // ЮKassa недоступна на перезапрос состояния. Ответ 200 здесь — потерянные деньги: ЮKassa
+    // больше не повторила бы уведомление, запись осталась бы `pending`, свипер отменил бы холд,
+    // а факт оплаты так и не был бы зафиксирован — возврат запускать не по чему.
+    fake.controls.failGetPayment = true;
+    const failed = await postWebhook(
+      paidApp,
+      webhookBody(yookassaPaymentId, 'payment.succeeded'),
+      ALLOWED_IP,
+    );
+
+    expect(failed.statusCode).toBe(500);
+    expect(errorCode(failed.json())).toBe('internal_error');
+    // Состояние не тронуто: ни подтверждения, ни письма, ни возврата.
+    expect((await appointmentOf(salon.masterId)).status).toBe('pending');
+    expect((await paymentOf(appointment.id)).status).toBe('pending');
+    expect(await countOutboxFor(db, appointment.id)).toBe(0);
+    expect(fake.calls.createRefund).toHaveLength(0);
+
+    // 5xx заставляет ЮKassa повторить доставку (до 24 часов): повтор при живом шлюзе обрабатывается.
+    fake.controls.failGetPayment = false;
+    const repeated = await postWebhook(
+      paidApp,
+      webhookBody(yookassaPaymentId, 'payment.succeeded'),
+      ALLOWED_IP,
+    );
+
+    expect(repeated.statusCode).toBe(200);
+    expect((await appointmentOf(salon.masterId)).status).toBe('confirmed');
+    expect((await paymentOf(appointment.id)).status).toBe('succeeded');
+    expect(await countOutboxFor(db, appointment.id)).toBe(1);
+  });
+
+  it('опоздавшая оплата при незавершённом возврате: флаг остаётся, свипер добивает возврат', async () => {
+    const { salon } = await bookFirstSlot(paidApp);
+    const appointment = await appointmentOf(salon.masterId);
+    const payment = await paymentOf(appointment.id);
+    const yookassaPaymentId = payment.yookassaPaymentId as string;
+
+    // Холд истёк: запись отменена, платёж снят. Клиент всё равно платит.
+    const sweeper = createTestSweeper();
+    const tick = await sweeper.tick(new Date(Date.now() + (PAYMENT_HOLD_MINUTES + 5) * MINUTE_MS));
+    expect(tick).toMatchObject({ expired: 1, paymentsCanceled: 1 });
+    expect((await paymentOf(appointment.id)).status).toBe('canceled');
+
+    const refundKey = `refund-${payment.id}`;
+    /** Вызовы возврата именно по нашему платежу: свипер тикает по всей БД. */
+    const refundCalls = () =>
+      fake.calls.createRefund.filter((call) => call.idempotenceKey === refundKey);
+
+    // ЮKassa приняла возврат, но деньги ещё в пути (`pending`): завершённым возврат не считается.
+    fake.controls.refundStatus = 'pending';
+    const webhook = await postWebhook(
+      paidApp,
+      webhookBody(yookassaPaymentId, 'payment.succeeded'),
+      ALLOWED_IP,
+    );
+
+    expect(webhook.statusCode).toBe(200);
+    const afterPending = await paymentOf(appointment.id);
+    // Платёж не «возвращён»: деньги не вернулись, поэтому флаг остаётся и будет добит свипером.
+    expect(afterPending.status).toBe('canceled');
+    expect(afterPending.refundRequired).toBe(true);
+    expect((await appointmentOf(salon.masterId)).status).toBe('cancelled');
+    expect(await countOutboxFor(db, appointment.id)).toBe(0);
+    expect(refundCalls()).toHaveLength(1);
+
+    // Провайдер довёл возврат до конца: следующий тик видит флаг и повторяет вызов с тем же ключом.
+    fake.controls.refundStatus = 'succeeded';
+    const retry = await createTestSweeper().tick();
+    expect(retry.refundsCompleted).toBeGreaterThanOrEqual(1);
+
+    const afterRetry = await paymentOf(appointment.id);
+    expect(afterRetry.status).toBe('refunded');
+    expect(afterRetry.refundRequired).toBe(false);
+
+    // Один и тот же ключ идемпотентности в обеих попытках: деньги не вернутся дважды.
+    const calls = refundCalls();
+    expect(calls).toHaveLength(2);
+    expect(new Set(calls.map((call) => call.idempotenceKey)).size).toBe(1);
+    expect(calls[0]).toEqual({
+      yookassaPaymentId,
+      amountKopecks: payment.amountKopecks,
+      idempotenceKey: refundKey,
+    });
+
+    // Запись остаётся отменённой, письмо клиенту не уходит: визита не будет.
+    expect((await appointmentOf(salon.masterId)).status).toBe('cancelled');
+    expect(await countOutboxFor(db, appointment.id)).toBe(0);
+  });
+
+  it('сбой возврата: долг остаётся в БД, свипер повторяет возврат тем же ключом', async () => {
+    const { salon } = await bookFirstSlot(paidApp);
+    const appointment = await appointmentOf(salon.masterId);
+    const payment = await paymentOf(appointment.id);
+    const yookassaPaymentId = payment.yookassaPaymentId as string;
+
+    // Холд истёк: запись отменена, платёж снят. Клиент всё равно платит.
+    const sweeper = createTestSweeper();
+    const tick = await sweeper.tick(new Date(Date.now() + (PAYMENT_HOLD_MINUTES + 5) * MINUTE_MS));
+    expect(tick).toMatchObject({ expired: 1, paymentsCanceled: 1 });
+
+    const expired = await appointmentOf(salon.masterId);
+    expect(expired.status).toBe('cancelled');
+    expect(expired.cancelReason).toBe('payment_expired');
+    expect((await paymentOf(appointment.id)).status).toBe('canceled');
+
+    // API возвратов недоступен в момент уведомления. Ретрай внутри обработчика бессмысленен:
+    // провайдеру нужен ответ 200, а его повтор уведомления уже ничего не вернёт (платёж
+    // терминальный), поэтому обязанность вернуть деньги живёт флагом в БД — он переживёт
+    // сбой шлюза и перезапуск API, а возврат добьёт свипер.
+    fake.controls.failCreateRefund = true;
+    const webhook = await postWebhook(
+      paidApp,
+      webhookBody(yookassaPaymentId, 'payment.succeeded'),
+      ALLOWED_IP,
+    );
+
+    expect(webhook.statusCode).toBe(200);
+    const afterFailure = await paymentOf(appointment.id);
+    // Платёж терминальный: деньги не «возвращаются» переводом в succeeded, они уже были списаны,
+    // и долг перед клиентом фиксируется отдельным флагом.
+    expect(afterFailure.status).toBe('canceled');
+    expect(afterFailure.refundRequired).toBe(true);
+    expect((await appointmentOf(salon.masterId)).status).toBe('cancelled');
+    expect(await countOutboxFor(db, appointment.id)).toBe(0);
+
+    const refundKey = `refund-${payment.id}`;
+    /** Вызовы возврата именно по нашему платежу: свипер тикает по всей БД. */
+    const refundCalls = () =>
+      fake.calls.createRefund.filter((call) => call.idempotenceKey === refundKey);
+
+    expect(refundCalls()).toHaveLength(1);
+    expect(refundCalls()[0]).toEqual({
+      yookassaPaymentId,
+      amountKopecks: payment.amountKopecks,
+      idempotenceKey: refundKey,
+    });
+
+    // Шлюз снова доступен: следующий тик видит флаг и повторяет возврат.
+    fake.controls.failCreateRefund = false;
+    const retry = await createTestSweeper().tick();
+    // Свипер считает по всей БД, поэтому только «хотя бы один», а не ровно один.
+    expect(retry.refundsCompleted).toBeGreaterThanOrEqual(1);
+
+    const afterRetry = await paymentOf(appointment.id);
+    expect(afterRetry.status).toBe('refunded');
+    expect(afterRetry.refundRequired).toBe(false);
+
+    // Обе попытки — с одним ключом идемпотентности: именно это не даёт вернуть деньги дважды,
+    // даже если первая попытка дошла до ЮKassa, но ответ до нас не добрался.
+    const calls = refundCalls();
+    expect(calls).toHaveLength(2);
+    expect(new Set(calls.map((call) => call.idempotenceKey)).size).toBe(1);
+    expect(calls.map((call) => call.idempotenceKey)).toEqual([refundKey, refundKey]);
+
+    // Запись остаётся отменённой, письмо клиенту не уходит: визита не будет.
+    expect((await appointmentOf(salon.masterId)).status).toBe('cancelled');
+    expect(await countOutboxFor(db, appointment.id)).toBe(0);
+
+    // Флаг снят вместе со статусом, поэтому следующий тик возврат не повторяет.
+    await createTestSweeper().tick();
+    expect(refundCalls()).toHaveLength(2);
+    expect((await paymentOf(appointment.id)).status).toBe('refunded');
   });
 
   it('payment.canceled: платёж canceled, запись cancelled(payment_canceled)', async () => {
