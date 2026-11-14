@@ -11,6 +11,7 @@
 | Ошибки API — единый формат `{ error: { code, message, requestId } }` из `contracts`                                                                     | этот файл                                     |
 | Деньги — в копейках, время — ISO 8601 с зоной (в БД UTC)                                                                                                | этот файл                                     |
 | Каталог рендерится динамически (`force-dynamic`), кэш данных сейчас отключён (`no-store`); ISR и on-demand revalidation — после стабилизации наполнения | этот файл                                     |
+| Оплата записи: `PAYMENTS_MODE=off\|test\|live`, холд 15 минут, свипер в процессе API, уведомления — allowlist IP + перезапрос состояния                 | [adr/0005](./adr/0005-yookassa-payments.md)   |
 
 ## Почему каталог не на ISR
 

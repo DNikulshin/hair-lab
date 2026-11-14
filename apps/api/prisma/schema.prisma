@@ -210,6 +210,11 @@ model Appointment {
 
   cancelReason String? @map("cancel_reason")
 
+  // Дедлайн холда при обязательной оплате (PAYMENTS_MODE != 'off'): NULL — оплата не ждётся.
+  // Холд выражается существующим статусом pending, нового значения в appointment_status нет:
+  // неизвестный статус сломал бы разбор ответа у уже установленных клиентов.
+  paymentDeadlineAt DateTime? @map("payment_deadline_at") @db.Timestamptz(3)
+
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
@@ -217,10 +222,13 @@ model Appointment {
   service Service @relation(fields: [serviceId], references: [id], onDelete: Restrict)
 
   outboxMessages OutboxMessage[]
+  payment        Payment?
 
   @@index([masterId, startsAt])
   @@index([serviceId])
   @@index([clientId])
+  // Выборка свипера истёкших холдов: pending-записи с наступившим дедлайном оплаты.
+  @@index([status, paymentDeadlineAt])
   @@map("appointments")
 }
 
@@ -232,6 +240,52 @@ enum AppointmentStatus {
   no_show
 
   @@map("appointment_status")
+}
+
+/// Платёж ЮKassa по записи: одна запись — один платёж (повторное создание платежа вне скоупа).
+/// Персональных данных клиента здесь нет: они берутся из `appointment` только для письма.
+/// `yookassa_payment_id` заполняется после создания платежа в шлюзе (до этого NULL):
+/// так порядок «запись + строка платежа в транзакции, платёж в шлюзе — после коммита»
+/// не требует держать транзакцию открытой на время сетевого вызова.
+model Payment {
+  id            String        @id @default(uuid()) @db.Uuid
+  appointmentId String        @map("appointment_id") @db.Uuid
+  status        PaymentStatus @default(pending)
+
+  // Сумма фиксируется на момент создания платежа (снимок цены услуги), в копейках.
+  amountKopecks Int @map("amount_kopecks")
+
+  yookassaPaymentId String? @unique @map("yookassa_payment_id")
+  confirmationUrl   String? @map("confirmation_url")
+
+  // Деньги получены, но запись подтвердить нельзя (холд истёк / запись отменена): возврат обязателен.
+  // Флаг, а не разовый вызов: если API ЮKassa недоступен в момент уведомления, обязанность вернуть
+  // деньги нельзя терять — её видно в БД и добивает свипер (`refund_<paymentId>` идемпотентен).
+  // Снимается в той же транзакции, где платёж становится `refunded`.
+  refundRequired Boolean @default(false) @map("refund_required")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  appointment Appointment @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+
+  @@unique([appointmentId])
+  // Выборка свипера: платежи с обязательным возвратом. Индекс по булеву полю сам по себе
+  // малополезен (две группы), но строк с `true` единицы, а тик идёт каждые 30 с: индекс
+  // даёт точечный доступ вместо последовательного чтения таблицы. Частичный индекс
+  // (`WHERE refund_required`) Prisma не выражает, а расхождение схемы после ручной правки
+  // SQL — будущий дрейф миграций.
+  @@index([refundRequired])
+  @@map("payments")
+}
+
+enum PaymentStatus {
+  pending
+  succeeded
+  canceled
+  refunded
+
+  @@map("payment_status")
 }
 
 /// Очередь исходящих писем (transactional outbox).

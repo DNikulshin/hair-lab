@@ -18,9 +18,11 @@ import {
   createBookingConfirmationTemplate,
   BOOKING_CANCELLATION_TYPE,
   BOOKING_CONFIRMATION_TYPE,
+  type CreateBookingPaymentsOptions,
 } from '../features/bookings';
 import { catalogRoutes } from '../features/catalog';
 import { healthRoutes } from '../features/health/health.routes';
+import { createYookassaClient, paymentsPlugin, type PaymentGateway } from '../features/payments';
 import { authPlugin, createOriginAllowList } from '../shared/auth';
 import { env } from '../shared/config/env';
 import { dbPlugin } from '../shared/db';
@@ -34,13 +36,42 @@ import { registerErrorHandler } from '../shared/http/error-handler';
 import { createLoggerOptions } from '../shared/logging/logger';
 
 /**
+ * Опции сборки: режим оплаты и шлюз подменяются в тестах, без мутации `process.env`.
+ * Всё, что не передано, берётся из окружения (`shared/config/env`).
+ */
+export interface BuildServerOptions {
+  payments?: {
+    /** Включена ли оплата записи. По умолчанию — `PAYMENTS_MODE != 'off'`. */
+    enabled?: boolean;
+    /** Шлюз платежей. По умолчанию — клиент ЮKassa на ключах магазина из окружения. */
+    gateway?: PaymentGateway;
+  };
+}
+
+/**
  * Композиционный корень: здесь собирается сервер и регистрируются фичи.
  * Бизнес-логики в `app` нет. Фича — инкапсулированный Fastify-плагин.
  *
  * Реестр шаблонов писем собирается здесь же: `shared` не импортирует `features`,
  * поэтому плагин почты получает шаблоны опцией.
  */
-export async function buildServer() {
+export async function buildServer(options: BuildServerOptions = {}) {
+  const paymentsEnabled = options.payments?.enabled ?? env.paymentsEnabled;
+  // Шлюз создаётся один раз на процесс и только при включённой оплате: без ключей
+  // магазина клиент ЮKassa бессмысленен, а в режиме `off` никто его не вызывает.
+  const paymentGateway: PaymentGateway | null = paymentsEnabled
+    ? (options.payments?.gateway ??
+      createYookassaClient({
+        shopId: env.YOOKASSA_SHOP_ID,
+        secretKey: env.YOOKASSA_SECRET_KEY,
+        apiUrl: env.YOOKASSA_API_URL,
+      }))
+    : null;
+  const bookingPayments: CreateBookingPaymentsOptions | undefined =
+    paymentGateway === null
+      ? undefined
+      : { gateway: paymentGateway, returnUrl: env.YOOKASSA_RETURN_URL };
+
   const app = Fastify({
     logger: createLoggerOptions(env),
     // API слушает только loopback, снаружи — nginx: настоящий IP клиента приходит
@@ -98,8 +129,15 @@ export async function buildServer() {
   });
   await app.register(healthRoutes);
   await app.register(catalogRoutes);
-  await app.register(bookingRoutes);
+  await app.register(bookingRoutes, { payments: bookingPayments });
   await app.register(accountBookingsRoutes);
+  // Оплата: маршруты и свипер истёкших холдов — только при включённом режиме.
+  if (paymentGateway !== null) {
+    await app.register(paymentsPlugin, {
+      gateway: paymentGateway,
+      sweepIntervalMs: env.PAYMENT_SWEEP_INTERVAL_MS,
+    });
+  }
   // `global: false`: лимиты задаются per-route в конфиге маршрута (см. auth.routes.ts).
   await app.register(rateLimit, { global: false });
   await app.register(authRoutes, { delivery: tokenDelivery });

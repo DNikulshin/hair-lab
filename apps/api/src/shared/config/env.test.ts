@@ -70,3 +70,58 @@ describe('parseEnv: почта', () => {
     expect(() => parseEnv({})).toThrow(/DATABASE_URL/);
   });
 });
+
+describe('parseEnv: оплата записи (ЮKassa)', () => {
+  it('без PAYMENTS_MODE оплата выключена и ключи магазина не нужны', () => {
+    const env = parseEnv({ DATABASE_URL });
+
+    expect(env.PAYMENTS_MODE).toBe('off');
+    expect(env.paymentsEnabled).toBe(false);
+    expect(env.YOOKASSA_API_URL).toBe('https://api.yookassa.ru/v3');
+    // Возврат по умолчанию — страница оплаты сайта.
+    expect(env.YOOKASSA_RETURN_URL).toBe('http://localhost:3000/booking/payment');
+    expect(env.PAYMENT_SWEEP_INTERVAL_MS).toBe(30_000);
+  });
+
+  it('test/live без ключей магазина — ошибка с именами полей, без значений', () => {
+    for (const mode of ['test', 'live'] as const) {
+      let message = '';
+      try {
+        parseEnv({ DATABASE_URL, PAYMENTS_MODE: mode });
+      } catch (error) {
+        message = (error as Error).message;
+      }
+
+      expect(message).toContain('YOOKASSA_SHOP_ID');
+      expect(message).toContain('YOOKASSA_SECRET_KEY');
+    }
+  });
+
+  it('test с ключами включает оплату', () => {
+    const env = parseEnv({
+      DATABASE_URL,
+      PAYMENTS_MODE: 'test',
+      YOOKASSA_SHOP_ID: 'shop-id-0001',
+      YOOKASSA_SECRET_KEY: 'test-secret-value',
+    });
+
+    expect(env.paymentsEnabled).toBe(true);
+    expect(env.YOOKASSA_SHOP_ID).toBe('shop-id-0001');
+  });
+
+  it('неизвестный режим и нулевой интервал свипера отклоняются', () => {
+    expect(() => parseEnv({ DATABASE_URL, PAYMENTS_MODE: 'sandbox' })).toThrow(/PAYMENTS_MODE/);
+    expect(() => parseEnv({ DATABASE_URL, PAYMENT_SWEEP_INTERVAL_MS: '0' })).toThrow(
+      /PAYMENT_SWEEP_INTERVAL_MS/,
+    );
+  });
+
+  it('YOOKASSA_RETURN_URL переопределяет адрес возврата', () => {
+    const env = parseEnv({
+      DATABASE_URL,
+      YOOKASSA_RETURN_URL: 'https://salon.example.invalid/paid',
+    });
+
+    expect(env.YOOKASSA_RETURN_URL).toBe('https://salon.example.invalid/paid');
+  });
+});

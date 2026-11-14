@@ -31,6 +31,43 @@ export const bookingConfirmationPayloadSchema = z.object({
 });
 export type BookingConfirmationPayload = z.infer<typeof bookingConfirmationPayloadSchema>;
 
+/**
+ * Входные данные снимка: строка записи и её снимки цены/длительности.
+ * Даты — `Date`, чтобы снимок нельзя было записать с локальным временем вместо UTC.
+ */
+export interface BookingConfirmationSnapshot {
+  clientName: string;
+  clientEmail: string;
+  serviceName: string;
+  masterName: string;
+  startsAt: Date;
+  endsAt: Date;
+  priceKopecks: number;
+  durationMin: number;
+}
+
+/**
+ * Снимок письма-подтверждения для `outbox_messages.payload`.
+ *
+ * Общая точка сборки снимка: письмо ставится не только при создании записи, но и после
+ * успешной оплаты (фича `payments`). Схема проверяется здесь же: в БД не должен попасть
+ * снимок, который диспетчер потом отвергнет как невалидный.
+ */
+export function buildBookingConfirmationPayload(
+  input: BookingConfirmationSnapshot,
+): BookingConfirmationPayload {
+  return bookingConfirmationPayloadSchema.parse({
+    clientName: input.clientName,
+    clientEmail: input.clientEmail,
+    serviceName: input.serviceName,
+    masterName: input.masterName,
+    startsAt: input.startsAt.toISOString(),
+    endsAt: input.endsAt.toISOString(),
+    priceKopecks: input.priceKopecks,
+    durationMin: input.durationMin,
+  });
+}
+
 export interface BookingConfirmationContext {
   /** Часовой пояс салона (`SALON_TIMEZONE`): в нём показываем дату и время. */
   timezone: string;
