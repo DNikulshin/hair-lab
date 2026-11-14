@@ -6,7 +6,14 @@ export {
   cancelAccountBooking,
   listAccountBookings,
 } from './account-bookings.service';
-export { bookingRoutes } from './bookings.routes';
+export { bookingRoutes, type BookingRoutesOptions } from './bookings.routes';
+export {
+  createBooking,
+  PaymentCreationFailedError,
+  type CreateBookingOptions,
+  type CreateBookingPaymentsOptions,
+  type CreateBookingResult,
+} from './bookings.service';
 export {
   BOOKING_CANCELLATION_TYPE,
   createBookingCancellationTemplate,
@@ -14,6 +21,9 @@ export {
 } from './booking-cancellation.email';
 export {
   BOOKING_CONFIRMATION_TYPE,
+  buildBookingConfirmationPayload,
   createBookingConfirmationTemplate,
   type BookingConfirmationContext,
+  type BookingConfirmationPayload,
+  type BookingConfirmationSnapshot,
 } from './booking-confirmation.email';

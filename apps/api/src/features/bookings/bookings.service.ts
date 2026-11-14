@@ -2,7 +2,18 @@ import type { Booking, BookingStatus, CreateBooking } from '@hair-lab/contracts'
 import { maskPhone } from '@hair-lab/contracts';
 import { env } from '../../shared/config/env';
 import { sqlStateOf, type Db } from '../../shared/db';
-import { BOOKING_CONFIRMATION_TYPE } from './booking-confirmation.email';
+import {
+  createPaymentHold,
+  failPaymentCreation,
+  findPaymentByAppointment,
+  paymentHoldDeadline,
+  savePaymentDetails,
+  type PaymentGateway,
+} from '../payments/index';
+import {
+  BOOKING_CONFIRMATION_TYPE,
+  buildBookingConfirmationPayload,
+} from './booking-confirmation.email';
 import { isSlotBookable, loadSchedules, salonDateOf } from './slots.service';
 
 /**
@@ -13,10 +24,29 @@ import { isSlotBookable, loadSchedules, salonDateOf } from './slots.service';
  * одновременные запросы на один слот не создают дубль — проигравший получает 409.
  * Телефоны и почта клиента наружу не отдаются и в логи не пишутся: для экрана успеха
  * клиент получает только маску номера (`clientPhoneMasked`).
+ *
+ * Оплата (`PAYMENTS_MODE != 'off'`, issue #8): запись создаётся как холд на 15 минут —
+ * `pending` + `paymentDeadlineAt` + строка `payments(pending)` в той же транзакции, письмо-
+ * подтверждение в outbox не пишется (оно уйдёт после оплаты). Платёж в шлюзе создаётся
+ * после коммита, вне транзакции; `confirmationUrl` и дедлайн холда возвращаются в `payment`.
+ * Без оплаты (по умолчанию) поведение прежнее, ни одного лишнего запроса.
  */
 
 const MINUTE_MS = 60_000;
 const CURRENCY = 'RUB' as const;
+
+/** Настройки режима оплаты, которые передаёт `app`: шлюз как зависимость, а не `process.env` в коде. */
+export interface CreateBookingPaymentsOptions {
+  /** Шлюз платежей: в тестах — поддельный, в проде — клиент ЮKassa. */
+  gateway: PaymentGateway;
+  /** Куда вернуть клиента после оплаты (`YOOKASSA_RETURN_URL`). */
+  returnUrl: string;
+}
+
+export interface CreateBookingOptions {
+  /** Оплата включена (`PAYMENTS_MODE != 'off'`): запись создаётся вместе с холдом платежа. */
+  payments?: CreateBookingPaymentsOptions;
+}
 
 /** Сколько раз пробуем записать при транзиентном конфликте: первая попытка и один повтор. */
 export const MAX_WRITE_CONFLICT_ATTEMPTS = 2;
@@ -76,6 +106,14 @@ export class MasterNotFoundError extends Error {
   }
 }
 
+/** Платёж не удалось создать в шлюзе: запись отменена, ответ 502 (см. `bookingRoutes`). */
+export class PaymentCreationFailedError extends Error {
+  constructor() {
+    super('Не удалось создать платёж');
+    this.name = 'PaymentCreationFailedError';
+  }
+}
+
 /** Строка записи, достаточная для DTO (телефон нужен только для маски, почта не нужна). */
 interface AppointmentRow {
   id: string;
@@ -88,6 +126,8 @@ interface AppointmentRow {
   durationMin: number;
   clientName: string;
   clientPhone: string;
+  /** Дедлайн холда: не `null` только когда оплата ждётся. */
+  paymentDeadlineAt: Date | null;
 }
 
 export interface CreateBookingResult {
@@ -128,9 +168,88 @@ function isSameRequest(row: AppointmentRow, dto: CreateBooking): boolean {
 }
 
 /** Повтор ключа: либо та же запись (200), либо конфликт содержимого (409). */
-function reuseOrConflict(row: AppointmentRow, dto: CreateBooking): CreateBookingResult {
+async function reuseOrConflict(
+  db: Db,
+  row: AppointmentRow,
+  dto: CreateBooking,
+  payments?: CreateBookingPaymentsOptions,
+): Promise<CreateBookingResult> {
   if (!isSameRequest(row, dto)) throw new IdempotencyConflictError();
-  return { status: 200, booking: toBookingDto(row) };
+  return { status: 200, booking: await toBookingDtoWithPayment(db, row, payments) };
+}
+
+/**
+ * DTO с данными оплаты, если запись всё ещё ждёт её: повтор запроса по `idempotencyKey` и
+ * проигранная гонка возвращают ту же ссылку на оплату из БД, не создавая второй платёж
+ * и не обращаясь к шлюзу.
+ */
+async function toBookingDtoWithPayment(
+  db: Db,
+  row: AppointmentRow,
+  payments?: CreateBookingPaymentsOptions,
+): Promise<Booking> {
+  const booking = toBookingDto(row);
+  if (payments === undefined) return booking;
+
+  const payment = await findPaymentByAppointment(db, row.id);
+  if (payment === null || payment.status !== 'pending' || payment.confirmationUrl === null) {
+    return booking;
+  }
+  if (row.paymentDeadlineAt === null) return booking;
+
+  return {
+    ...booking,
+    payment: {
+      confirmationUrl: payment.confirmationUrl,
+      expiresAt: row.paymentDeadlineAt.toISOString(),
+    },
+  };
+}
+
+/**
+ * Создание платежа в шлюзе — после коммита записи, вне транзакции: сетевой вызов не держит
+ * транзакцию открытой, а `Idempotence-Key: payment-<appointmentId>` защищает от дубля платежа
+ * при ретрае (ЮKassa вернёт тот же платёж).
+ *
+ * Сбой шлюза не оставляет слот занятым: запись отменяется (`payment_creation_failed`), платёж
+ * становится `canceled`, наружу — `PaymentCreationFailedError` (502).
+ */
+async function createGatewayPayment(
+  db: Db,
+  payments: CreateBookingPaymentsOptions,
+  input: {
+    booking: Booking;
+    appointmentId: string;
+    paymentId: string;
+    deadline: Date;
+    serviceName: string;
+  },
+): Promise<Booking> {
+  try {
+    const created = await payments.gateway.createPayment({
+      appointmentId: input.appointmentId,
+      amountKopecks: input.booking.price.amountMinor,
+      // Описание без ПДн: только услуга. Ни имени, ни телефона, ни почты.
+      description: `Оплата записи: ${input.serviceName}`,
+      returnUrl: payments.returnUrl,
+      idempotenceKey: `payment-${input.appointmentId}`,
+    });
+
+    await savePaymentDetails(db, input.paymentId, created);
+
+    return {
+      ...input.booking,
+      payment: {
+        confirmationUrl: created.confirmationUrl,
+        // Срок ссылки — дедлайн нашего холда: после него запись снимается свипером.
+        expiresAt: input.deadline.toISOString(),
+      },
+    };
+  } catch {
+    // Слот не должен остаться занятым неоплаченной записью: компенсация и 502.
+    await failPaymentCreation(db, input.appointmentId);
+    throw new PaymentCreationFailedError();
+  }
 }
 
 /**
@@ -143,11 +262,15 @@ function reuseOrConflict(row: AppointmentRow, dto: CreateBooking): CreateBooking
  * Используется в двух местах: когда слот недоступен по расписанию (`isSlotBookable`)
  * и когда запись проиграла гонку на уровне БД (`23P01`, `23505`, `P2034` после исчерпания попыток).
  */
-async function resolveLostRace(db: Db, dto: CreateBooking): Promise<CreateBookingResult> {
+async function resolveLostRace(
+  db: Db,
+  dto: CreateBooking,
+  payments?: CreateBookingPaymentsOptions,
+): Promise<CreateBookingResult> {
   const repeated = await db.appointment.findUnique({
     where: { idempotencyKey: dto.idempotencyKey },
   });
-  if (repeated !== null) return reuseOrConflict(repeated, dto);
+  if (repeated !== null) return reuseOrConflict(db, repeated, dto, payments);
   throw new SlotUnavailableError();
 }
 
@@ -167,18 +290,23 @@ async function resolveLostRace(db: Db, dto: CreateBooking): Promise<CreateBookin
  * `clientId` передаёт маршрут, когда запрос пришёл с сессией клиента; гостевые записи
  * остаются без аккаунта. Контракты запроса и ответа не меняются: клиент не может указать
  * чужой аккаунт.
+ *
+ * `options.payments` включает режим оплаты: шлюз и адрес возврата приходят из `app`
+ * (в тестах — поддельный шлюз), чтения `process.env` внутри сервиса нет.
  */
 export async function createBooking(
   db: Db,
   dto: CreateBooking,
   clientId?: string,
+  options: CreateBookingOptions = {},
 ): Promise<CreateBookingResult> {
   const tz = env.SALON_TIMEZONE;
+  const payments = options.payments;
 
   const existing = await db.appointment.findUnique({
     where: { idempotencyKey: dto.idempotencyKey },
   });
-  if (existing !== null) return reuseOrConflict(existing, dto);
+  if (existing !== null) return reuseOrConflict(db, existing, dto, payments);
 
   const service = await db.service.findFirst({
     where: { id: dto.serviceId, isActive: true },
@@ -215,13 +343,18 @@ export async function createBooking(
     if (!isSlotBookable({ ...schedule, date, tz, startsAt, endsAt })) {
       // На повторе после конфликта записи занятый слот может быть нашей же записью:
       // ключ проверяем до 409 `slot_unavailable`, иначе сетевой ретрай клиента ломается.
-      return await resolveLostRace(db, dto);
+      return await resolveLostRace(db, dto, payments);
     }
 
     try {
       // Запись и письмо в очередь — одной транзакцией (transactional outbox):
       // нет строки outbox без записи и наоборот. Отправкой занимается фоновый диспетчер,
       // поэтому недоступный SMTP не ломает создание записи (AGENTS.md, «Данные и надёжность»).
+      //
+      // В режиме оплаты вместо письма в той же транзакции пишется строка платежа-холда:
+      // письмо-подтверждение уйдёт только после успешной оплаты (обработчик уведомления).
+      const deadline = payments === undefined ? null : paymentHoldDeadline();
+
       const created = await db.$transaction(async (tx) => {
         const appointment = await tx.appointment.create({
           data: {
@@ -236,34 +369,60 @@ export async function createBooking(
             priceKopecks: service.priceKopecks,
             durationMin: service.durationMin,
             idempotencyKey: dto.idempotencyKey,
+            // Дедлайн холда: до него запись ждёт оплаты, после — снимается свипером.
+            ...(deadline === null ? {} : { paymentDeadlineAt: deadline }),
           },
         });
 
-        // Письмо нужно только когда клиент оставил почту. Снимок фиксируем здесь:
-        // правка услуги или мастера позже не меняет уже созданное письмо.
+        if (deadline !== null) {
+          const hold = await createPaymentHold(tx, {
+            appointmentId: appointment.id,
+            amountKopecks: service.priceKopecks,
+          });
+          return { appointment, paymentId: hold.paymentId };
+        }
+
+        // Письмо нужно только когда клиент оставил почту. Снимок собирается одной точкой
+        // (`buildBookingConfirmationPayload`): правка услуги или мастера позже не меняет
+        // уже созданное письмо.
         if (dto.clientEmail !== undefined) {
           await tx.outboxMessage.create({
             data: {
               type: BOOKING_CONFIRMATION_TYPE,
               appointmentId: appointment.id,
-              payload: {
+              payload: buildBookingConfirmationPayload({
                 clientName: dto.clientName,
                 clientEmail: dto.clientEmail,
                 serviceName: service.name,
                 masterName: master.fullName,
-                startsAt: startsAt.toISOString(),
-                endsAt: endsAt.toISOString(),
+                startsAt,
+                endsAt,
                 priceKopecks: service.priceKopecks,
                 durationMin: service.durationMin,
-              },
+              }),
             },
           });
         }
 
-        return appointment;
+        return { appointment, paymentId: null };
       });
 
-      return { status: 201, booking: toBookingDto(created) };
+      const booking = toBookingDto(created.appointment);
+      if (payments === undefined || created.paymentId === null || deadline === null) {
+        return { status: 201, booking };
+      }
+
+      // Платёж в шлюзе — после коммита: сетевой вызов не держит транзакцию открытой.
+      return {
+        status: 201,
+        booking: await createGatewayPayment(db, payments, {
+          booking,
+          appointmentId: created.appointment.id,
+          paymentId: created.paymentId,
+          deadline,
+          serviceName: service.name,
+        }),
+      };
     } catch (error) {
       const writeConflict = isWriteConflict(error);
       // Транзиентный конфликт — повторяем попытку с начала (свежая проверка доступности).
@@ -275,7 +434,7 @@ export async function createBooking(
       // Во всех случаях повторяем чтение по ключу: если запись есть, повтор безопасен.
       if (!writeConflict && sqlState !== '23P01' && sqlState !== '23505') throw error;
 
-      return await resolveLostRace(db, dto);
+      return await resolveLostRace(db, dto, payments);
     }
   }
 }

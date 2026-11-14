@@ -77,6 +77,19 @@ export const createBookingSchema = z.object({
 export type CreateBooking = z.infer<typeof createBookingSchema>;
 
 /**
+ * Данные оплаты записи (issue #8): ссылка на страницу оплаты ЮKassa и срок действия ссылки.
+ *
+ * Схема живёт здесь, рядом с `bookingSchema`, потому что является её частью; из публичного API
+ * пакета она доступна и как `bookingPaymentSchema`, и из `payments/payment.contract` (реэкспорт).
+ * Поля только аддитивные: старые клиенты `payment` игнорируют, при `PAYMENTS_MODE=off` его нет.
+ */
+export const bookingPaymentSchema = z.object({
+  confirmationUrl: z.url(),
+  expiresAt: isoDateTimeSchema,
+});
+export type BookingPayment = z.infer<typeof bookingPaymentSchema>;
+
+/**
  * Созданная запись. Цена и длительность — снимки условий услуги на момент записи.
  * Контактов клиента здесь нет: наружу они не отдаются. `clientPhoneMasked` — аддитивное
  * поле для экрана успеха (маску считает сервер); старые клиенты его игнорируют.
@@ -92,6 +105,11 @@ export const bookingSchema = z.object({
   durationMin: z.number().int().positive(),
   clientName: z.string().min(1),
   clientPhoneMasked: z.string().min(1).optional(),
+  /**
+   * Оплата включена (`PAYMENTS_MODE != 'off'`) и запись ждёт оплаты: ссылка на ЮKassa.
+   * Поле отсутствует, когда оплата не требуется — старые клиенты его не знают и не ждут.
+   */
+  payment: bookingPaymentSchema.optional(),
 });
 export type Booking = z.infer<typeof bookingSchema>;
 
