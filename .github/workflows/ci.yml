@@ -55,8 +55,17 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm lint
       - run: pnpm check:arch
+
+      # Бинарник actionlint кэшируется между прогонами: сам скрипт скачивает его
+      # с GitHub Releases, а не тянет Docker-образ (Docker Hub отдаёт 502 и лимитирует пуллы).
+      - name: Кэш actionlint
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/hair-lab/actionlint
+          key: actionlint-1.7.12-${{ runner.os }}-${{ runner.arch }}
+
       # Схемные ошибки workflow (например, недопустимое значение permissions) GitHub
-      # находит только при запуске; actionlint ловит их до мержа. Docker есть на runner.
+      # находит только при запуске; actionlint ловит их до мержа.
       - run: pnpm lint:workflows
       - run: pnpm test
       - run: pnpm format:check
