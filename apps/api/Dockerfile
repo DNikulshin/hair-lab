@@ -5,7 +5,7 @@
 # Слои разделены намеренно: `deps` копирует только манифесты воркспейса, поэтому слой
 # `pnpm install` переиспользуется, пока не изменились lockfile или package.json пакетов.
 # Правка исходников в `deps` не попадает и установку не инвалидирует.
-FROM node:22-alpine AS base
+FROM node:26-alpine AS base
 ENV PNPM_HOME=/pnpm
 ENV PATH=$PNPM_HOME:$PATH
 RUN corepack enable
@@ -33,7 +33,7 @@ RUN pnpm --filter @hair-lab/contracts build \
  && pnpm --filter @hair-lab/api build \
  && pnpm --filter @hair-lab/api deploy --prod /out
 
-FROM node:22-alpine AS runner
+FROM node:26-alpine AS runner
 ENV NODE_ENV=production
 ENV API_HOST=0.0.0.0
 WORKDIR /app
