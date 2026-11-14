@@ -44,7 +44,10 @@ server {
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        # X-Forwarded-For перезаписывается, а не дописывается: api доверяет этому заголовку
+        # (trustProxy: true), а по request.ip проверяется allowlist вебхука ЮKassa — иначе
+        # IP подделывается одним заголовком и allowlist обходится (ADR-0005).
+        proxy_set_header X-Forwarded-For $remote_addr;
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_read_timeout 60s;
     }
