@@ -65,45 +65,66 @@ sudo -u deployer git clone https://github.com/DNikulshin/hair-lab.git /home/depl
 Скрипт деплоя сверяет это через `compose config --images` и падает с подсказкой, если в `.env`
 осталось что-то другое.
 
-## 4. SSH-ключ для GitHub Actions
+## 4. SSH-ключ и принудительная команда для GitHub Actions
+
+Ключ не должен давать шелл: пользователь `deployer` состоит в группе `docker`, а это эквивалент
+root — поэтому в `authorized_keys` ключ ограничен принудительной командой, а не только адресами.
+
+Почему не `from="…"`: GitHub публикует **8350** диапазонов адресов Actions (5622 IPv4 + 2728 IPv6),
+это строка на **151 КБ**, которую неудобно и рискованно редактировать, а при смене диапазонов
+деплой молча падал бы с `Permission denied (publickey)`. Принудительная команда даёт строже:
+украденный ключ умеет только «задеплой коммит из `main`».
+
+**4.1. Ключ.** Приватную часть кладёт в секрет тот, у кого есть `gh` (в этой настройке — агент
+под `dev`), публичная идёт на хост:
 
 ```bash
-# на любой машине с ssh-keygen, ключ без пароля: им пользуется раннер
-ssh-keygen -t ed25519 -C "hair-lab staging CD" -N "" -f ~/staging-deploy-key
+ls -l /home/dev/.ssh/hair-lab-staging-cd.pub      # ssh-ed25519 …, отпечаток проверяется ниже
 ```
 
-Публичную часть — в `authorized_keys` пользователя `deployer`, с ограничением по диапазонам
-адресов GitHub Actions (ключ работает только из сети раннеров):
+**4.2. Принудительная команда.** `deploy/staging/ssh-deploy.sh` из репозитория кладётся в каталог
+стека и принадлежит `deployer`:
 
 ```bash
-ranges=$(curl -sS https://api.github.com/meta | jq -r '.actions[]' | paste -sd, -)
+sudo install -o deployer -g deployer -m 700 \
+  /home/dev/projects/hair-lab/deploy/staging/ssh-deploy.sh \
+  /home/deployer/hair-lab-staging/ssh-deploy.sh
+```
+
+**4.3. `authorized_keys`.** Одна строка, ключ ограничен командой и опциями `restrict`
+(без `scp`, проброса агента, pty и форвардинга):
+
+```bash
 sudo install -d -o deployer -g deployer -m 700 /home/deployer/.ssh
-printf 'from="%s" %s\n' "$ranges" "$(cat ~/staging-deploy-key.pub)" |
-  sudo tee -a /home/deployer/.ssh/authorized_keys >/dev/null
+line="restrict,command=\"/home/deployer/hair-lab-staging/ssh-deploy.sh\" $(sudo cat /home/dev/.ssh/hair-lab-staging-cd.pub)"
+printf '%s\n' "$line" | sudo tee /home/deployer/.ssh/authorized_keys >/dev/null
 sudo chown deployer:deployer /home/deployer/.ssh/authorized_keys
 sudo chmod 600 /home/deployer/.ssh/authorized_keys
+sudo ssh-keygen -lf /home/deployer/.ssh/authorized_keys   # ожидаем SHA256:NMfj…
 ```
 
-Диапазоны `actions` периодически меняются: если деплой начал падать на подключении —
-перегенерировать строку. Ограничение по адресам — единственная защита ключа, поэтому в
-`authorized_keys` не должно быть других ключей без `from=`.
-
-Приватную часть (`~/staging-deploy-key`) — в секрет репозитория, файл после этого удалить.
-
-## 5. Секрет и переменные репозитория
+**4.4. Проверка правды.** Локально `ssh` этим ключом не подключается не будет — `sshd` выполняет
+только принудительную команду с аргументом от клиента, поэтому проверка настоящая — первый
+прогон workflow (шаг 6). Что можно проверить на хосте:
 
 ```bash
-gh secret set STAGING_SSH_KEY < ~/staging-deploy-key
+sudo sshd -T | grep -E '^(pubkeyauthentication|passwordauthentication)'
+getent passwd deployer | cut -d: -f7                    # ожидаем /bin/bash
+sudo -u deployer bash -c 'SSH_ORIGINAL_COMMAND="deploy main" /home/deployer/hair-lab-staging/ssh-deploy.sh; echo exit=$?'
+```
+
+Последняя команда — боевой деплой (её же выполняет Actions), запускай только когда стек готов.
+Обновление `ssh-deploy.sh` — вручную этой же командой `install`: ключ `scp` не разрешает.
+
+## 5. Секрет и переменная репозитория
+
+```bash
+gh secret set STAGING_SSH_KEY < /home/dev/.ssh/hair-lab-staging-cd
 gh variable set STAGING_HOST --body "hair-lab.dnikulshin.ru"   # адрес хоста для SSH (порт 22)
 ```
 
-Необязательные переменные (по умолчанию совпадают с этим стендом):
-
-| Переменная           | По умолчанию                      |
-| -------------------- | --------------------------------- |
-| `STAGING_USER`       | `deployer`                        |
-| `STAGING_APP_DIR`    | `/home/deployer/hair-lab-staging` |
-| `STAGING_DEPLOY_DIR` | `/home/deployer/hair-lab-deploy`  |
+Необязательная переменная `STAGING_USER` (по умолчанию `deployer`). Пути на хосте в workflow не
+передаются: они зашиты в принудительной команде и в `$HOME/hair-lab-deploy` деплой-клона.
 
 Окружение `staging` создаётся само при первом запуске workflow; в нём можно включить
 required reviewers или свои секреты (Settings → Environments).
@@ -126,10 +147,10 @@ curl -sS https://hair-lab.dnikulshin.ru:8443/api/health
 
 - **Откат**: Actions → Staging → _Run workflow_, в `ref` — sha предыдущего коммита из истории
   `main`. Скрипт соберёт образы этого коммита и перезапустит стек.
-- **Ручной деплой** (если Actions недоступен) — тем же скриптом на хосте:
+- **Ручной деплой** (если Actions недоступен) — теми же скриптами на хосте:
 
   ```bash
-  sudo -u deployer bash /home/deployer/hair-lab-staging/deploy-staging.sh main
+  sudo -u deployer bash -c 'SSH_ORIGINAL_COMMAND="deploy main" /home/deployer/hair-lab-staging/ssh-deploy.sh'
   ```
 
 - **Выключить CD**: Actions → Staging → _Disable workflow_. Стенд продолжит работать на

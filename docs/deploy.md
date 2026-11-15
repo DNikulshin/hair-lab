@@ -206,7 +206,7 @@ deploy` завершился ошибкой, шаг краснеет, `up -d` н
 слушается и не проброшен). Конфиг nginx: `deploy/nginx/hair-lab.staging.dnikulshin.ru.conf`
 (wildcard-сертификат, `X-Robots-Tag: noindex`); установка — по разделу 6.
 
-- каталог `/home/deployer/hair-lab-staging` (пользователь `deployer`): `docker-compose.prod.yml`, свой `.env` (не в git, права `600`) и скрипт деплоя `deploy-staging.sh`; код берётся из деплой-клона `/home/deployer/hair-lab-deploy`. Не `/opt`:
+- каталог `/home/deployer/hair-lab-staging` (пользователь `deployer`): `docker-compose.prod.yml`, свой `.env` (не в git, права `600`) и принудительная команда ключа `ssh-deploy.sh`; код берётся из деплой-клона `/home/deployer/hair-lab-deploy`, делегируемый скрипт — `scripts/deploy-staging.sh` из его `origin/main`. Не `/opt`:
   из `/opt` `docker compose` под snap-докером падает с `compose file ... is invalid` (виден только
   путь `/var/lib/snapd/void/...`: snap-конфайнмент не видит `/opt`), из `/home` и `/root` работает;
 - обновляется автоматически: merge в `main` → workflow `staging.yml` (`scripts/deploy-staging.sh`),
@@ -246,7 +246,7 @@ LOG_LEVEL=info
 вручную это делает `scripts/deploy-staging.sh` (он же собирает образы при каждом деплое):
 
 ```bash
-sudo -u deployer bash /home/deployer/hair-lab-staging/deploy-staging.sh main
+sudo -u deployer bash -c 'SSH_ORIGINAL_COMMAND="deploy main" /home/deployer/hair-lab-staging/ssh-deploy.sh'
 ```
 
 `docker compose pull` в этом разделе не нужен и только помешал бы: локальные образы

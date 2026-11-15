@@ -34,7 +34,8 @@ wildcard-сертификат `*.dnikulshin.ru` (`/etc/ssl/dnikulshin/{fullchain
 ## Обновление: CD после merge
 
 Стенд обновляется автоматически: merge в `main` → workflow **Staging** (`.github/workflows/staging.yml`)
-→ `scripts/deploy-staging.sh` на хосте → сборка образов из деплой-клона → миграции → `up -d`
+→ `scripts/deploy-staging.sh` на хосте (его берёт из `origin/main` принудительная команда) →
+сборка образов из деплой-клона → миграции → `up -d`
 → healthcheck `/api/health` и `/`. Прогон виден в Actions (окружение `staging`), повтор и откат —
 кнопкой _Run workflow_.
 
@@ -45,6 +46,10 @@ wildcard-сертификат `*.dnikulshin.ru` (`/etc/ssl/dnikulshin/{fullchain
 - **Docs-only коммиты стенд не трогают**: job `deploy` пропускается по `scripts/changed-components.mjs`.
 - **Деплой берёт код из `/home/deployer/hair-lab-deploy`**, а не из рабочего клона агента: CD
   переключает коммиты только там. Незакоммиченные правки на стенд не попадают — сначала merge.
+- **Ключ Actions не даёт шелла**: в `authorized_keys` он ограничен принудительной командой
+  `deploy <ref>` (`deploy/staging/ssh-deploy.sh`) и опцией `restrict` — украденный ключ умеет только
+  задеплоить коммит из `main`. По адресам (`from=`) не ограничиваем: GitHub отдаёт 8350 диапазонов,
+  это 151 КБ в одной строке. Поэтому же `scp` этим ключом недоступен.
 - **Коммит и время деплоя**: `/home/deployer/hair-lab-staging/.deployed-sha`.
 - **Откат**: Actions → Staging → _Run workflow_, `ref` = sha предыдущего коммита из истории `main`.
 - **Лог прогона на хосте**: `journalctl` не нужен, всё в Actions; при падении healthcheck в лог
@@ -56,7 +61,7 @@ wildcard-сертификат `*.dnikulshin.ru` (`/etc/ssl/dnikulshin/{fullchain
 Ручной деплой остаётся как аварийный путь и делает то же самое:
 
 ```bash
-sudo -u deployer bash /home/deployer/hair-lab-staging/deploy-staging.sh main
+sudo -u deployer bash -c 'SSH_ORIGINAL_COMMAND="deploy main" /home/deployer/hair-lab-staging/ssh-deploy.sh'
 ```
 
 `NEXT_BASE_PATH` не задаём (в отличие от локального запуска за прокси code-server).

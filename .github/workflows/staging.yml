@@ -6,6 +6,9 @@ name: Staging
 # перезапускает стек. Образы не публикуются в GHCR: staging-адрес с портом `:8443`
 # вшивается в web-бандл на этапе сборки и отличается от прод-значений.
 #
+# Ключ в `authorized_keys` ограничен принудительной командой `deploy <ref>` (issue #128),
+# поэтому `scp` недоступен: deploy-скрипт всегда берётся из `origin/main` деплой-клона.
+#
 # Разовая настройка хоста и секретов — `deploy/staging/install.md`.
 
 on:
@@ -27,9 +30,8 @@ concurrency:
   cancel-in-progress: false
 
 env:
+  # Остальные пути зашиты в принудительной команде на хосте (`authorized_keys`).
   STAGING_USER: ${{ vars.STAGING_USER || 'deployer' }}
-  STAGING_APP_DIR: ${{ vars.STAGING_APP_DIR || '/home/deployer/hair-lab-staging' }}
-  STAGING_DEPLOY_DIR: ${{ vars.STAGING_DEPLOY_DIR || '/home/deployer/hair-lab-deploy' }}
 
 jobs:
   changes:
@@ -70,20 +72,12 @@ jobs:
           chmod 600 ~/.ssh/id_ed25519
           ssh-keyscan -H "$STAGING_HOST" >> ~/.ssh/known_hosts
 
-      - name: Выгрузить скрипт деплоя
-        env:
-          STAGING_HOST: ${{ vars.STAGING_HOST }}
-        run: |
-          # Подстановка переменных локальная: на хост уходят значения.
-          # shellcheck disable=SC2029
-          scp -q scripts/deploy-staging.sh \
-            "$STAGING_USER@$STAGING_HOST:$STAGING_APP_DIR/deploy-staging.sh.new"
-
       - name: Собрать и перезапустить staging
         env:
           STAGING_HOST: ${{ vars.STAGING_HOST }}
           REF: ${{ github.event.inputs.ref || 'main' }}
         run: |
-          # Скрипт встаёт на место до запуска: заменять файл работающего bash нельзя.
+          # Ключ ограничен принудительной командой `deploy <ref>` (deploy/staging/ssh-deploy.sh):
+          # клиентская команда не исполняется, sshd передаёт её только в SSH_ORIGINAL_COMMAND.
           # shellcheck disable=SC2029
-          ssh "$STAGING_USER@$STAGING_HOST" "mv '$STAGING_APP_DIR/deploy-staging.sh.new' '$STAGING_APP_DIR/deploy-staging.sh' && STAGING_DEPLOY_DIR='$STAGING_DEPLOY_DIR' bash '$STAGING_APP_DIR/deploy-staging.sh' '$REF'"
+          ssh "$STAGING_USER@$STAGING_HOST" "deploy $REF"
