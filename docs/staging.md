@@ -9,43 +9,56 @@ wildcard-сертификат `*.dnikulshin.ru` (`/etc/ssl/dnikulshin/{fullchain
 
 ## Что где лежит
 
-| Что            | Где                                                                                                        |
-| -------------- | ---------------------------------------------------------------------------------------------------------- |
-| Каталог стека  | `/root/hair-lab-staging` (compose-файл и `.env`, права `600`)                                              |
-| Compose-проект | `-p hair-lab-staging` (том `hair-lab-staging_db-data`, контейнеры `hair-lab-staging-*`)                    |
-| Порты          | `127.0.0.1:3010` (web), `127.0.0.1:3011` (api); 3000/3001 — локальный `pnpm dev`                           |
-| nginx          | `/etc/nginx/sites-available/hair-lab-staging` из `deploy/nginx/hair-lab.staging.dnikulshin.ru.conf`        |
-| Образы         | собираются локально из `main`: `hair-lab-api:local`, `hair-lab-api-migrations:local`, `hair-lab-web:local` |
-| БД             | сервис `db` (postgres:17-alpine), наружу не публикуется; миграции — сервис `migrations`                    |
+| Что            | Где                                                                                                                                |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| Каталог стека  | `/home/deployer/hair-lab-staging` (пользователь `deployer`: compose-файл, `.env` с правами `600`, скрипт деплоя)                   |
+| Деплой-клон    | `/home/deployer/hair-lab-deploy` — отдельный от рабочего клона агента, CD переключает коммиты только в нём                         |
+| CD             | workflow `staging.yml`: merge в `main` → сборка на хосте → миграции → `up -d` → healthcheck                                        |
+| Compose-проект | `-p hair-lab-staging` (том `hair-lab-staging_db-data`, контейнеры `hair-lab-staging-*`)                                            |
+| Порты          | `127.0.0.1:3010` (web), `127.0.0.1:3011` (api); 3000/3001 — локальный `pnpm dev`                                                   |
+| nginx          | `/etc/nginx/sites-available/hair-lab-staging` из `deploy/nginx/hair-lab.staging.dnikulshin.ru.conf`                                |
+| Образы         | собираются локально на хосте из задеплоенного коммита: `hair-lab-api:local`, `hair-lab-api-migrations:local`, `hair-lab-web:local` |
+| БД             | сервис `db` (postgres:17-alpine), наружу не публикуется; миграции — сервис `migrations`                                            |
 
 Почему не `/opt`: snap-версия Docker не видит `/opt` — `docker compose` из этого каталога падает
 с `compose file "/var/lib/snapd/void/…" is invalid`. Из `/root` и `/home` работает.
+
+Почему не `/root` (как было до #125): CD идёт по SSH под пользователем `deployer`, а у него нет
+и не должно быть доступа к `/root` и к домашнему каталогу агента (`/home/dev/.pi` — ключи
+провайдеров, `.env` проекта).
 
 Почему отдельный проект: имя `hair-lab` из `name:` в compose-файле занято более ранней попыткой,
 её том `hair-lab_db-data` инициализирован другим паролем (`prisma migrate deploy` падал с
 `P1000: Authentication failed`). `-p hair-lab-staging` даёт свой том и свои контейнеры.
 
-## Обновление
+## Обновление: CD после merge
+
+Стенд обновляется автоматически: merge в `main` → workflow **Staging** (`.github/workflows/staging.yml`)
+→ `scripts/deploy-staging.sh` на хосте → сборка образов из деплой-клона → миграции → `up -d`
+→ healthcheck `/api/health` и `/`. Прогон виден в Actions (окружение `staging`), повтор и откат —
+кнопкой _Run workflow_.
+
+Что важно знать:
+
+- **Сборка идёт на хосте, а не в CI**: порт `:8443` вшивается в `NEXT_PUBLIC_*` на сборке web и
+  отличается от прод-значений, поэтому образы staging в GHCR не публикуются.
+- **Docs-only коммиты стенд не трогают**: job `deploy` пропускается по `scripts/changed-components.mjs`.
+- **Деплой берёт код из `/home/deployer/hair-lab-deploy`**, а не из рабочего клона агента: CD
+  переключает коммиты только там. Незакоммиченные правки на стенд не попадают — сначала merge.
+- **Коммит и время деплоя**: `/home/deployer/hair-lab-staging/.deployed-sha`.
+- **Откат**: Actions → Staging → _Run workflow_, `ref` = sha предыдущего коммита из истории `main`.
+- **Лог прогона на хосте**: `journalctl` не нужен, всё в Actions; при падении healthcheck в лог
+  попадают последние 60 строк `docker compose logs api web`.
+
+Разовая настройка (пользователь `deployer`, перенос стека из `/root`, SSH-ключ, секреты) —
+`deploy/staging/install.md`.
+
+Ручной деплой остаётся как аварийный путь и делает то же самое:
 
 ```bash
-sudo bash -s <<'SH'
-set -euo pipefail
-cd /home/dev/projects/hair-lab
-docker build -f apps/api/Dockerfile -t hair-lab-api:local .
-docker build -f apps/api/Dockerfile --target migrations -t hair-lab-api-migrations:local .
-docker build -f apps/web/Dockerfile -t hair-lab-web:local \
-  --build-arg NEXT_PUBLIC_SITE_NAME="Стриж Lab" \
-  --build-arg NEXT_PUBLIC_SITE_SHORT_NAME="Стриж" \
-  --build-arg NEXT_PUBLIC_SITE_URL="https://hair-lab.dnikulshin.ru:8443" \
-  --build-arg NEXT_PUBLIC_API_URL="https://hair-lab.dnikulshin.ru:8443/api" \
-  --build-arg NEXT_PUBLIC_SITE_CITY="Москва" \
-  --build-arg NEXT_PUBLIC_SITE_TIMEZONE="Europe/Moscow" .
-SH
-
-sudo bash -c 'cd /root/hair-lab-staging && docker compose -p hair-lab-staging -f docker-compose.prod.yml run --rm -T migrations && docker compose -p hair-lab-staging -f docker-compose.prod.yml up -d --remove-orphans'
+sudo -u deployer bash /home/deployer/hair-lab-staging/deploy-staging.sh main
 ```
 
-Порт `:8443` вшивается в `NEXT_PUBLIC_*` на сборке web — при смене адреса образ web нужно пересобрать.
 `NEXT_BASE_PATH` не задаём (в отличие от локального запуска за прокси code-server).
 
 ## Демо-данные
@@ -54,7 +67,7 @@ sudo bash -c 'cd /root/hair-lab-staging && docker compose -p hair-lab-staging -f
 10:00–20:00, только вымышленные данные):
 
 ```bash
-sudo bash -c 'cd /root/hair-lab-staging && docker compose -p hair-lab-staging -f docker-compose.prod.yml exec -T db psql -U hair_lab -d hair_lab' < scripts/seed-staging.sql
+sudo -u deployer bash -c 'cd /home/deployer/hair-lab-staging && docker compose -p hair-lab-staging -f docker-compose.prod.yml exec -T db psql -U hair_lab -d hair_lab' < scripts/seed-staging.sql
 ```
 
 ## Режимы и проверенное поведение (2026-11-14)
@@ -81,7 +94,7 @@ curl -sS https://hair-lab.dnikulshin.ru:8443/api/services | head -c 200
 ## Остановка
 
 ```bash
-sudo bash -c 'cd /root/hair-lab-staging && docker compose -p hair-lab-staging -f docker-compose.prod.yml down'
+sudo -u deployer bash -c 'cd /home/deployer/hair-lab-staging && docker compose -p hair-lab-staging -f docker-compose.prod.yml down'
 ```
 
 Том с БД сохраняется; `down -v` удалит данные стенда.

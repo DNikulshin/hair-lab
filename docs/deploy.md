@@ -206,9 +206,11 @@ deploy` завершился ошибкой, шаг краснеет, `up -d` н
 слушается и не проброшен). Конфиг nginx: `deploy/nginx/hair-lab.staging.dnikulshin.ru.conf`
 (wildcard-сертификат, `X-Robots-Tag: noindex`); установка — по разделу 6.
 
-- каталог `/root/hair-lab-staging`: `docker-compose.prod.yml` + свой `.env` (не в git). Не `/opt`:
+- каталог `/home/deployer/hair-lab-staging` (пользователь `deployer`): `docker-compose.prod.yml`, свой `.env` (не в git, права `600`) и скрипт деплоя `deploy-staging.sh`; код берётся из деплой-клона `/home/deployer/hair-lab-deploy`. Не `/opt`:
   из `/opt` `docker compose` под snap-докером падает с `compose file ... is invalid` (виден только
-  путь `/var/lib/snapd/void/...`: snap-конфайнмент не видит `/opt`), из `/root` работает;
+  путь `/var/lib/snapd/void/...`: snap-конфайнмент не видит `/opt`), из `/home` и `/root` работает;
+- обновляется автоматически: merge в `main` → workflow `staging.yml` (`scripts/deploy-staging.sh`),
+  см. `docs/staging.md` и разовую настройку `deploy/staging/install.md`;
 - проект compose — `hair-lab-staging`: команды запускаются с `-p hair-lab-staging`. Имя `hair-lab`
   из `name:` в compose-файле занято прошлой попыткой, и её том `hair-lab_db-data` инициализирован
   другим паролем (`prisma migrate deploy` падал с `P1000: Authentication failed`); со своим
@@ -220,7 +222,7 @@ deploy` завершился ошибкой, шаг краснеет, `up -d` н
   `https://hair-lab.dnikulshin.ru:8443/api/payments/webhooks/yookassa`
   (`PAYMENTS_MODE=test` — когда ключи лежат в `.env` на хосте).
 
-Файл `/root/hair-lab-staging/.env` (не в git). Образы локальные, поэтому `GHCR_IMAGE_*` —
+Файл `/home/deployer/hair-lab-staging/.env` (не в git). Образы локальные, поэтому `GHCR_IMAGE_*` —
 локальные имена, а `IMAGE_TAG=local`; секретов нет, кроме пароля БД:
 
 ```bash
@@ -240,35 +242,24 @@ SALON_TIMEZONE=Europe/Moscow
 LOG_LEVEL=info
 ```
 
-Образы собираются локально, тег `local`. Порт вшивается в `NEXT_PUBLIC_*` на сборке web:
+Образы собираются локально, тег `local`. Порт вшивается в `NEXT_PUBLIC_*` на сборке web —
+вручную это делает `scripts/deploy-staging.sh` (он же собирает образы при каждом деплое):
 
 ```bash
-docker build -f apps/api/Dockerfile -t hair-lab-api:local .
-docker build -f apps/api/Dockerfile --target migrations -t hair-lab-api-migrations:local .
-docker build -f apps/web/Dockerfile -t hair-lab-web:local \
-  --build-arg NEXT_PUBLIC_SITE_NAME="Стриж Lab" \
-  --build-arg NEXT_PUBLIC_SITE_URL="https://hair-lab.dnikulshin.ru:8443" \
-  --build-arg NEXT_PUBLIC_API_URL="https://hair-lab.dnikulshin.ru:8443/api" .
+sudo -u deployer bash /home/deployer/hair-lab-staging/deploy-staging.sh main
 ```
 
 `docker compose pull` в этом разделе не нужен и только помешал бы: локальные образы
 `hair-lab-*:local` он попытался бы тянуть из Docker Hub. Образ `postgres:17-alpine` (сервис `db`)
 compose подтянет сам при `up`. `pull` нужен только в разделе 5 — там образы приходят из GHCR.
-Порядок запуска — миграции, затем контейнеры:
-
-```bash
-cd /root/hair-lab-staging
-docker compose -p hair-lab-staging -f docker-compose.prod.yml run --rm -T migrations
-docker compose -p hair-lab-staging -f docker-compose.prod.yml up -d --remove-orphans
-curl -sS https://hair-lab.dnikulshin.ru:8443/api/health   # {"status":"ok",...}
-```
+Скрипт делает всё по порядку — сборка, сверка тегов с `.env`, миграции, `up -d`, healthcheck.
 
 **Демо-данные.** Каталог услуг, мастера, их услуги и недельное расписание для staging —
 `scripts/seed-staging.sql` (те же фиксированные UUID, что в dev, поэтому интерфейс и ручные
 проверки совпадают с локальной разработкой). Из корня репозитория:
 
 ```bash
-sudo bash -c 'cd /root/hair-lab-staging && docker compose -p hair-lab-staging -f docker-compose.prod.yml exec -T db psql -U hair_lab -d hair_lab' \
+sudo -u deployer bash -c 'cd /home/deployer/hair-lab-staging && docker compose -p hair-lab-staging -f docker-compose.prod.yml exec -T db psql -U hair_lab -d hair_lab' \
   < scripts/seed-staging.sql
 ```
 
