@@ -42,9 +42,9 @@ server {
     return 301 https://strizhlab.ru$request_uri;
 }
 
-# TLS на нестандартном порту — рабочий вариант: ЮKassa принимает адреса уведомлений и return_url
-# по HTTPS на 443 и 8443 (docs/integrations.md). Тогда `listen 443 ssl` остаётся локальным,
-# а наружу публикуется, например, 8443 → 443 (см. deploy/nginx/hair-lab.staging.dnikulshin.ru.conf).
+# Прод слушает стандартный 443: этот файл — конфиг для прода, нестандартные порты в нём не нужны.
+# Вариант «внешний 8443 → локальный 443» (ЮKassa такой адрес принимает) — только для стендов
+# на машине за домашним NAT, см. deploy/nginx/hair-lab.staging.dnikulshin.ru.conf.
 server {
     listen 443 ssl;
     listen [::]:443 ssl;
