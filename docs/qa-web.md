@@ -7,17 +7,52 @@
 
 ## Общие правила
 
-- Собираем **production**-сборку: `pnpm --filter @hair-lab/web build`, затем
-  `pnpm --filter @hair-lab/web exec next start -p 3003` (порт 3000 занят `pc-remote`, 3001 — api,
-  3002 — dev web). Порт для проверок — **3003**.
-- API нужен живым только если сценарий про данные: `pnpm --filter @hair-lab/api dev`
-  с `DATABASE_URL` на dev-БД (`127.0.0.1:55432`). Для PWA/вёрстки достаточно статики.
-- Всегда смотрим **консоль** (`playwright_browser_console_messages`) и **сеть**
-  (`playwright_browser_network_requests`): 4xx/5xx на своих же ассетах — это баг, даже если
-  страница «выглядит нормально».
-- Проверяем и светлую, и тёмную тему (`playwright_browser_emulate_media`), если правка про UI.
-- После проверки гасим сервер: `pkill -f "next start -p 3003"`.
-- Если MCP `playwright` недоступен — в отчёте пишем «браузерная проверка не выполнена» с причиной,
+### Сборка и запуск (production, порт 3003)
+
+`next start` **не работает** с `output: 'standalone'` (`apps/web/next.config.ts`): сервер печатает
+предупреждение и отдаёт 404 на всех маршрутах. Запускаем standalone-сервер:
+
+```bash
+# 1. Переменные прокси-префиксов очищаем: иначе Next вшивает /absproxy/<port> в сборку
+#    и все страницы отвечают 404 (в dev-окружении code-server эти переменные бывают заданы).
+NEXT_BASE_PATH= NEXT_ASSET_PREFIX= pnpm --filter @hair-lab/web build
+
+# 2. standalone-вывод не содержит статики — докладываем её рядом.
+cp -r apps/web/.next/static apps/web/.next/standalone/apps/web/.next/static
+cp -r apps/web/public  apps/web/.next/standalone/apps/web/public
+
+# 3. Запуск (порт 3000 занят pc-remote, 3001 — api, 3002 — dev web).
+cd apps/web/.next/standalone/apps/web
+PORT=3003 HOSTNAME=127.0.0.1 NEXT_PUBLIC_API_URL=http://127.0.0.1:3001 node server.js
+```
+
+Данные витрины приходят с api — без него страницы отдают fallback «временно недоступен»:
+
+```bash
+DATABASE_URL='postgresql://hair_lab:change_me@127.0.0.1:55432/hair_lab' \
+  PAYMENTS_MODE=off APP_URL='http://localhost:3003' CORS_ORIGINS='http://localhost:3003' \
+  pnpm --filter @hair-lab/api dev
+```
+
+После проверки гасим оба процесса (по порту, не по имени — `pkill -f 'next start'` не сработает):
+
+```bash
+for p in 3003 3001; do kill "$(ss -tlnpH "sport = :$p" | grep -o 'pid=[0-9]*' | head -1 | cut -d= -f2)"; done
+```
+
+### Что смотреть и как показывать результат
+
+- Всегда смотрим **консоль** и **сеть**: 4xx/5xx на своих же ассетах — баг, даже если страница
+  «выглядит нормально». В chrome-devtools это `list_console_messages` / `list_network_requests`,
+  в playwright — `browser_console_messages` / `browser_network_requests`.
+- Проверяем светлую и тёмную тему (`emulate` → `colorScheme` / `browser_emulate_media`), если
+  правка про UI.
+- **Скриншоты владельцу — картинкой в чат**: `chrome-devtools` MCP `take_screenshot` **без
+  `filePath`** возвращает image-content, и Pi Web рисует его в транскрипте (вложения `read` так
+  не отображаются). С `filePath` тот же тул пишет PNG на диск и в чат ничего не отправляет.
+- Для этой же цели есть `publish_preview` / `/share` (см. скилл `design-preview`) — ссылка
+  `https://pi.dnikulshin.ru:8443/preview/<slug>/` для другого устройства.
+- Если MCP недоступен — в отчёте пишем «браузерная проверка не выполнена» с причиной,
   а не «проверено».
 
 ## Сценарий: PWA (#16)

@@ -1,8 +1,11 @@
 import Link from 'next/link';
 import { getMasters, getServices } from '@/features/catalog/api/catalog-api';
 import { formatPrice } from '@/features/catalog/model/format';
+import { DurationBar, maxDuration } from '@/features/catalog/ui/duration-bar';
 import { siteConfig } from '@/shared/config/site';
+import { ButtonLink } from '@/shared/ui/button';
 import { Container } from '@/shared/ui/container';
+import { Section } from '@/shared/ui/section';
 
 /**
  * Динамический рендер: на главной превью каталога, и fallback «временно недоступен»
@@ -15,73 +18,85 @@ export const dynamic = 'force-dynamic';
 const PREVIEW_LIMIT = 4;
 
 /**
- * Главная: hero-тизер и короткие превью каталога со ссылками на полные страницы.
+ * Главная: дисплейный заголовок салона, линейка-сигнатура, превью услуг и мастеров.
  * Данные те же, что у витрины (общий загрузчик `catalog-api`), логики здесь нет.
  */
 export default async function HomePage() {
   const [services, masters] = await Promise.all([getServices(), getMasters()]);
   const servicePreview = services.ok ? services.data.slice(0, PREVIEW_LIMIT) : [];
   const masterPreview = masters.ok ? masters.data.slice(0, PREVIEW_LIMIT) : [];
+  const longest = maxDuration(services.ok ? services.data : []);
 
   return (
-    <Container className="flex flex-col gap-16 py-16">
-      <main className="flex flex-col gap-12">
-        <section className="flex flex-col gap-6">
-          <p className="text-sm uppercase tracking-[0.18em] text-muted">{siteConfig.city}</p>
-          <h1 className="max-w-3xl text-5xl font-semibold leading-[1.05] tracking-tight sm:text-6xl">
-            {siteConfig.name}
-          </h1>
-          <p className="max-w-xl text-lg text-muted">{siteConfig.description}</p>
-          <div className="flex flex-wrap gap-3 pt-2">
-            <span className="rounded-card border border-border bg-surface-raised px-4 py-2 text-sm">
-              Каркас собран
-            </span>
-            <span className="rounded-card border border-border bg-surface-raised px-4 py-2 text-sm">
-              Tailwind v4 + токены
-            </span>
-            <span className="rounded-card border border-border bg-surface-raised px-4 py-2 text-sm">
-              Бренд из окружения
-            </span>
+    <main>
+      <Container className="flex flex-col gap-16 py-12 sm:py-16">
+        <section className="flex flex-col gap-8">
+          <div className="grid items-end gap-6 md:grid-cols-[1.55fr_1fr] md:gap-12">
+            <h1 className="text-[clamp(2.5rem,7vw,4.5rem)] font-extralight leading-[0.95]">
+              {siteConfig.name}
+            </h1>
+            <div className="flex max-w-sm flex-col gap-4 text-sm text-muted md:pb-2">
+              <p>{siteConfig.description}</p>
+              <p>
+                Запись онлайн: свободное окно держим{' '}
+                <span className="font-medium text-ink">15 минут</span>, звонить не нужно.
+              </p>
+            </div>
           </div>
+          {/* Сигнатура системы: единственная акцентная линия на экране. */}
+          <div aria-hidden="true" className="h-[5px] w-full bg-accent [transform:skewY(-1.1deg)]" />
         </section>
 
-        <section aria-labelledby="home-services" className="flex flex-col gap-4">
-          <div className="flex flex-wrap items-baseline justify-between gap-2">
-            <h2 id="home-services" className="text-2xl font-semibold tracking-tight">
-              Услуги
-            </h2>
-            <Link href="/services" className="text-sm underline">
+        <Section
+          id="home-services"
+          title="Услуги и длительность"
+          description={`Прайс ${siteConfig.name}: цена и время указаны для каждой услуги.`}
+          action={
+            <Link href="/services" className="text-sm text-muted underline hover:text-ink">
               Все услуги и цены
             </Link>
-          </div>
+          }
+        >
           {!services.ok ? (
             <p className="text-sm text-muted">Услуги и цены временно недоступны.</p>
           ) : servicePreview.length === 0 ? (
             <p className="text-sm text-muted">Прайс обновляется — загляните чуть позже.</p>
           ) : (
-            <ul className="flex flex-col gap-2">
+            <ul className="flex flex-col">
               {servicePreview.map((service) => (
                 <li
                   key={service.id}
-                  className="flex flex-wrap items-baseline justify-between gap-2 border-b border-border pb-2 text-sm"
+                  className="flex flex-col gap-1.5 border-t border-border py-4 last:border-b sm:flex-row sm:items-center sm:gap-6"
                 >
-                  <span>{service.name}</span>
-                  <span className="text-muted">{formatPrice(service.price.amountMinor)}</span>
+                  <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+                    <span className="text-base font-medium">{service.name}</span>
+                    {service.description ? (
+                      <span className="text-sm text-muted">{service.description}</span>
+                    ) : null}
+                  </div>
+                  {/* На узком экране шкала и цена уходят на свою строку: иначе название
+                      сжимается до нескольких символов в строке. */}
+                  <div className="flex items-center justify-between gap-4 sm:justify-end sm:gap-6">
+                    <DurationBar minutes={service.durationMin} maxMinutes={longest} />
+                    <span className="font-display text-lg font-light sm:w-24 sm:text-right">
+                      {formatPrice(service.price.amountMinor)}
+                    </span>
+                  </div>
                 </li>
               ))}
             </ul>
           )}
-        </section>
+        </Section>
 
-        <section aria-labelledby="home-masters" className="flex flex-col gap-4">
-          <div className="flex flex-wrap items-baseline justify-between gap-2">
-            <h2 id="home-masters" className="text-2xl font-semibold tracking-tight">
-              Мастера
-            </h2>
-            <Link href="/masters" className="text-sm underline">
+        <Section
+          id="home-masters"
+          title="Мастера"
+          action={
+            <Link href="/masters" className="text-sm text-muted underline hover:text-ink">
               Все мастера
             </Link>
-          </div>
+          }
+        >
           {!masters.ok ? (
             <p className="text-sm text-muted">Список мастеров временно недоступен.</p>
           ) : masterPreview.length === 0 ? (
@@ -89,19 +104,42 @@ export default async function HomePage() {
               Состав мастеров обновляется — загляните чуть позже.
             </p>
           ) : (
-            <ul className="flex flex-wrap gap-2">
+            <ul className="flex flex-wrap gap-3">
               {masterPreview.map((master) => (
                 <li
                   key={master.id}
-                  className="rounded-card border border-border bg-surface-raised px-4 py-2 text-sm"
+                  className="flex items-center gap-3 rounded-card border border-border px-4 py-2.5"
                 >
-                  {master.fullName}
+                  <span
+                    aria-hidden="true"
+                    className="flex size-9 items-center justify-center rounded-full border border-border font-display text-xs text-muted"
+                  >
+                    {master.fullName
+                      .split(/\s+/)
+                      .slice(0, 2)
+                      .map((part) => part.charAt(0).toUpperCase())
+                      .join('')}
+                  </span>
+                  <div className="flex flex-col">
+                    <span className="text-sm">{master.fullName}</span>
+                    {master.bio ? <span className="text-xs text-muted">{master.bio}</span> : null}
+                  </div>
                 </li>
               ))}
             </ul>
           )}
+        </Section>
+
+        <section className="flex flex-wrap items-center justify-between gap-6 border-t border-ink pt-8">
+          <div className="flex flex-col gap-1.5">
+            <h2 className="text-xl font-light">Записаться на визит</h2>
+            <p className="max-w-md text-sm text-muted">
+              Выберите услугу, мастера и свободное время — подтверждение придёт на почту.
+            </p>
+          </div>
+          <ButtonLink href="/services">Выбрать услугу</ButtonLink>
         </section>
-      </main>
-    </Container>
+      </Container>
+    </main>
   );
 }
