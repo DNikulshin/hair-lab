@@ -109,7 +109,8 @@ sudo install -o deployer -g deployer -m 700 \
 ```bash
 sudo install -d -o deployer -g deployer -m 700 /home/deployer/.ssh
 PUB=$(sudo cat /home/dev/.ssh/hair-lab-staging-cd.pub)
-echo "restrict,command=\"/home/deployer/hair-lab-staging/ssh-deploy.sh\" $PUB" |
+printf 'restrict,command="%s" %s\n' \
+  "/home/deployer/hair-lab-staging/ssh-deploy.sh" "$PUB" |
   sudo tee /home/deployer/.ssh/authorized_keys >/dev/null
 sudo chown deployer:deployer /home/deployer/.ssh/authorized_keys
 sudo chmod 600 /home/deployer/.ssh/authorized_keys
@@ -119,7 +120,7 @@ sudo ssh-keygen -lf /home/deployer/.ssh/authorized_keys   # ожидаем SHA25
 
 **Кавычки вокруг значения `command=` обязательны.** Без них sshd (проверено на OpenSSH 10.2)
 молча игнорирует строку ключа: вход даёт `Permission denied (publickey,password)`, а в логе нет
-внятной причины. Поэтому в команде выше пара `\"…\"` вокруг пути — не опечатка.
+внятной причины. Поэтому `printf` выше подставляет путь внутрь кавычек `"%s"` — это не опечатка.
 
 **4.5. Проверка правды.** Прогон workflow (шаг 6) — не единственная проверка: `authorized_keys`
 без `from=`, поэтому ключ можно проверить локально, и это дешевле, чем ждать раннер:
