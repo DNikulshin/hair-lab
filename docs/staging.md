@@ -24,6 +24,11 @@ wildcard-сертификат `*.dnikulshin.ru` (`/etc/ssl/dnikulshin/{fullchain
 Почему не `/opt`: snap-версия Docker не видит `/opt` — `docker compose` из этого каталога падает
 с `compose file "/var/lib/snapd/void/…" is invalid`. Из `/root` и `/home` работает.
 
+Порт `:8443` во всех адресах (APP_URL, CORS_ORIGINS, NEXT_PUBLIC_*, `return_url` ЮKassa) — это
+**только стенд**: наружу проброшен 8443 → 443 из-за домашнего NAT. В прод-значения он не переносится,
+прод слушает 443 без порта в адресах — это проверяет `pnpm check:prod-urls` в `release.yml`
+(`docs/deploy.md`, «Порты: прод — только 443», issue #142).
+
 Почему не `/root` (как было до #125): CD идёт по SSH под пользователем `deployer`, а у него нет
 и не должно быть доступа к `/root` и к домашнему каталогу агента (`/home/dev/.pi` — ключи
 провайдеров, `.env` проекта).
