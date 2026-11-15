@@ -21,13 +21,13 @@ export default function OfflinePage() {
     <main className="py-16">
       <Container className="max-w-lg">
         <section className="flex flex-col gap-4 rounded-card border border-border bg-surface-raised p-6">
-          <h1 className="text-2xl font-semibold">Нет подключения</h1>
+          <h1 className="text-2xl font-light">Нет подключения</h1>
           <p className="text-sm text-muted">
             Похоже, интернет пропал. Проверьте соединение — и попробуйте снова: страницы, которые вы
             уже открывали, останутся доступны.
           </p>
           <p className="text-sm">
-            <Link href="/" className="underline">
+            <Link href="/" className="underline hover:text-accent">
               На главную
             </Link>
           </p>

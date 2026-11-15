@@ -45,3 +45,12 @@ export function formatDuration(minutes: number): string {
   if (hours === 0) return `${rest} мин`;
   return rest === 0 ? `${hours} ч` : `${hours} ч ${rest} мин`;
 }
+
+/**
+ * Минуты без пересчёта в часы: в прайсе «120 мин» понятнее, чем «2 ч», потому что
+ * длительности сравнивают между собой (шкала `DurationBar`).
+ */
+export function formatMinutes(minutes: number): string {
+  if (!Number.isFinite(minutes) || minutes <= 0) return '—';
+  return `${Math.round(minutes)} мин`;
+}

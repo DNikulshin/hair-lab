@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatDuration, formatPrice } from './format';
+import { formatDuration, formatMinutes, formatPrice } from './format';
 
 /**
  * Intl вставляет неразрывные пробелы (U+00A0) между разрядами и перед знаком валюты.
@@ -50,5 +50,18 @@ describe('formatDuration', () => {
 
   it('не роняет рендер на некорректной длительности', () => {
     expect(formatDuration(0)).toBe('—');
+  });
+});
+
+describe('formatMinutes', () => {
+  it('показывает минуты без пересчёта в часы', () => {
+    expect(formatMinutes(60)).toBe('60 мин');
+    expect(formatMinutes(120)).toBe('120 мин');
+    expect(formatMinutes(45)).toBe('45 мин');
+  });
+
+  it('не роняет рендер на невалидном значении', () => {
+    expect(formatMinutes(0)).toBe('—');
+    expect(formatMinutes(Number.NaN)).toBe('—');
   });
 });
