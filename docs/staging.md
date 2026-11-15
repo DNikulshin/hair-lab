@@ -57,6 +57,10 @@ wildcard-сертификат `*.dnikulshin.ru` (`/etc/ssl/dnikulshin/{fullchain
   режима: `deploy <ref>` (staging, сборка на хосте) и `deploy-image <ref>` (preprod, образы
   из GHCR — `docs/preprod.md`). По адресам (`from=`) не ограничиваем: GitHub отдаёт 8350 диапазонов,
   это 151 КБ в одной строке. Поэтому же `scp` этим ключом недоступен.
+- **Wrapper обновляется сам** (issue #141): при запуске он сверяет себя с
+  `origin/main:deploy/staging/ssh-deploy.sh`, при отличии ставит новую копию и перезапускается —
+  иначе после изменения команд на хосте оставалась бы старая и деплой падал бы на «разрешена только
+  команда …».
 - **Коммит и время деплоя**: `/home/deployer/hair-lab-staging/.deployed-sha`.
 - **Откат**: Actions → Staging → _Run workflow_, `ref` = sha предыдущего коммита из истории `main`.
 - **Лог прогона на хосте**: `journalctl` не нужен, всё в Actions; при падении healthcheck в лог
