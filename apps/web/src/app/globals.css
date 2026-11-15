@@ -133,6 +133,8 @@
   --accent: #2438c9;
   --on-accent: #ffffff;
   --border: #c5c1b5;
+  /* Ошибки формы: отдельная роль, а не «красный по месту». 5.58:1 на surface. */
+  --danger: #b3261e;
 
   --font-display-stack: 'Unbounded', ui-sans-serif, system-ui, sans-serif;
   --font-body-stack:
@@ -151,6 +153,7 @@
     --accent: #8fa0ff;
     --on-accent: #131518;
     --border: #2e3238;
+    --danger: #ff9b90;
 
     color-scheme: dark;
   }
@@ -168,6 +171,7 @@
   --color-accent: var(--accent);
   --color-on-accent: var(--on-accent);
   --color-border: var(--border);
+  --color-danger: var(--danger);
 
   --font-display: var(--font-display-stack);
   --font-body: var(--font-body-stack);
@@ -212,6 +216,10 @@
   :focus-visible {
     outline: 2px solid var(--accent);
     outline-offset: 2px;
+    /* Кольцо появляется мгновенно: `transition-colors` иначе интерполирует `outline-color`
+       из currentColor, и обводка на мгновение окрашивается в цвет текста (на тёмной кнопке
+       это читалось как «фокус пропал»). */
+    transition: none;
   }
 
   /* Единственная анимация системы — смена цвета; при reduced-motion её тоже гасим. */

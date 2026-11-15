@@ -13,10 +13,12 @@ export default async function MagicLoginPage({
   const token = typeof params.token === 'string' ? params.token : null;
 
   return (
-    <main className="py-12">
-      <Container className="max-w-lg">
+    <main>
+      <Container className="max-w-lg py-12 sm:py-16">
         <section className="flex flex-col gap-4 rounded-card border border-border bg-surface-raised p-6">
-          <h1 className="text-2xl font-semibold">Вход по ссылке</h1>
+          <h1 className="text-[clamp(1.5rem,3.5vw,2rem)] font-extralight leading-tight">
+            Вход по ссылке
+          </h1>
           <MagicLinkConsumer token={token} />
         </section>
       </Container>

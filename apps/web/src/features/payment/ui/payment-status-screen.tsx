@@ -36,10 +36,11 @@ export interface PaymentStatusScreenProps {
   appointmentId: string | null;
 }
 
-const SECONDARY_LINK_CLASS = 'w-fit text-sm underline';
-const BUTTON_CLASS = 'w-fit rounded-card border border-border px-3 py-2 text-sm';
+const SECONDARY_LINK_CLASS = 'w-fit text-sm underline hover:text-accent';
+const BUTTON_CLASS =
+  'w-fit rounded-card border border-border px-4 py-2 text-sm transition-colors hover:border-ink';
 const PRIMARY_LINK_CLASS =
-  'w-fit rounded-card bg-accent px-4 py-2 text-sm font-medium text-surface';
+  'inline-flex w-fit items-center justify-center rounded-card border border-ink bg-ink px-5 py-3 text-sm font-medium text-surface transition-colors hover:border-accent hover:bg-accent hover:text-on-accent';
 
 export function PaymentStatusScreen({ appointmentId }: PaymentStatusScreenProps) {
   const [view, setView] = useState<PaymentView>({ kind: 'loading' });
@@ -143,7 +144,7 @@ export function PaymentStatusScreen({ appointmentId }: PaymentStatusScreenProps)
 
   return (
     <div className="flex flex-col gap-4">
-      <p role="status" className="text-lg font-medium">
+      <p role="status" className="text-lg font-medium text-ink">
         {state.title}
       </p>
       {state.description === null ? null : (

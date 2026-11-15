@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { Button } from '@/shared/ui/button';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import type { AccountBooking } from '@hair-lab/contracts';
@@ -173,36 +174,35 @@ export function AccountBookings({ timeZone }: AccountBookingsProps) {
       return (
         <div className="flex flex-wrap items-center gap-2">
           <p className="text-sm">Отменить эту запись?</p>
-          <button
+          <Button
             type="button"
+            variant="ghost"
+            size="sm"
             onClick={() => void handleCancel(booking.id)}
             disabled={cancellingId === booking.id}
-            className="rounded-card border border-border px-3 py-1 text-sm text-red-600 disabled:opacity-60"
+            className="border-danger text-danger hover:border-danger hover:text-danger"
           >
             {cancellingId === booking.id ? 'Отменяем…' : 'Да, отменить'}
-          </button>
-          <button
-            type="button"
-            onClick={() => setConfirmId(null)}
-            className="rounded-card border border-border px-3 py-1 text-sm"
-          >
+          </Button>
+          <Button type="button" variant="ghost" size="sm" onClick={() => setConfirmId(null)}>
             Оставить
-          </button>
+          </Button>
         </div>
       );
     }
 
     return (
       <div className="flex flex-col gap-1">
-        <button
+        <Button
           type="button"
+          variant="ghost"
+          size="sm"
           onClick={() => setConfirmId(booking.id)}
           disabled={!booking.cancellable || cancellingId === booking.id}
           aria-describedby={booking.cancellable ? undefined : `cancel-hint-${booking.id}`}
-          className="w-fit rounded-card border border-border px-3 py-1 text-sm disabled:opacity-60"
         >
           {cancellingId === booking.id ? 'Отменяем…' : 'Отменить'}
-        </button>
+        </Button>
         {booking.cancellable ? null : (
           <p id={`cancel-hint-${booking.id}`} className="text-xs text-muted">
             Отмена недоступна: до визита меньше двух часов. Позвоните в салон.
@@ -227,7 +227,10 @@ export function AccountBookings({ timeZone }: AccountBookingsProps) {
     return (
       <div className="flex flex-col gap-1">
         <p className="text-sm">Запись ещё не подтверждена.</p>
-        <Link href={paymentPagePath(booking.id)} className="w-fit text-sm underline">
+        <Link
+          href={paymentPagePath(booking.id)}
+          className="w-fit text-sm underline hover:text-accent"
+        >
           Перейти к оплате
         </Link>
       </div>
@@ -252,16 +255,12 @@ export function AccountBookings({ timeZone }: AccountBookingsProps) {
     if (state === 'unavailable') {
       return (
         <div className="flex flex-col gap-2">
-          <p role="alert" className="text-sm text-red-600">
+          <p role="alert" className="text-sm text-danger">
             {error ?? 'Не удалось загрузить записи. Попробуйте позже.'}
           </p>
-          <button
-            type="button"
-            onClick={handleRetry}
-            className="w-fit rounded-card border border-border px-3 py-2 text-sm"
-          >
+          <Button type="button" variant="ghost" size="sm" onClick={handleRetry}>
             Повторить
-          </button>
+          </Button>
         </div>
       );
     }
@@ -274,7 +273,7 @@ export function AccountBookings({ timeZone }: AccountBookingsProps) {
               : 'Прошлых записей пока нет — здесь появится история визитов.'}
           </p>
           {scope === 'upcoming' ? (
-            <Link href="/book" className="w-fit underline">
+            <Link href="/book" className="w-fit underline hover:text-accent">
               Записаться на услугу
             </Link>
           ) : null}
@@ -287,7 +286,7 @@ export function AccountBookings({ timeZone }: AccountBookingsProps) {
         {items.map((booking) => (
           <li
             key={booking.id}
-            className="flex flex-col gap-3 rounded-card border border-border bg-surface-raised p-4"
+            className="flex flex-col gap-3 rounded-card border border-border p-4"
           >
             <div className="flex flex-wrap items-baseline justify-between gap-2">
               <p className="font-medium">{booking.serviceName}</p>
@@ -321,8 +320,10 @@ export function AccountBookings({ timeZone }: AccountBookingsProps) {
             aria-pressed={scope === tab.scope}
             onClick={() => handleScopeChange(tab.scope)}
             className={[
-              'rounded-card border px-4 py-2 text-sm',
-              scope === tab.scope ? 'border-accent bg-accent text-surface' : 'border-border',
+              'rounded-card border px-4 py-1.5 text-sm transition-colors',
+              scope === tab.scope
+                ? 'border-ink bg-ink text-surface'
+                : 'border-border text-muted hover:border-ink hover:text-ink',
             ].join(' ')}
           >
             {tab.label}
@@ -331,7 +332,7 @@ export function AccountBookings({ timeZone }: AccountBookingsProps) {
       </div>
 
       {error !== null && state !== 'unavailable' ? (
-        <p role="alert" className="text-sm text-red-600">
+        <p role="alert" className="text-sm text-danger">
           {error}
         </p>
       ) : null}

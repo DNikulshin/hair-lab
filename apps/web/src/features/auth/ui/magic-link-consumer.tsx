@@ -40,10 +40,10 @@ export function MagicLinkConsumer({ token }: { token: string | null }) {
 
   return (
     <div className="flex flex-col gap-3">
-      <p role="alert" className="text-sm text-red-600">
+      <p role="alert" className="text-sm text-danger">
         Ссылка недействительна или срок её действия истёк. Запросите новую.
       </p>
-      <Link href="/login" className="w-fit text-sm underline">
+      <Link href="/login" className="w-fit text-sm underline hover:text-accent">
         Вернуться ко входу
       </Link>
     </div>

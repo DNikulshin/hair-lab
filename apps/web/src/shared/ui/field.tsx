@@ -1,41 +1,55 @@
 'use client';
 
 import { useId } from 'react';
-import type { InputHTMLAttributes, ReactNode, SelectHTMLAttributes } from 'react';
+import type { InputHTMLAttributes, ReactNode, Ref, SelectHTMLAttributes } from 'react';
+
+type FieldControlProps = {
+  id: string;
+  'aria-invalid': boolean;
+  'aria-describedby': string | undefined;
+};
 
 type FieldProps = {
   label: string;
-  /** Текст ошибки: показываем под контролом и связываем через `aria-describedby`. */
-  error?: string;
+  /** Текст ошибки: показывается под контролом и связывается с ним через `aria-describedby`. */
+  error?: string | undefined;
   hint?: string;
-  /** Явный id контрола; без него Field и контрол свяжутся автоматически (см. FieldControl). */
+  /** Явный id контрола; без него генерируется стабильный. */
   id?: string;
-  children: ReactNode;
+  /** Контрол получает id и aria-атрибуты готовыми — вручную связывать ничего не нужно. */
+  children: (control: FieldControlProps) => ReactNode;
 };
 
 /**
- * Поле формы (#13): подпись сверху, подчёркивание вместо рамки, ошибка — цветом акцента
- * и текстом, а не только цветом. Ошибка не повторяет введённое значение.
+ * Поле формы (#13): подпись сверху, подчёркивание вместо рамки, ошибка — текстом и цветом.
+ *
+ * Контрол приходит функцией, а не элементом: так `id`/`aria-invalid`/`aria-describedby`
+ * не приходится дублировать в каждом поле, и связь подписи с контролом не расходится.
  */
 export function Field({ label, error, hint, id, children }: FieldProps) {
   const generatedId = useId();
   const fieldId = id ?? generatedId;
   const errorId = `${fieldId}-error`;
   const hintId = `${fieldId}-hint`;
+  const describedBy = error ? errorId : hint ? hintId : undefined;
 
   return (
     <div className="flex flex-col gap-1.5">
       <label htmlFor={fieldId} className="text-xs text-muted">
         {label}
       </label>
-      {children}
+      {children({
+        id: fieldId,
+        'aria-invalid': error !== undefined,
+        'aria-describedby': describedBy,
+      })}
       {hint && !error ? (
         <span id={hintId} className="text-xs text-muted">
           {hint}
         </span>
       ) : null}
       {error ? (
-        <span id={errorId} className="text-xs text-accent">
+        <span id={errorId} className="text-xs text-danger">
           {error}
         </span>
       ) : null}
@@ -43,15 +57,27 @@ export function Field({ label, error, hint, id, children }: FieldProps) {
   );
 }
 
-/** Подчёркнутый инпут: граница `ink` даёт контраст ≥ 3:1, фокус — акцентная обводка. */
+/**
+ * Подчёркнутый инпут: линия `ink` даёт контраст ≥ 3:1 (требование к границам контролов),
+ * фокус — акцентная обводка из базового слоя.
+ */
 const controlClasses =
-  'w-full rounded-none border-0 border-b border-ink bg-transparent px-0 py-2 text-base text-ink placeholder:text-muted';
+  'w-full rounded-none border-0 border-b border-ink bg-transparent px-0 py-2 text-base text-ink placeholder:text-muted aria-[invalid=true]:border-danger';
 
-export function TextInput({ className, ...rest }: InputHTMLAttributes<HTMLInputElement>) {
+/**
+ * `ref` принимаем обычным пропом: в React 19 он для функциональных компонентов больше не
+ * отдельный механизм, и проброс `{...rest}` доходит до `<input>` (нужно визарду записи,
+ * который переводит фокус на первое ошибочное поле).
+ */
+type TextInputProps = InputHTMLAttributes<HTMLInputElement> & { ref?: Ref<HTMLInputElement> };
+
+export function TextInput({ className, ...rest }: TextInputProps) {
   return <input className={[controlClasses, className].filter(Boolean).join(' ')} {...rest} />;
 }
 
-export function Select({ className, children, ...rest }: SelectHTMLAttributes<HTMLSelectElement>) {
+type SelectProps = SelectHTMLAttributes<HTMLSelectElement> & { ref?: Ref<HTMLSelectElement> };
+
+export function Select({ className, children, ...rest }: SelectProps) {
   return (
     <select className={[controlClasses, className].filter(Boolean).join(' ')} {...rest}>
       {children}
