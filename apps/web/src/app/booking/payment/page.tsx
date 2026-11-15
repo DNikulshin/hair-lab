@@ -36,10 +36,12 @@ export default async function PaymentPage({ searchParams }: PaymentPageProps) {
   const appointmentId = firstParam(params.appointmentId);
 
   return (
-    <main className="py-12">
-      <Container className="max-w-lg">
+    <main>
+      <Container className="max-w-lg py-12 sm:py-16">
         <section className="flex flex-col gap-4 rounded-card border border-border bg-surface-raised p-6">
-          <h1 className="text-2xl font-semibold">Оплата записи</h1>
+          <h1 className="text-[clamp(1.5rem,3.5vw,2rem)] font-extralight leading-tight">
+            Оплата записи
+          </h1>
           {/*
             `key` по id: при переходе между двумя `/booking/payment?appointmentId=…` App Router
             не перемонтирует страницу, и экран продолжил бы опрос прежней записи. Ремоунт проще

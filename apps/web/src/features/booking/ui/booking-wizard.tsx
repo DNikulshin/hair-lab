@@ -13,6 +13,9 @@ import {
 } from 'react';
 import type { Booking, CreateBooking, Master, Service, Slot } from '@hair-lab/contracts';
 import { formatDuration, formatPrice } from '@/features/catalog';
+import { Button } from '@/shared/ui/button';
+import { Card } from '@/shared/ui/card';
+import { Field, TextInput } from '@/shared/ui/field';
 import { paymentHandoff, savePaymentDraft } from '@/features/payment';
 import { fetchSlots, submitBooking } from '../api/booking-api';
 import { createIdempotencyKey } from '../model/idempotency-key';
@@ -66,7 +69,7 @@ type SlotsStatus = 'idle' | 'loading' | 'ready' | 'unavailable';
 const DATE_OPTION_COUNT = 14;
 
 const SELECT_CLASS =
-  'w-full rounded-card border border-border bg-surface-raised px-3 py-2 text-sm disabled:opacity-60';
+  'w-full rounded-none border-0 border-b border-ink bg-transparent py-2 text-base text-ink disabled:opacity-60';
 
 interface ContactFieldProps {
   id: string;
@@ -94,36 +97,22 @@ function ContactField({
   inputRef,
   onChange,
 }: ContactFieldProps) {
-  const errorId = `${id}-error`;
-  const invalid = error !== undefined;
-
   return (
-    <div className="flex flex-col gap-1">
-      <label htmlFor={id} className="text-sm font-medium">
-        {label}
-      </label>
-      <input
-        id={id}
-        ref={inputRef}
-        type={type}
-        {...(inputMode === undefined ? {} : { inputMode })}
-        autoComplete={autoComplete}
-        {...(placeholder === undefined ? {} : { placeholder })}
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        aria-invalid={invalid}
-        aria-describedby={invalid ? errorId : undefined}
-        className={[
-          'w-full rounded-card border bg-surface-raised px-3 py-2 text-sm',
-          invalid ? 'border-red-600' : 'border-border',
-        ].join(' ')}
-      />
-      {error !== undefined ? (
-        <p id={errorId} className="text-sm text-red-600">
-          {error}
-        </p>
-      ) : null}
-    </div>
+    <Field label={label} {...(error === undefined ? {} : { error })}>
+      {(control) => (
+        <TextInput
+          {...control}
+          id={id}
+          ref={inputRef}
+          type={type}
+          {...(inputMode === undefined ? {} : { inputMode })}
+          autoComplete={autoComplete}
+          {...(placeholder === undefined ? {} : { placeholder })}
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+        />
+      )}
+    </Field>
   );
 }
 
@@ -333,13 +322,9 @@ export function BookingWizard({
           <p className="text-sm text-muted">
             Не удалось загрузить свободное время. Попробуйте ещё раз или позвоните в салон.
           </p>
-          <button
-            type="button"
-            onClick={handleRetrySlots}
-            className="w-fit rounded-card border border-border px-3 py-2 text-sm"
-          >
+          <Button type="button" variant="ghost" size="sm" onClick={handleRetrySlots}>
             Повторить
-          </button>
+          </Button>
         </div>
       );
     }
@@ -356,9 +341,7 @@ export function BookingWizard({
         {slotGroups.map((group) => (
           <div key={group.masterId} className="flex flex-col gap-2">
             {masterId === '' ? (
-              <p className="text-xs uppercase tracking-wide text-muted">
-                {masterNames.get(group.masterId) ?? 'Мастер'}
-              </p>
+              <p className="text-xs text-muted">{masterNames.get(group.masterId) ?? 'Мастер'}</p>
             ) : null}
             <ul className="flex flex-wrap gap-2">
               {group.slots.map((item) => {
@@ -370,8 +353,10 @@ export function BookingWizard({
                       aria-pressed={selected}
                       onClick={() => handleSlotSelect(item)}
                       className={[
-                        'rounded-card border px-3 py-2 text-sm',
-                        selected ? 'border-accent bg-accent text-surface' : 'border-border',
+                        'rounded-card border px-3 py-2 text-sm transition-colors',
+                        selected
+                          ? 'border-accent bg-accent text-on-accent'
+                          : 'border-border hover:border-ink',
                       ].join(' ')}
                     >
                       {formatSlotTime(item.startsAt, timeZone)}
@@ -388,20 +373,20 @@ export function BookingWizard({
 
   if (redirecting) {
     return (
-      <section className="flex flex-col gap-4 rounded-card border border-border bg-surface-raised p-6">
-        <h2 className="text-xl font-semibold">Переходим к оплате…</h2>
+      <Card className="gap-4 p-6">
+        <h2 className="text-xl font-light">Переходим к оплате…</h2>
         <p role="status" className="text-sm text-muted">
           Открываем страницу оплаты. Черновик записи останется в этой вкладке — по нему страница
           поймёт, какую запись оплачивать.
         </p>
-      </section>
+      </Card>
     );
   }
 
   if (booking !== null) {
     return (
-      <section className="flex flex-col gap-4 rounded-card border border-border bg-surface-raised p-6">
-        <h2 className="text-xl font-semibold">Запись создана</h2>
+      <Card className="gap-4 p-6">
+        <h2 className="text-xl font-light">Запись создана</h2>
         <p className="text-sm">
           {formatSlotDateTime(booking.startsAt, timeZone)}. Мы позвоним, чтобы подтвердить визит.
         </p>
@@ -432,7 +417,11 @@ export function BookingWizard({
         {paymentFallbackUrl === null ? null : (
           <p className="text-sm">
             Чтобы запись подтвердили, её нужно оплатить.{' '}
-            <a href={paymentFallbackUrl} rel="noopener noreferrer" className="underline">
+            <a
+              href={paymentFallbackUrl}
+              rel="noopener noreferrer"
+              className="underline hover:text-accent"
+            >
               Перейти к оплате
             </a>
           </p>
@@ -441,17 +430,17 @@ export function BookingWizard({
           Аккаунт не нужен: запись оформлена как гостевая. Кабинет клиента с историей визитов
           появится позже — тогда записью можно будет управлять самостоятельно.
         </p>
-        <Link href="/" className="w-fit text-sm underline">
+        <Link href="/" className="w-fit text-sm underline hover:text-accent">
           Вернуться на главную
         </Link>
-      </section>
+      </Card>
     );
   }
 
   return (
     <div className="flex flex-col gap-8">
       <section className="flex flex-col gap-2">
-        <label htmlFor="booking-service" className="text-sm font-medium">
+        <label htmlFor="booking-service" className="text-xs text-muted">
           1. Услуга
         </label>
         <select
@@ -471,7 +460,7 @@ export function BookingWizard({
       </section>
 
       <section className="flex flex-col gap-2">
-        <label htmlFor="booking-master" className="text-sm font-medium">
+        <label htmlFor="booking-master" className="text-xs text-muted">
           2. Мастер
         </label>
         <select
@@ -491,7 +480,7 @@ export function BookingWizard({
       </section>
 
       <section className="flex flex-col gap-2">
-        <label htmlFor="booking-date" className="text-sm font-medium">
+        <label htmlFor="booking-date" className="text-xs text-muted">
           3. Дата
         </label>
         <select
@@ -511,63 +500,65 @@ export function BookingWizard({
       </section>
 
       <section aria-labelledby="booking-slots" className="flex flex-col gap-3">
-        <h2 id="booking-slots" className="text-sm font-medium">
+        <h2 id="booking-slots" className="text-xs font-normal text-muted">
           4. Время
         </h2>
         {renderSlots()}
       </section>
 
       <form noValidate onSubmit={handleSubmit} className="flex flex-col gap-4">
-        <fieldset className="flex flex-col gap-3">
-          <legend className="text-sm font-medium">5. Контакты</legend>
-          <ContactField
-            id="booking-name"
-            label="Имя"
-            type="text"
-            autoComplete="name"
-            value={name}
-            error={errors.fieldErrors.clientName}
-            inputRef={nameRef}
-            onChange={setName}
-          />
-          <ContactField
-            id="booking-phone"
-            label="Телефон"
-            type="tel"
-            inputMode="tel"
-            autoComplete="tel"
-            placeholder="+7 900 000-00-00 или +1 202 555 0143"
-            value={phone}
-            error={errors.fieldErrors.clientPhone}
-            inputRef={phoneRef}
-            onChange={setPhone}
-          />
-          <ContactField
-            id="booking-email"
-            label="Электронная почта (необязательно)"
-            type="email"
-            inputMode="email"
-            autoComplete="email"
-            value={email}
-            error={errors.fieldErrors.clientEmail}
-            inputRef={emailRef}
-            onChange={setEmail}
-          />
+        {/*
+          legend не участвует во flex-раскладке: с `flex` на fieldset подпись прилипала к первому
+          полю. Поэтому группировка — fieldset + внутренний flex-контейнер, а зазор задаёт `mb-3`.
+        */}
+        <fieldset className="border-0 p-0">
+          <legend className="mb-3 text-xs text-muted">5. Контакты</legend>
+          <div className="flex flex-col gap-4">
+            <ContactField
+              id="booking-name"
+              label="Имя"
+              type="text"
+              autoComplete="name"
+              value={name}
+              error={errors.fieldErrors.clientName}
+              inputRef={nameRef}
+              onChange={setName}
+            />
+            <ContactField
+              id="booking-phone"
+              label="Телефон"
+              type="tel"
+              inputMode="tel"
+              autoComplete="tel"
+              placeholder="+7 900 000-00-00 или +1 202 555 0143"
+              value={phone}
+              error={errors.fieldErrors.clientPhone}
+              inputRef={phoneRef}
+              onChange={setPhone}
+            />
+            <ContactField
+              id="booking-email"
+              label="Электронная почта (необязательно)"
+              type="email"
+              inputMode="email"
+              autoComplete="email"
+              value={email}
+              error={errors.fieldErrors.clientEmail}
+              inputRef={emailRef}
+              onChange={setEmail}
+            />
+          </div>
         </fieldset>
 
         {errors.formError !== null ? (
-          <p role="alert" className="text-sm text-red-600">
+          <p role="alert" className="text-sm text-danger">
             {errors.formError}
           </p>
         ) : null}
 
-        <button
-          type="submit"
-          disabled={slot === null || submitting}
-          className="w-fit rounded-card bg-accent px-4 py-2 text-sm font-medium text-surface disabled:opacity-60"
-        >
+        <Button type="submit" disabled={slot === null || submitting}>
           {submitting ? 'Отправляем…' : 'Записаться'}
-        </button>
+        </Button>
 
         {slot === null ? (
           <p className="text-xs text-muted">

@@ -41,10 +41,12 @@ export default async function BookPage({ searchParams }: BookPageProps) {
   ]);
 
   return (
-    <Container className="flex flex-col gap-8 py-12">
-      <header className="flex flex-col gap-2">
-        <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">Онлайн-запись</h1>
-        <p className="max-w-2xl text-muted">
+    <Container className="flex flex-col gap-8 py-12 sm:py-16">
+      <header className="flex flex-col gap-3 border-b border-ink pb-6">
+        <h1 className="text-[clamp(2rem,5vw,3rem)] font-extralight leading-[1.05]">
+          Онлайн-запись
+        </h1>
+        <p className="max-w-2xl text-sm text-muted">
           Записаться можно без регистрации: выберите услугу, мастера и время, оставьте контакты — мы
           позвоним и подтвердим визит.
         </p>
