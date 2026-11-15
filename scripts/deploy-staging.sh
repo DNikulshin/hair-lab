@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Автоматический деплой staging (issue #125).
 #
-# Запускается workflow `staging.yml` по SSH на самом хосте staging. Скрипт лежит в каталоге
-# стека рядом с `docker-compose.prod.yml` и `.env` (workflow обновляет его копию через `scp`
-# перед запуском), поэтому `git checkout` в деплой-клоне не может подменить исполняемый файл.
+# Запускается с хоста staging принудительной командой ключа Actions (`deploy/staging/ssh-deploy.sh`,
+# issue #128) или вручную. Сам скрипт всегда берётся из `origin/main` деплой-клона
+# и запускается из временной копии, поэтому `git checkout` его не подменяет.
 #
 #   ./deploy-staging.sh [ref]
 #
@@ -16,13 +16,14 @@
 # на этапе сборки и отличается от прод-значений (см. `docs/staging.md`).
 #
 # Переменные окружения (по умолчанию — значения этого стенда):
+#   STAGING_STACK_DIR    каталог стека (compose-файл и `.env`); по умолчанию — каталог скрипта
 #   STAGING_DEPLOY_DIR   деплой-клон репозитория ($HOME/hair-lab-deploy)
 #   STAGING_PROJECT      имя compose-проекта (hair-lab-staging)
 #   STAGING_PUBLIC_URL   публичный адрес стенда (https://hair-lab.dnikulshin.ru:8443)
 #   NEXT_PUBLIC_SITE_*   бренд и город, попадают в web на сборке
 set -euo pipefail
 
-STACK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+STACK_DIR="${STAGING_STACK_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 STAGING_DEPLOY_DIR="${STAGING_DEPLOY_DIR:-$HOME/hair-lab-deploy}"
 PROJECT="${STAGING_PROJECT:-hair-lab-staging}"
 PUBLIC_URL="${STAGING_PUBLIC_URL:-https://hair-lab.dnikulshin.ru:8443}"
