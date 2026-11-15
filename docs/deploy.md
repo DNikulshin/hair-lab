@@ -202,8 +202,8 @@ deploy` завершился ошибкой, шаг краснеет, `up -d` н
 ## Staging на этой машине
 
 Не прод-контур: отдельный стек на том же хосте. Публичный адрес —
-`https://hair-lab.dnikulshin.ru:8443` (наружу проброшен только 8443 → локальный 443; 80 не
-слушается и не проброшен). Конфиг nginx: `deploy/nginx/hair-lab.staging.dnikulshin.ru.conf`
+`https://hair-lab.dnikulshin.ru:8443` (наружу проброшены 8443 → локальный 443 и 2222 → 22 для CD;
+80 не слушается и не проброшен). Конфиг nginx: `deploy/nginx/hair-lab.staging.dnikulshin.ru.conf`
 (wildcard-сертификат, `X-Robots-Tag: noindex`); установка — по разделу 6.
 
 - каталог `/home/deployer/hair-lab-staging` (пользователь `deployer`): `docker-compose.prod.yml`, свой `.env` (не в git, права `600`) и принудительная команда ключа `ssh-deploy.sh`; код берётся из деплой-клона `/home/deployer/hair-lab-deploy`, делегируемый скрипт — `scripts/deploy-staging.sh` из его `origin/main`. Не `/opt`:
