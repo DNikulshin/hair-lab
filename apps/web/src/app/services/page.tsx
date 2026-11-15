@@ -25,10 +25,12 @@ export default async function ServicesPage() {
   const services = await getServices();
 
   return (
-    <Container className="flex flex-col gap-8 py-12">
-      <header className="flex flex-col gap-2">
-        <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">Услуги и цены</h1>
-        <p className="max-w-2xl text-muted">
+    <Container className="flex flex-col gap-10 py-12 sm:py-16">
+      <header className="flex flex-col gap-3 border-b border-ink pb-6">
+        <h1 className="text-[clamp(2rem,5vw,3rem)] font-extralight leading-[1.05]">
+          Услуги и цены
+        </h1>
+        <p className="max-w-2xl text-sm text-muted">
           Прайс салона {siteConfig.name} в {siteConfig.city}: цена и длительность указаны для каждой
           услуги.
         </p>
@@ -39,7 +41,7 @@ export default async function ServicesPage() {
       ) : services.data.length === 0 ? (
         <EmptyState variant="empty" />
       ) : (
-        <div className="flex flex-col gap-10">
+        <div className="flex flex-col gap-12">
           {groupServicesByCategory(services.data).map((group) => (
             <CategorySection key={group.categoryId ?? 'uncategorized'} group={group} />
           ))}

@@ -1,35 +1,156 @@
 @import 'tailwindcss';
 
 /*
- * Дизайн-токены — единственное место, где задаются цвета, шрифты и ритм.
- * Семантика (surface / ink / muted / accent) вместо «серых» имён:
- * тему можно менять здесь, не трогая компоненты.
+ * Дизайн-система «Разметка» (#13, docs/design/README.md).
  *
- * Стилистика салона ещё не утверждена — палитра нейтральная и временная.
+ * Токены — единственное место, где задаются цвета, шрифты и радиус. Роли семантические
+ * (surface / ink / muted / accent / border), поэтому тема меняется здесь, а компоненты
+ * не трогаются. Светлая и тёмная схемы равноправны: тёмная — не «инверсия ради галочки»,
+ * контраст проверен отдельно.
+ *
+ * Шрифты вендорены (woff2 рядом, подмножества latin + cyrillic, OFL). Объявлены здесь,
+ * а не через next/font: нужен unicode-range на подмножество, и сборка не должна зависеть
+ * от доступности fonts.googleapis.com (с dev-хоста он недоступен).
  */
-:root {
-  --surface: #faf8f5;
-  --surface-raised: #ffffff;
-  --ink: #12100e;
-  --muted: #6b6560;
-  --accent: #2f4f4a;
-  --border: #e3ddd4;
 
+/* Unbounded — дисплей: 200 (h1), 300 (h2, цены), 500 (знак, кнопки). */
+@font-face {
+  font-family: 'Unbounded';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 200;
+  src: url('./fonts/unbounded-200-latin.woff2') format('woff2');
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329,
+    U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Unbounded';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 200;
+  src: url('./fonts/unbounded-200-cyrillic.woff2') format('woff2');
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+@font-face {
+  font-family: 'Unbounded';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 300;
+  src: url('./fonts/unbounded-300-latin.woff2') format('woff2');
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329,
+    U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Unbounded';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 300;
+  src: url('./fonts/unbounded-300-cyrillic.woff2') format('woff2');
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+@font-face {
+  font-family: 'Unbounded';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 500;
+  src: url('./fonts/unbounded-500-latin.woff2') format('woff2');
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329,
+    U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Unbounded';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 500;
+  src: url('./fonts/unbounded-500-cyrillic.woff2') format('woff2');
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+
+/* Golos Text — текст: 400 (тело), 500 (акценты), 600 (сильные подписи). */
+@font-face {
+  font-family: 'Golos Text';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 400;
+  src: url('./fonts/golos-text-400-latin.woff2') format('woff2');
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329,
+    U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Golos Text';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 400;
+  src: url('./fonts/golos-text-400-cyrillic.woff2') format('woff2');
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+@font-face {
+  font-family: 'Golos Text';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 500;
+  src: url('./fonts/golos-text-500-latin.woff2') format('woff2');
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329,
+    U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Golos Text';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 500;
+  src: url('./fonts/golos-text-500-cyrillic.woff2') format('woff2');
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+@font-face {
+  font-family: 'Golos Text';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 600;
+  src: url('./fonts/golos-text-600-latin.woff2') format('woff2');
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329,
+    U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Golos Text';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 600;
+  src: url('./fonts/golos-text-600-cyrillic.woff2') format('woff2');
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+
+:root {
+  --surface: #efede6;
+  --surface-raised: #f8f6f0;
+  --ink: #17181a;
+  --muted: #5c5f63;
+  --accent: #2438c9;
+  --on-accent: #ffffff;
+  --border: #c5c1b5;
+
+  --font-display-stack: 'Unbounded', ui-sans-serif, system-ui, sans-serif;
   --font-body-stack:
-    ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial,
-    'Noto Sans', sans-serif;
+    'Golos Text', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue',
+    Arial, 'Noto Sans', sans-serif;
 
   color-scheme: light;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --surface: #12100e;
-    --surface-raised: #1b1815;
-    --ink: #f4f1ec;
-    --muted: #a8a19a;
-    --accent: #8fc4b8;
-    --border: #2c2723;
+    --surface: #131518;
+    --surface-raised: #1b1e23;
+    --ink: #efede6;
+    --muted: #a8a7a1;
+    --accent: #8fa0ff;
+    --on-accent: #131518;
+    --border: #2e3238;
 
     color-scheme: dark;
   }
@@ -37,7 +158,7 @@
 
 /*
  * `@theme inline` превращает переменные в утилиты Tailwind:
- * bg-surface, text-ink, border-border, font-body.
+ * bg-surface, text-ink, border-border, rounded-card, font-display.
  */
 @theme inline {
   --color-surface: var(--surface);
@@ -45,8 +166,10 @@
   --color-ink: var(--ink);
   --color-muted: var(--muted);
   --color-accent: var(--accent);
+  --color-on-accent: var(--on-accent);
   --color-border: var(--border);
 
+  --font-display: var(--font-display-stack);
   --font-body: var(--font-body-stack);
 
   --radius-card: 12px;
@@ -59,16 +182,45 @@
 
   body {
     @apply bg-surface font-body text-ink antialiased;
+    /* Цены и длительности выравниваются по разрядам: табличные цифры во всём интерфейсе. */
+    font-variant-numeric: tabular-nums;
     text-rendering: optimizeLegibility;
   }
 
   h1,
-  h2,
-  h3 {
+  h2 {
+    @apply font-display text-balance;
+    letter-spacing: -0.02em;
+  }
+
+  /* Заголовки карточек — текстовым шрифтом: дисплейный вес 500 в мелком кегле звучит грубо. */
+  h3,
+  h4 {
     @apply text-balance;
+    letter-spacing: normal;
+  }
+
+  h1 {
+    letter-spacing: -0.03em;
   }
 
   p {
     @apply text-pretty;
+  }
+
+  /* Фокус виден всегда и одинаково: кобальтовая обводка с отступом. */
+  :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  /* Единственная анимация системы — смена цвета; при reduced-motion её тоже гасим. */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      transition-duration: 0.01ms !important;
+      animation-duration: 0.01ms !important;
+    }
   }
 }

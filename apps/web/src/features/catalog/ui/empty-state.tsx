@@ -1,4 +1,5 @@
 import { siteConfig } from '@/shared/config/site';
+import { Card } from '@/shared/ui/card';
 
 type EmptyStateVariant = 'empty' | 'unavailable';
 
@@ -29,16 +30,16 @@ export function EmptyState({ variant }: EmptyStateProps) {
   const phoneHref = phone ? `tel:${phone.replace(/[^+\d]/g, '')}` : undefined;
 
   return (
-    <div className="rounded-card border border-border bg-surface-raised p-6">
-      <h2 className="text-xl font-medium">{title}</h2>
-      <p className="mt-2 text-sm text-muted">{description}</p>
+    <Card tone="plain" className="max-w-2xl">
+      <h2 className="text-xl font-light">{title}</h2>
+      <p className="text-sm text-muted">{description}</p>
       {variant === 'unavailable' && phone && phoneHref ? (
-        <p className="mt-3 text-sm">
-          <a href={phoneHref} className="font-medium underline">
+        <p className="text-sm">
+          <a href={phoneHref} className="font-medium underline hover:text-accent">
             {phone}
           </a>
         </p>
       ) : null}
-    </div>
+    </Card>
   );
 }

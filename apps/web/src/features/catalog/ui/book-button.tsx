@@ -1,4 +1,4 @@
-import Link from 'next/link';
+import { ButtonLink } from '@/shared/ui/button';
 
 type BookButtonProps = {
   serviceId: string;
@@ -12,12 +12,13 @@ type BookButtonProps = {
  */
 export function BookButton({ serviceId, serviceName }: BookButtonProps) {
   return (
-    <Link
-      href={{ pathname: '/book', query: { serviceId } }}
-      aria-label={`Записаться онлайн: ${serviceName}`}
-      className="w-fit rounded-card bg-accent px-4 py-2 text-sm font-medium text-surface transition-opacity hover:opacity-90"
+    <ButtonLink
+      href={`/book?serviceId=${encodeURIComponent(serviceId)}`}
+      variant="ghost"
+      size="sm"
+      ariaLabel={`Записаться онлайн: ${serviceName}`}
     >
       Записаться онлайн
-    </Link>
+    </ButtonLink>
   );
 }
