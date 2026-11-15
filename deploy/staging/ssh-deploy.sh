@@ -23,6 +23,7 @@ export PATH="${STAGING_PATH:-/snap/bin:/usr/local/bin:/usr/bin:/bin}"
 export LC_ALL=C
 
 STACK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SELF="$STACK_DIR/$(basename "${BASH_SOURCE[0]}")"
 DEPLOY_DIR="${STAGING_DEPLOY_DIR:-$HOME/hair-lab-deploy}"
 
 deny() {
@@ -56,7 +57,27 @@ esac
 git -C "$DEPLOY_DIR" fetch --prune --force origin '+refs/heads/*:refs/remotes/origin/*' >/dev/null
 
 tmp="$(mktemp)"
-trap 'rm -f "$tmp"' EXIT
+trap 'rm -f "$tmp" "$tmp.wrapper" "$SELF.new"' EXIT
+
+# Самопереустановка (issue #141): этот файл sshd запускает по `authorized_keys` до любого
+# `git fetch`, поэтому сам он не обновляется. Иначе после изменения режимов на хосте остаётся
+# старая копия и деплой падает на «разрешена только команда …».
+# Переустанавливаем себя из `origin/main` и перезапускаемся: `SSH_ORIGINAL_COMMAND` живёт в
+# окружении и переживает exec, а `WRAPPER_REEXEC` не даёт зациклиться, если файл не сходится.
+if [[ "${WRAPPER_REEXEC:-0}" != 1 ]]; then
+  git -C "$DEPLOY_DIR" show "origin/main:deploy/staging/ssh-deploy.sh" >"$tmp.wrapper"
+  if ! cmp -s "$tmp.wrapper" "$SELF"; then
+    if [[ "$(head -1 "$tmp.wrapper")" == '#!/usr/bin/env bash' ]]; then
+      install -m 700 "$tmp.wrapper" "$SELF.new" && mv "$SELF.new" "$SELF" ||
+        deny "не смог обновить wrapper $SELF"
+      echo "wrapper обновлён из origin/main — перезапуск" >&2
+      WRAPPER_REEXEC=1 exec bash "$SELF"
+    fi
+    echo "предупреждение: origin/main:deploy/staging/ssh-deploy.sh не похож на wrapper — работаю текущей копией" >&2
+  fi
+  rm -f "$tmp.wrapper"
+fi
+
 git -C "$DEPLOY_DIR" show "origin/main:$runner" >"$tmp"
 
 STAGING_STACK_DIR="$STACK_DIR" STAGING_DEPLOY_DIR="$DEPLOY_DIR" bash "$tmp" "$ref"

@@ -143,7 +143,11 @@ sudo sshd -T | grep -E '^(pubkeyauthentication|passwordauthentication)'
 getent passwd deployer | cut -d: -f7                    # ожидаем /bin/bash
 ```
 
-Обновление `ssh-deploy.sh` — вручную командой `install` из шага 4.3: ключ `scp` не разрешает.
+Обновление `ssh-deploy.sh` — автоматическое (issue #141): при каждом запуске wrapper сравнивает
+себя с `origin/main:deploy/staging/ssh-deploy.sh`, при отличии ставит новую копию и перезапускается
+(в логе строка «wrapper обновлён из origin/main — перезапуск»). Если в `origin/main` окажется файл
+без ожидаемого шебанга, wrapper остаётся прежним и печатает предупреждение. Ручной `install`
+нужен только для **первой** установки (шаг 4.3).
 
 ## 5. Секрет и переменная репозитория
 
