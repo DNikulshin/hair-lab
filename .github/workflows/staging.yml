@@ -1,0 +1,89 @@
+name: Staging
+
+# CD на staging-контур (issue #125, описание стенда — docs/staging.md).
+#
+# После merge в `main` хост staging сам собирает образы из отдельного деплой-клона и
+# перезапускает стек. Образы не публикуются в GHCR: staging-адрес с портом `:8443`
+# вшивается в web-бандл на этапе сборки и отличается от прод-значений.
+#
+# Разовая настройка хоста и секретов — `deploy/staging/install.md`.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Ветка или коммит из деплой-клона; sha из истории main — откат'
+        required: false
+        default: main
+
+permissions:
+  contents: read
+
+# Два деплоя одновременно не нужны: второй встаёт в очередь (на хосте дополнительно flock).
+concurrency:
+  group: staging-deploy
+  cancel-in-progress: false
+
+env:
+  STAGING_USER: ${{ vars.STAGING_USER || 'deployer' }}
+  STAGING_APP_DIR: ${{ vars.STAGING_APP_DIR || '/home/deployer/hair-lab-staging' }}
+  STAGING_DEPLOY_DIR: ${{ vars.STAGING_DEPLOY_DIR || '/home/deployer/hair-lab-deploy' }}
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      any: ${{ steps.detect.outputs.any }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Определить, что изменилось
+        id: detect
+        run: node scripts/changed-components.mjs
+
+  deploy:
+    needs: changes
+    # docs-only коммиты стенд не трогают; ручной запуск деплоит всегда.
+    if: needs.changes.outputs.any == 'true' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    # Окружение для истории деплоев и, при желании, своих секретов (Settings → Environments).
+    environment: staging
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Подготовить SSH
+        env:
+          SSH_KEY: ${{ secrets.STAGING_SSH_KEY }}
+          STAGING_HOST: ${{ vars.STAGING_HOST }}
+        run: |
+          for required in SSH_KEY STAGING_HOST; do
+            if [ -z "${!required}" ]; then
+              echo "не задано: $required — см. deploy/staging/install.md" >&2
+              exit 1
+            fi
+          done
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H "$STAGING_HOST" >> ~/.ssh/known_hosts
+
+      - name: Выгрузить скрипт деплоя
+        env:
+          STAGING_HOST: ${{ vars.STAGING_HOST }}
+        run: |
+          # Подстановка переменных локальная: на хост уходят значения.
+          # shellcheck disable=SC2029
+          scp -q scripts/deploy-staging.sh \
+            "$STAGING_USER@$STAGING_HOST:$STAGING_APP_DIR/deploy-staging.sh.new"
+
+      - name: Собрать и перезапустить staging
+        env:
+          STAGING_HOST: ${{ vars.STAGING_HOST }}
+          REF: ${{ github.event.inputs.ref || 'main' }}
+        run: |
+          # Скрипт встаёт на место до запуска: заменять файл работающего bash нельзя.
+          # shellcheck disable=SC2029
+          ssh "$STAGING_USER@$STAGING_HOST" "mv '$STAGING_APP_DIR/deploy-staging.sh.new' '$STAGING_APP_DIR/deploy-staging.sh' && STAGING_DEPLOY_DIR='$STAGING_DEPLOY_DIR' bash '$STAGING_APP_DIR/deploy-staging.sh' '$REF'"
