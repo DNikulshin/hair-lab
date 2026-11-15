@@ -257,21 +257,11 @@ jobs:
           GHCR_PAT: ${{ secrets.GHCR_PAT }}
           GHCR_USER: ${{ github.repository_owner }}
         run: |
-          # Переменные подставляются локально: на VPS уходят значения, не имена.
+          # Логика деплоя живёт в репозитории (`scripts/deploy-prod.sh`) и передаётся по stdin:
+          # на сервер ничего не копируется, локально скрипт можно прогнать с подменённым docker.
+          # Внутри — pull, миграции, up -d, healthcheck на loopback и автооткат на предыдущий тег
+          # из `.deployed-sha`, если healthcheck не прошёл (issue #136).
           # shellcheck disable=SC2029
           ssh "$VPS_USER@$VPS_HOST" \
-            "APP_DIR='$APP_DIR' GHCR_PAT='$GHCR_PAT' GHCR_USER='$GHCR_USER' bash -s" <<'REMOTE'
-          set -euo pipefail
-          cd "$APP_DIR"
-          if [ -n "${GHCR_PAT}" ]; then
-            printf '%s' "$GHCR_PAT" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
-          fi
-          docker compose -f docker-compose.prod.yml pull
-          # Миграции до запуска новых контейнеров: `run` сам поднимет db и дождётся
-          # healthcheck (`depends_on: service_healthy`). `-T` — без TTY, в CI его нет.
-          # `set -euo pipefail` останавливает скрипт при падении миграции:
-          # до `up -d` дело не доходит, старые контейнеры продолжают работать.
-          docker compose -f docker-compose.prod.yml run --rm -T migrations
-          docker compose -f docker-compose.prod.yml up -d --remove-orphans
-          docker image prune -f
-          REMOTE
+            "APP_DIR='$APP_DIR' IMAGE_TAG='${{ github.sha }}' GHCR_PAT='$GHCR_PAT' GHCR_USER='$GHCR_USER' bash -s" \
+            < scripts/deploy-prod.sh
