@@ -1,0 +1,132 @@
+name: Preprod
+
+# Ручной прогон прод-пути (issue #139): образы собираются здесь и публикуются в GHCR,
+# на хосте стек preprod только тянет их — ровно так же, как `deploy` в `release.yml` на проде.
+# Автозапуска нет by design: это «чистый порог» перед продом, решение принимает владелец.
+#
+# Разовая настройка контура — `deploy/preprod/install.md`, описание — `docs/preprod.md`.
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Коммит из истории main (или main)'
+        required: false
+        default: main
+
+permissions:
+  contents: read
+  packages: write
+
+# Два preprod-прогона одновременно не нужны: второй встаёт в очередь (на хосте ещё flock).
+concurrency:
+  group: preprod-deploy
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io
+  STAGING_USER: ${{ vars.STAGING_USER || 'deployer' }}
+  STAGING_HOST: ${{ vars.STAGING_HOST }}
+  STAGING_PORT: ${{ vars.STAGING_SSH_PORT || '22' }}
+  # Адрес preprod вшивается в web на сборке (как на проде с его доменом).
+  SITE_URL: ${{ vars.PREPROD_SITE_URL || 'https://preprod.dnikulshin.ru:8443' }}
+
+jobs:
+  images:
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.tag.outputs.sha }}
+      tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref || 'main' }}
+
+      - name: Тег образов
+        id: tag
+        run: |
+          sha="$(git rev-parse HEAD)"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "tag=preprod-$sha" >> "$GITHUB_OUTPUT"
+
+      # Docker не принимает заглавные буквы в имени образа: owner в репозитории — DNikulshin.
+      - name: Нормализовать имя образа
+        run: echo "IMAGE_BASE=${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Собрать api
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/api/Dockerfile
+          push: true
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_BASE }}-api:${{ steps.tag.outputs.tag }}
+          cache-from: type=gha,scope=api
+          cache-to: type=gha,mode=max,scope=api
+
+      - name: Собрать образ миграций
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/api/Dockerfile
+          target: migrations
+          push: true
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_BASE }}-api-migrations:${{ steps.tag.outputs.tag }}
+          cache-from: type=gha,scope=api-migrations
+          cache-to: type=gha,mode=max,scope=api-migrations
+
+      - name: Собрать web
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/web/Dockerfile
+          push: true
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_BASE }}-web:${{ steps.tag.outputs.tag }}
+          build-args: |
+            NEXT_PUBLIC_SITE_NAME=${{ vars.NEXT_PUBLIC_SITE_NAME || 'Стриж Lab' }}
+            NEXT_PUBLIC_SITE_SHORT_NAME=${{ vars.NEXT_PUBLIC_SITE_SHORT_NAME || 'Стриж' }}
+            NEXT_PUBLIC_SITE_URL=${{ env.SITE_URL }}
+            NEXT_PUBLIC_API_URL=${{ env.SITE_URL }}/api
+            NEXT_PUBLIC_SITE_CITY=${{ vars.NEXT_PUBLIC_SITE_CITY || 'Москва' }}
+            NEXT_PUBLIC_SITE_TIMEZONE=${{ vars.NEXT_PUBLIC_SITE_TIMEZONE || 'Europe/Moscow' }}
+          cache-from: type=gha,scope=web
+          cache-to: type=gha,mode=max,scope=web
+
+  deploy:
+    needs: images
+    runs-on: ubuntu-latest
+    environment: preprod
+    timeout-minutes: 30
+    steps:
+      - name: Подготовить SSH
+        env:
+          SSH_KEY: ${{ secrets.STAGING_SSH_KEY }}
+          STAGING_HOST: ${{ vars.STAGING_HOST }}
+        run: |
+          for required in SSH_KEY STAGING_HOST; do
+            if [ -z "${!required}" ]; then
+              echo "не задано: $required — см. deploy/preprod/install.md" >&2
+              exit 1
+            fi
+          done
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -T 10 -p "$STAGING_PORT" -H "$STAGING_HOST" >> ~/.ssh/known_hosts
+
+      - name: Выкатить preprod из GHCR
+        env:
+          STAGING_HOST: ${{ vars.STAGING_HOST }}
+          SHA: ${{ needs.images.outputs.sha }}
+        run: |
+          # Принудительная команда ключа: `deploy-image <sha>` тянет образы `preprod-<sha>`
+          # из GHCR и перезапускает стек preprod (deploy/staging/ssh-deploy.sh).
+          # shellcheck disable=SC2029
+          ssh -p "$STAGING_PORT" "$STAGING_USER@$STAGING_HOST" "deploy-image $SHA"

@@ -48,8 +48,9 @@ wildcard-сертификат `*.dnikulshin.ru` (`/etc/ssl/dnikulshin/{fullchain
 - **Деплой берёт код из `/home/deployer/hair-lab-deploy`**, а не из рабочего клона агента: CD
   переключает коммиты только там. Незакоммиченные правки на стенд не попадают — сначала merge.
 - **Ключ Actions не даёт шелла**: в `authorized_keys` он ограничен принудительной командой
-  `deploy <ref>` (`deploy/staging/ssh-deploy.sh`) и опцией `restrict` — украденный ключ умеет только
-  задеплоить коммит из `main`. По адресам (`from=`) не ограничиваем: GitHub отдаёт 8350 диапазонов,
+  и опцией `restrict` — украденный ключ умеет только задеплоить коммит из `main`. У команды два
+  режима: `deploy <ref>` (staging, сборка на хосте) и `deploy-image <ref>` (preprod, образы
+  из GHCR — `docs/preprod.md`). По адресам (`from=`) не ограничиваем: GitHub отдаёт 8350 диапазонов,
   это 151 КБ в одной строке. Поэтому же `scp` этим ключом недоступен.
 - **Коммит и время деплоя**: `/home/deployer/hair-lab-staging/.deployed-sha`.
 - **Откат**: Actions → Staging → _Run workflow_, `ref` = sha предыдущего коммита из истории `main`.

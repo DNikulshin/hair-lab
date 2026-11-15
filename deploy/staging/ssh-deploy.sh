@@ -5,9 +5,11 @@
 #   restrict,command="/home/deployer/hair-lab-staging/ssh-deploy.sh" ssh-ed25519 AAAA…
 # Кавычки вокруг значения `command=` обязательны: без них sshd молча игнорирует ключ
 # (проверено на OpenSSH 10.2 — `command=/path` даёт `Permission denied`, issue #132).
-# Клиентская команда попадает в SSH_ORIGINAL_COMMAND, и единственное, что разрешено, — `deploy <ref>`.
+# Клиентская команда попадает в SSH_ORIGINAL_COMMAND, и разрешены ровно две формы:
+#   deploy <ref>        — staging: сборка на хосте (issue #125)
+#   deploy-image <ref>  — preprod: образы из GHCR, как на проде (issue #139)
 # Так ключ из секрета репозитория не даёт ни шелла, ни доступа к docker: максимум — деплой
-# коммита из истории `main`.
+# коммита из истории `main` в один из двух контуров.
 #
 # Почему не from="…": GitHub публикует 8350 диапазонов адресов Actions (151 КБ в одной строке),
 # а при их смене деплой молча ломался бы на `Permission denied`.
@@ -30,8 +32,17 @@ deny() {
 
 cmd="${SSH_ORIGINAL_COMMAND:-}"
 case "$cmd" in
-  deploy\ *) ref="${cmd#deploy }" ;;
-  *) deny "разрешена только команда «deploy <ref>», получено: «${cmd}»" ;;
+  deploy\ *)
+    ref="${cmd#deploy }"
+    runner="scripts/deploy-staging.sh"
+    ;;
+  deploy-image\ *)
+    ref="${cmd#deploy-image }"
+    runner="scripts/deploy-preprod.sh"
+    ;;
+  *)
+    deny "разрешены команды «deploy <ref>» и «deploy-image <ref>», получено: «${cmd}»"
+    ;;
 esac
 
 # main или коммит из истории main. Никаких флагов, кавычек и составных команд.
@@ -46,6 +57,6 @@ git -C "$DEPLOY_DIR" fetch --prune --force origin '+refs/heads/*:refs/remotes/or
 
 tmp="$(mktemp)"
 trap 'rm -f "$tmp"' EXIT
-git -C "$DEPLOY_DIR" show "origin/main:scripts/deploy-staging.sh" >"$tmp"
+git -C "$DEPLOY_DIR" show "origin/main:$runner" >"$tmp"
 
 STAGING_STACK_DIR="$STACK_DIR" STAGING_DEPLOY_DIR="$DEPLOY_DIR" bash "$tmp" "$ref"
