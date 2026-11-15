@@ -114,6 +114,9 @@ docker build -f apps/api/Dockerfile --target migrations -t hair-lab-api-migratio
 Отдельный контур на этой машине (свой стек, своя БД, публичный адрес `https://hair-lab.dnikulshin.ru:8443`)
 описан в `docs/staging.md` — там же каталог стека, порядок обновления, демо-данные и проверки.
 
+Прод-путь (образы из GHCR → `compose pull` → миграции → `up` → healthcheck) можно прогнать
+вручную до появления VPS: контур **preprod** — `docs/preprod.md`, настройка — `deploy/preprod/install.md`.
+
 ## 5. Деплой на VPS
 
 ### Целевой процесс: одна кнопка, ноль ручных шагов
