@@ -82,7 +82,14 @@ docker build -q -f apps/web/Dockerfile -t hair-lab-web:local \
 
 # Compose подставляет образы из `.env` (GHCR_IMAGE_* + IMAGE_TAG). Если они разойдутся
 # с собранными тегами, стенд молча поднял бы старые образы — поэтому сверяем явно.
-expected="$(printf '%s\n' hair-lab-api:local hair-lab-api-migrations:local hair-lab-web:local | sort)"
+#
+# Сверяем только те образы, которые поднимет `up -d` (`api`, `web`): сервис `migrations`
+# объявлен с `profiles: [migrations]`, а `compose config --images` профильные сервисы не
+# показывает (issue #134). Наличие образа миграций проверяем отдельно.
+for image in hair-lab-api:local hair-lab-web:local hair-lab-api-migrations:local; do
+  docker image inspect "$image" >/dev/null 2>&1 || fail "образ $image не собран"
+done
+expected="$(printf '%s\n' hair-lab-api:local hair-lab-web:local | sort)"
 actual="$("${COMPOSE[@]}" config --images | grep -E '^hair-lab-' | sort || true)"
 if [[ "$actual" != "$expected" ]]; then
   fail "compose подставит другие образы, чем собраны.
