@@ -139,18 +139,30 @@ docker build -f apps/api/Dockerfile --target migrations -t hair-lab-api-migratio
 настройка staging (`docs/staging.md`, «Диагностика CD»): там всё свелось к трём вещам — проброс
 порта, ограниченный ключ и один идемпотентный скрипт.
 
-Целевая цепочка (часть уже есть в `release.yml`):
+Цепочка (реализовано в `release.yml` + `scripts/deploy-prod.sh`):
 
 1. тег `v*.*.*` на `main` → `verify-tag` (коммит в `main`) → `images` (GHCR: `sha`, `latest`, версия);
-2. `deploy` → `docker compose pull` → `run --rm migrations` → `up -d --remove-orphans` →
-   **healthcheck `/api/health` и `/` с ретраями** → запись `.deployed-sha`;
-3. если healthcheck не прошёл — **откат на предыдущий тег** автоматически (`IMAGE_TAG=<prev>` +
-   `up -d`), а не ручное разбирательство;
+2. `deploy` → guard прод-адресов → `.env` на сервер → по SSH запускается `scripts/deploy-prod.sh`
+   (передаётся по stdin, на сервере ничего не оседает):
+   `pull` → `run --rm migrations` → `up -d --remove-orphans` → **healthcheck на loopback**
+   (`127.0.0.1:$API_PORT/health` и `127.0.0.1:$WEB_PORT/`, до 60 с) → запись `.deployed-sha`;
+3. если healthcheck не прошёл — **автооткат**: тот же compose с `IMAGE_TAG` из `.deployed-sha`,
+   повторный healthcheck, `IMAGE_TAG` возвращается в `.env`, job падает с сообщением
+   «откат на `<тег>` выполнен — прод работает». Если откат тоже не поднялся или маркера нет —
+   «нужен ручной разбор»;
 4. логи и статус — только в Actions; тексты ошибок не требуют SSH к серверу (в отличие от staging,
    где логи раннера недоступны из-за фильтрации egress).
 
-Чего пока нет (заведено отдельно): healthcheck и автооткат в `deploy`-джобе, сквозная проверка
-«тег → прод» на живом сервере, заполненные секреты/переменные (`DEPLOY_ENABLED`, `VPS_*`, `GHCR_PAT`).
+Откат «руками» при необходимости — тем же скриптом с нужным тегом:
+
+```bash
+ssh "$VPS_USER@$VPS_HOST" "APP_DIR='${VPS_APP_DIR}' IMAGE_TAG='<sha-или-тег>' bash -s" \
+  < scripts/deploy-prod.sh
+```
+
+Остаётся разовой настройкой: секреты/переменные (`DEPLOY_ENABLED`, `VPS_HOST/USER/SSH_KEY`) и сквозная
+проверка «тег → прод» на живом сервере. `GHCR_PAT` **не нужен**: пакеты публичные, `pull` идёт
+анонимно (проверено на preprod, issue #139); логин выполняется только если PAT задан.
 
 Секреты и переменные ниже — разовая настройка; после неё деплой не должен требовать SSH-сессий,
 ручных `docker`-команд и правок файлов на сервере.
@@ -169,13 +181,13 @@ docker build -f apps/api/Dockerfile --target migrations -t hair-lab-api-migratio
 
 Секреты:
 
-| Секрет                                | Назначение                                        |
-| ------------------------------------- | ------------------------------------------------- |
-| `VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY` | доступ по SSH (ключ без passphrase)               |
-| `POSTGRES_PASSWORD`                   | пароль БД                                         |
-| `GHCR_PAT`                            | токен с `read:packages` для `docker login` на VPS |
-| `YOOKASSA_SECRET_KEY`                 | секретный ключ магазина ЮKassa                    |
-| `SMTP_PASSWORD`                       | пароль приложения почты                           |
+| Секрет                                | Назначение                                                                          |
+| ------------------------------------- | ----------------------------------------------------------------------------------- |
+| `VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY` | доступ по SSH (ключ без passphrase)                                                 |
+| `POSTGRES_PASSWORD`                   | пароль БД                                                                           |
+| `GHCR_PAT`                            | **не обязателен**: пакеты публичные; если задан — выполняется `docker login` на VPS |
+| `YOOKASSA_SECRET_KEY`                 | секретный ключ магазина ЮKassa                                                      |
+| `SMTP_PASSWORD`                       | пароль приложения почты                                                             |
 
 Имена образов в GHCR приводятся к нижнему регистру в workflow (шаг «Нормализовать имя образа»):
 Docker не принимает заглавные буквы в имени образа.
