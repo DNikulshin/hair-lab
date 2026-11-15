@@ -96,12 +96,17 @@ sudo install -o deployer -g deployer -m 700 \
 
 ```bash
 sudo install -d -o deployer -g deployer -m 700 /home/deployer/.ssh
-line="restrict,command=\"/home/deployer/hair-lab-staging/ssh-deploy.sh\" $(sudo cat /home/dev/.ssh/hair-lab-staging-cd.pub)"
-printf '%s\n' "$line" | sudo tee /home/deployer/.ssh/authorized_keys >/dev/null
+PUB=$(sudo cat /home/dev/.ssh/hair-lab-staging-cd.pub)
+echo "restrict,command=/home/deployer/hair-lab-staging/ssh-deploy.sh $PUB" |
+  sudo tee /home/deployer/.ssh/authorized_keys >/dev/null
 sudo chown deployer:deployer /home/deployer/.ssh/authorized_keys
 sudo chmod 600 /home/deployer/.ssh/authorized_keys
+sudo cut -c1-80 /home/deployer/.ssh/authorized_keys
 sudo ssh-keygen -lf /home/deployer/.ssh/authorized_keys   # ожидаем SHA256:NMfj…
 ```
+
+Кавычек вокруг пути нет намеренно: в нём нет пробелов и запятых, а `sshd` разбирает такое значение
+без них — зато команда копируется в терминал без экранирования.
 
 **4.4. Проверка правды.** Локально `ssh` этим ключом не подключается не будет — `sshd` выполняет
 только принудительную команду с аргументом от клиента, поэтому проверка настоящая — первый

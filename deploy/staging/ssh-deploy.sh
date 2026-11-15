@@ -2,7 +2,8 @@
 # Принудительная команда для ключа GitHub Actions (issue #128).
 #
 # sshd запускает её вместо любой команды клиента: в `authorized_keys` строка выглядит как
-#   restrict,command="/home/deployer/hair-lab-staging/ssh-deploy.sh" ssh-ed25519 AAAA…
+#   restrict,command=/home/deployer/hair-lab-staging/ssh-deploy.sh ssh-ed25519 AAAA…
+# (кавычки не нужны: в пути нет пробелов и запятых)
 # Клиентская команда попадает в SSH_ORIGINAL_COMMAND, и единственное, что разрешено, — `deploy <ref>`.
 # Так ключ из секрета репозитория не даёт ни шелла, ни доступа к docker: максимум — деплой
 # коммита из истории `main`.
