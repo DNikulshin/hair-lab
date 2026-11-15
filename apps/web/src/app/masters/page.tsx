@@ -24,10 +24,10 @@ export default async function MastersPage() {
   const masters = await getMasters();
 
   return (
-    <Container className="flex flex-col gap-8 py-12">
-      <header className="flex flex-col gap-2">
-        <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">Мастера</h1>
-        <p className="max-w-2xl text-muted">
+    <Container className="flex flex-col gap-10 py-12 sm:py-16">
+      <header className="flex flex-col gap-3 border-b border-ink pb-6">
+        <h1 className="text-[clamp(2rem,5vw,3rem)] font-extralight leading-[1.05]">Мастера</h1>
+        <p className="max-w-2xl text-sm text-muted">
           Кто работает в салоне {siteConfig.name} и какие услуги оказывает.
         </p>
       </header>
@@ -38,7 +38,7 @@ export default async function MastersPage() {
         <EmptyState variant="empty" />
       ) : (
         <section aria-labelledby="masters-list" className="flex flex-col gap-4">
-          <h2 id="masters-list" className="text-2xl font-semibold tracking-tight">
+          <h2 id="masters-list" className="text-2xl font-light">
             Наши мастера
           </h2>
           <ul className="grid gap-4 sm:grid-cols-2">
