@@ -32,6 +32,9 @@ concurrency:
 env:
   # Остальные пути зашиты в принудительной команде на хосте (`authorized_keys`).
   STAGING_USER: ${{ vars.STAGING_USER || 'deployer' }}
+  # Хост за домашним NAT: наружу проброшен только 8443, поэтому SSH идёт на внешний 2222 → 22
+  # (issue #130). Локальный проброс — `STAGING_SSH_PORT` в переменных репозитория.
+  STAGING_PORT: ${{ vars.STAGING_SSH_PORT || '22' }}
 
 jobs:
   changes:
@@ -70,7 +73,7 @@ jobs:
           install -m 700 -d ~/.ssh
           printf '%s\n' "$SSH_KEY" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
-          ssh-keyscan -H "$STAGING_HOST" >> ~/.ssh/known_hosts
+          ssh-keyscan -T 10 -p "$STAGING_PORT" -H "$STAGING_HOST" >> ~/.ssh/known_hosts
 
       - name: Собрать и перезапустить staging
         env:
@@ -80,4 +83,4 @@ jobs:
           # Ключ ограничен принудительной командой `deploy <ref>` (deploy/staging/ssh-deploy.sh):
           # клиентская команда не исполняется, sshd передаёт её только в SSH_ORIGINAL_COMMAND.
           # shellcheck disable=SC2029
-          ssh "$STAGING_USER@$STAGING_HOST" "deploy $REF"
+          ssh -p "$STAGING_PORT" "$STAGING_USER@$STAGING_HOST" "deploy $REF"

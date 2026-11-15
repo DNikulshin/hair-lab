@@ -82,7 +82,19 @@ root — поэтому в `authorized_keys` ключ ограничен при�
 ls -l /home/dev/.ssh/hair-lab-staging-cd.pub      # ssh-ed25519 …, отпечаток проверяется ниже
 ```
 
-**4.2. Принудительная команда.** `deploy/staging/ssh-deploy.sh` из репозитория кладётся в каталог
+**4.2. Проброс порта.** Хост за домашним NAT: наружу проброшены только 8443 → 443 (сайт) и
+**2222 → 22** (SSH для CD). Правило ставится на роутере (владелец), на хосте — разрешение ufw:
+
+```bash
+sudo ufw status numbered | grep -E '22|8443'
+sudo ufw allow 22/tcp        # если 22 закрыт; `ufw` по умолчанию DROP
+```
+
+В репозитории это переменная `STAGING_SSH_PORT=2222` (шаг 5): без неё workflow стучится в 22 и
+получает `Connection refused`. При смене домашнего IP деплой отвалится, пока DNS
+`hair-lab.dnikulshin.ru` не укажет на новый адрес.
+
+**4.3. Принудительная команда.** `deploy/staging/ssh-deploy.sh` из репозитория кладётся в каталог
 стека и принадлежит `deployer`:
 
 ```bash
@@ -91,7 +103,7 @@ sudo install -o deployer -g deployer -m 700 \
   /home/deployer/hair-lab-staging/ssh-deploy.sh
 ```
 
-**4.3. `authorized_keys`.** Одна строка, ключ ограничен командой и опциями `restrict`
+**4.4. `authorized_keys`.** Одна строка, ключ ограничен командой и опциями `restrict`
 (без `scp`, проброса агента, pty и форвардинга):
 
 ```bash
@@ -108,7 +120,7 @@ sudo ssh-keygen -lf /home/deployer/.ssh/authorized_keys   # ожидаем SHA25
 Кавычек вокруг пути нет намеренно: в нём нет пробелов и запятых, а `sshd` разбирает такое значение
 без них — зато команда копируется в терминал без экранирования.
 
-**4.4. Проверка правды.** Локально `ssh` этим ключом не подключается не будет — `sshd` выполняет
+**4.5. Проверка правды.** Локально `ssh` этим ключом не подключается не будет — `sshd` выполняет
 только принудительную команду с аргументом от клиента, поэтому проверка настоящая — первый
 прогон workflow (шаг 6). Что можно проверить на хосте:
 
@@ -128,8 +140,9 @@ gh secret set STAGING_SSH_KEY < /home/dev/.ssh/hair-lab-staging-cd
 gh variable set STAGING_HOST --body "hair-lab.dnikulshin.ru"   # адрес хоста для SSH (порт 22)
 ```
 
-Необязательная переменная `STAGING_USER` (по умолчанию `deployer`). Пути на хосте в workflow не
-передаются: они зашиты в принудительной команде и в `$HOME/hair-lab-deploy` деплой-клона.
+Необязательная переменная `STAGING_USER` (по умолчанию `deployer`), порт SSH — `STAGING_SSH_PORT`
+(`2222` на этом хосте). Пути на хосте в workflow не передаются: они зашиты в принудительной
+команде и в `$HOME/hair-lab-deploy` деплой-клона.
 
 Окружение `staging` создаётся само при первом запуске workflow; в нём можно включить
 required reviewers или свои секреты (Settings → Environments).
