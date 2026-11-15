@@ -109,29 +109,41 @@ sudo install -o deployer -g deployer -m 700 \
 ```bash
 sudo install -d -o deployer -g deployer -m 700 /home/deployer/.ssh
 PUB=$(sudo cat /home/dev/.ssh/hair-lab-staging-cd.pub)
-echo "restrict,command=/home/deployer/hair-lab-staging/ssh-deploy.sh $PUB" |
+printf 'restrict,command="%s" %s\n' \
+  "/home/deployer/hair-lab-staging/ssh-deploy.sh" "$PUB" |
   sudo tee /home/deployer/.ssh/authorized_keys >/dev/null
 sudo chown deployer:deployer /home/deployer/.ssh/authorized_keys
 sudo chmod 600 /home/deployer/.ssh/authorized_keys
-sudo cut -c1-80 /home/deployer/.ssh/authorized_keys
+sudo cut -c1-100 /home/deployer/.ssh/authorized_keys
 sudo ssh-keygen -lf /home/deployer/.ssh/authorized_keys   # ожидаем SHA256:NMfj…
 ```
 
-Кавычек вокруг пути нет намеренно: в нём нет пробелов и запятых, а `sshd` разбирает такое значение
-без них — зато команда копируется в терминал без экранирования.
+**Кавычки вокруг значения `command=` обязательны.** Без них sshd (проверено на OpenSSH 10.2)
+молча игнорирует строку ключа: вход даёт `Permission denied (publickey,password)`, а в логе нет
+внятной причины. Поэтому `printf` выше подставляет путь внутрь кавычек `"%s"` — это не опечатка.
 
-**4.5. Проверка правды.** Локально `ssh` этим ключом не подключается не будет — `sshd` выполняет
-только принудительную команду с аргументом от клиента, поэтому проверка настоящая — первый
-прогон workflow (шаг 6). Что можно проверить на хосте:
+**4.5. Проверка правды.** Прогон workflow (шаг 6) — не единственная проверка: `authorized_keys`
+без `from=`, поэтому ключ можно проверить локально, и это дешевле, чем ждать раннер:
+
+```bash
+ssh -i /home/dev/.ssh/hair-lab-staging-cd -p 22 deployer@127.0.0.1 'echo ping'
+```
+
+Ожидаемо: `отказано: разрешена только команда «deploy <ref>»…` и код 64 — это значит, что
+**аутентификация прошла**, а принудительная команда отвергла лишний аргумент. Если видишь
+`Permission denied (publickey,password)` — проблема в `authorized_keys` (нет файла, не те права
+или нет кавычек в `command=`). Боевой запуск (он же выполняет Actions):
+
+```bash
+ssh -i /home/dev/.ssh/hair-lab-staging-cd -p 22 deployer@127.0.0.1 'deploy main'
+```
 
 ```bash
 sudo sshd -T | grep -E '^(pubkeyauthentication|passwordauthentication)'
 getent passwd deployer | cut -d: -f7                    # ожидаем /bin/bash
-sudo -u deployer bash -c 'SSH_ORIGINAL_COMMAND="deploy main" /home/deployer/hair-lab-staging/ssh-deploy.sh; echo exit=$?'
 ```
 
-Последняя команда — боевой деплой (её же выполняет Actions), запускай только когда стек готов.
-Обновление `ssh-deploy.sh` — вручную этой же командой `install`: ключ `scp` не разрешает.
+Обновление `ssh-deploy.sh` — вручную командой `install` из шага 4.3: ключ `scp` не разрешает.
 
 ## 5. Секрет и переменная репозитория
 
