@@ -95,6 +95,11 @@ services:
       # Серверные запросы Next.js к api внутри compose-сети (runtime, не build-arg).
       # Браузер по-прежнему ходит через NEXT_PUBLIC_API_URL и nginx.
       API_URL: http://api:3001
+      # Метка стенда для плашки на странице (issue #170). Значения пишут в `.env` стека
+      # deploy-скрипты стендов; на проде их нет — плашка не рендерится.
+      DEPLOY_ENV: ${DEPLOY_ENV:-}
+      DEPLOY_SHA: ${DEPLOY_SHA:-}
+      DEPLOY_AT: ${DEPLOY_AT:-}
     depends_on:
       api:
         condition: service_healthy

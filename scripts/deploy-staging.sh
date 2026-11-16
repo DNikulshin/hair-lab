@@ -99,6 +99,23 @@ if [[ "$actual" != "$expected" ]]; then
 fi
 
 # --- миграции и перезапуск --------------------------------------------------
+# Метка стенда для плашки на странице (issue #170). `web` читает их как runtime-переменные,
+# поэтому пишем в `.env` стека (compose прокидывает их в контейнер), а не в build-args:
+# один и тот же образ должен вести себя по-разному на стенде и на проде.
+set_env_var() { # файл ключ значение — заменяет строку KEY=..., не дублирует ключ
+  local file="$1" key="$2" value="$3" tmp
+  tmp="$(mktemp)"
+  grep -v "^${key}=" "$file" >"$tmp" || true
+  printf '%s=%s\n' "$key" "$value" >>"$tmp"
+  cat "$tmp" >"$file" # cat, а не mv: у `.env` права 600, их надо сохранить
+  rm -f "$tmp"
+}
+
+DEPLOYED_AT="$(date -u +%FT%TZ)"
+set_env_var "$STACK_DIR/.env" DEPLOY_ENV staging
+set_env_var "$STACK_DIR/.env" DEPLOY_SHA "$TARGET"
+set_env_var "$STACK_DIR/.env" DEPLOY_AT "$DEPLOYED_AT"
+
 log "миграции"
 "${COMPOSE[@]}" run --rm -T migrations
 log "перезапуск контейнеров"
@@ -122,5 +139,5 @@ if ((ready == 0)); then
   fail "стенд не отвечает на $PUBLIC_URL/api/health и $PUBLIC_URL/ после перезапуска"
 fi
 
-printf '%s %s\n' "$TARGET" "$(date -u +%FT%TZ)" >"$STACK_DIR/.deployed-sha"
+printf '%s %s\n' "$TARGET" "$DEPLOYED_AT" >"$STACK_DIR/.deployed-sha"
 log "готово: $PUBLIC_URL на коммите $TARGET"
