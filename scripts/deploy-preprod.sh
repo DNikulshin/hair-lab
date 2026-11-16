@@ -64,6 +64,23 @@ while read -r image; do
 done <<<"$actual"
 
 # --- тянем образы и перезапускаем ------------------------------------------
+# Метка стенда для плашки на странице (issue #170): `web` читает их как runtime-переменные,
+# поэтому пишем в `.env` стека (compose прокидывает их в контейнер). Образы тут из GHCR,
+# то есть одинаковые с продом — различие задаётся именно этими переменными.
+set_env_var() { # файл ключ значение — заменяет строку KEY=..., не дублирует ключ
+  local file="$1" key="$2" value="$3" tmp
+  tmp="$(mktemp)"
+  grep -v "^${key}=" "$file" >"$tmp" || true
+  printf '%s=%s\n' "$key" "$value" >>"$tmp"
+  cat "$tmp" >"$file" # cat, а не mv: у `.env` права 600, их надо сохранить
+  rm -f "$tmp"
+}
+
+DEPLOYED_AT="$(date -u +%FT%TZ)"
+set_env_var "$STACK_DIR/.env" DEPLOY_ENV preprod
+set_env_var "$STACK_DIR/.env" DEPLOY_SHA "$TARGET"
+set_env_var "$STACK_DIR/.env" DEPLOY_AT "$DEPLOYED_AT"
+
 log "pull образов"
 "${COMPOSE[@]}" pull
 log "миграции"
@@ -89,5 +106,5 @@ if ((ready == 0)); then
   fail "preprod не отвечает на loopback-портах $API_PORT/health и $WEB_PORT после перезапуска"
 fi
 
-printf '%s %s\n' "$TARGET" "$(date -u +%FT%TZ)" >"$STACK_DIR/.deployed-sha"
+printf '%s %s\n' "$TARGET" "$DEPLOYED_AT" >"$STACK_DIR/.deployed-sha"
 log "готово: preprod на коммите $TARGET (тег $IMAGE_TAG)"
