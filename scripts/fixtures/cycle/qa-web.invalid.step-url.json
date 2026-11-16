@@ -1,0 +1,31 @@
+{
+  "status": "done",
+  "reason": null,
+  "steps": [
+    {
+      "id": "s1",
+      "url": "",
+      "action": "Открыть страницу записи и выбрать услугу",
+      "observed": "Форма записи отрисована, ошибок в консоли нет",
+      "console_errors": [],
+      "failed_requests": [],
+      "cache_headers": "cache-control: no-store"
+    },
+    {
+      "id": "s2",
+      "url": "http://127.0.0.1:3003/login",
+      "action": "Войти тестовым клиентом",
+      "observed": "Редирект в кабинет клиента",
+      "console_errors": [
+        {
+          "type": "warning",
+          "text": "Slow network is detected"
+        }
+      ],
+      "failed_requests": ["GET /api/slots 500"],
+      "cache_headers": {
+        "cache-control": "no-store"
+      }
+    }
+  ]
+}

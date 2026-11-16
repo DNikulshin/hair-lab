@@ -1,0 +1,11 @@
+[
+  "const commit = '0123456789abcdef0123456789abcdef01234567';",
+  "const id = '550e8400-e29b-41d4-a716-446655440000';",
+  "// refs.mjs:12 — ссылка на строку в отчёте",
+  "API_KEY=\"<вставьте ключ>\"",
+  "token=xxxxxxxxxxxxxxxx",
+  "password=\"changeme\"",
+  "example_token = \"example-token-value\"",
+  "DATABASE_URL=postgres://user:{{DB_PASSWORD}}@db:5432/hair_lab",
+  "const note = 'в диффе нет секретов';"
+]

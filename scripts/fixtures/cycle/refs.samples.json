@@ -1,0 +1,36 @@
+{
+  "parse": [
+    {
+      "ref": "scripts/lib/cycle/redact.mjs:12",
+      "kind": "path",
+      "value": "scripts/lib/cycle/redact.mjs",
+      "line": 12
+    },
+    {
+      "ref": "gate:typecheck",
+      "kind": "gate",
+      "value": "typecheck",
+      "line": null
+    },
+    {
+      "ref": "qa:s2",
+      "kind": "qa",
+      "value": "s2",
+      "line": null
+    },
+    {
+      "ref": "  gate:lint  ",
+      "kind": "gate",
+      "value": "lint",
+      "line": null
+    }
+  ],
+  "malformed": ["", "gate:", "qa:", "gates:typecheck", "scripts/lib/cycle/redact.mjs", "12"],
+  "forbidden": [
+    "/etc/passwd:1",
+    "../secret.mjs:1",
+    ".pi/artifacts/2026-11-16-1-slug/state.json:1",
+    "node_modules/lodash/index.js:1",
+    "scripts/missing.mjs:1"
+  ]
+}

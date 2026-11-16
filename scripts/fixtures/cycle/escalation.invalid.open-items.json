@@ -1,0 +1,6 @@
+{
+  "reason": "iteration_limit",
+  "detail": "Две итерации исчерпаны, остаётся BLOCKER R1",
+  "draft_pr_allowed": true,
+  "open_items": "R1"
+}

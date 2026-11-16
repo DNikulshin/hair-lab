@@ -1,0 +1,48 @@
+{
+  "issue": 152,
+  "slug": "orchestrator-t1b",
+  "branch": "chore/152-orchestrator-t1b",
+  "base_sha": "0123456789abcdef0123456789abcdef01234567",
+  "iteration": 1,
+  "max_iterations": 2,
+  "stage": "CODE",
+  "stage_status": "RUNNING",
+  "criteria_source": "issue",
+  "retries": {
+    "REVIEW": 0,
+    "EVALUATE": 0,
+    "evidence": 0
+  },
+  "owner_approved": false,
+  "models": {
+    "plan": "vendor/plan-model",
+    "code": "vendor/code-model",
+    "review": "vendor/review-model"
+  },
+  "history": [
+    {
+      "stage": "INIT",
+      "iteration": 1,
+      "started_at": "2026-11-16T09:00:00Z",
+      "finished_at": "2026-11-16T09:01:00Z",
+      "status": "done"
+    },
+    {
+      "stage": "PLAN",
+      "iteration": 1,
+      "started_at": "2026-11-16T09:01:00Z",
+      "finished_at": "2026-11-16T09:05:00Z",
+      "status": "done"
+    },
+    {
+      "stage": "CODE",
+      "iteration": 1,
+      "started_at": "2026-11-16T09:05:00Z",
+      "finished_at": null,
+      "status": "running"
+    }
+  ],
+  "escalation": null,
+  "started_at": "2026-11-16T09:00:00Z",
+  "updated_at": "2026-11-16T09:06:00Z"
+}
