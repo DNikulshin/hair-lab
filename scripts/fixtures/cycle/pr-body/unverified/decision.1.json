@@ -1,0 +1,23 @@
+{
+  "iteration": 1,
+  "action": "PROCEED_WITH_UNVERIFIED",
+  "retry_stage": null,
+  "acquire": ["gate:test_int"],
+  "reasons": ["criteria:C2 partial", "criteria:C3 unverified"],
+  "rework_items": [],
+  "unverified": [
+    "gate:test_int not_run (no_database)",
+    "criteria:C3 unverified",
+    "evaluation unverified: Поведение на битом JSON артефакта"
+  ],
+  "downgraded": [],
+  "counts": {
+    "blockers": 0,
+    "major": 0,
+    "minor": 2,
+    "followups": 0,
+    "partial_criteria": 1,
+    "verdict_without_evidence": 0
+  },
+  "unresolved_refs": 1
+}

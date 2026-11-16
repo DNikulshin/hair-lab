@@ -1,0 +1,38 @@
+{
+  "verdict": "REWORK",
+  "criteria": [
+    {
+      "id": "C1",
+      "status": "unmet",
+      "evidence": ["scripts/lib/cycle/redact.mjs:64"],
+      "note": "Маскирование не применяется к сводке находок"
+    },
+    {
+      "id": "C2",
+      "status": "met",
+      "evidence": ["gate:contracts_build"],
+      "note": "Сборка контрактов не затронута"
+    }
+  ],
+  "scores": {
+    "coverage": 1,
+    "correctness": 0,
+    "tests": 2,
+    "data": 3,
+    "pii_security": 0,
+    "architecture": 3,
+    "scope": 3,
+    "docs": 1,
+    "evidence": 2
+  },
+  "defects": [
+    {
+      "id": "D1",
+      "severity": "MAJOR",
+      "claim": "В сообщении об ошибке нет пути файла",
+      "evidence": ["scripts/lib/cycle/refs.mjs:141"],
+      "repro": "resolveRef('src/missing.mjs:1') печатает пустой путь"
+    }
+  ],
+  "unverified": []
+}

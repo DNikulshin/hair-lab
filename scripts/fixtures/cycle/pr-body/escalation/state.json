@@ -1,0 +1,46 @@
+{
+  "issue": 158,
+  "slug": "cycle-pr-body",
+  "branch": "chore/158-cycle-pr-body",
+  "base_sha": "0123456789abcdef0123456789abcdef01234567",
+  "iteration": 2,
+  "max_iterations": 2,
+  "stage": "ESCALATED",
+  "stage_status": "done",
+  "criteria_source": "issue",
+  "retries": {
+    "REVIEW": 0,
+    "EVALUATE": 0,
+    "evidence": 0
+  },
+  "owner_approved": false,
+  "models": {
+    "plan": "vendor/plan-model",
+    "code": "vendor/code-model",
+    "review": "vendor/review-model",
+    "evaluate": "vendor/evaluate-model"
+  },
+  "history": [
+    {
+      "stage": "INIT",
+      "iteration": 1,
+      "started_at": "2026-11-16T09:00:00Z",
+      "finished_at": "2026-11-16T09:01:00Z",
+      "status": "done"
+    },
+    {
+      "stage": "DECIDE",
+      "iteration": 2,
+      "started_at": "2026-11-16T10:30:00Z",
+      "finished_at": "2026-11-16T10:32:00Z",
+      "status": "done"
+    }
+  ],
+  "escalation": {
+    "reason": "iteration_limit",
+    "detail": "Две итерации исчерпаны, остаётся BLOCKER R1",
+    "draft_pr_allowed": true
+  },
+  "started_at": "2026-11-16T09:00:00Z",
+  "updated_at": "2026-11-16T10:32:00Z"
+}

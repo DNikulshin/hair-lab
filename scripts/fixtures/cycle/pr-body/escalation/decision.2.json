@@ -1,0 +1,27 @@
+{
+  "iteration": 2,
+  "action": "ESCALATE",
+  "retry_stage": null,
+  "acquire": [],
+  "reasons": [
+    "review:BLOCKER R1",
+    "criteria:C1 unmet",
+    "evaluation:MAJOR D1",
+    "escalate:iteration_limit"
+  ],
+  "rework_items": [
+    "R1 [BLOCKER] scripts/lib/cycle/redact.mjs:64 — маскирование не применяется к сводке",
+    "D1 [MAJOR] scripts/lib/cycle/refs.mjs:141 — в сообщении нет пути файла"
+  ],
+  "unverified": [],
+  "downgraded": [],
+  "counts": {
+    "blockers": 2,
+    "major": 1,
+    "minor": 0,
+    "followups": 0,
+    "partial_criteria": 0,
+    "verdict_without_evidence": 0
+  },
+  "unresolved_refs": 0
+}

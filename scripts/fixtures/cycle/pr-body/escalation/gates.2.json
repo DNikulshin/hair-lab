@@ -1,0 +1,28 @@
+{
+  "iteration": 2,
+  "base_sha": "0123456789abcdef0123456789abcdef01234567",
+  "head": "89abcdef0123456789abcdef0123456789abcdef",
+  "started_at": "2026-11-16T10:10:00Z",
+  "gates": [
+    {
+      "id": "contracts_build",
+      "cmd": "pnpm --filter @hair-lab/contracts build",
+      "required": true,
+      "status": "pass",
+      "exit": 0,
+      "duration_s": 12.5,
+      "log": null,
+      "reason": null
+    },
+    {
+      "id": "test_int",
+      "cmd": "pnpm test:int",
+      "required": true,
+      "status": "skipped",
+      "exit": null,
+      "duration_s": 0,
+      "log": null,
+      "reason": "not_applicable"
+    }
+  ]
+}
