@@ -45,11 +45,20 @@ ESLint-правила `no-restricted-imports` не умеют проверять
 - CSRF для методов кроме GET/HEAD/OPTIONS проверяет Origin, с fallback на Referer; allowlist — origin(APP_URL) ∪ CORS_ORIGINS. Per-route rate limit: регистрация 5/час/IP, вход 10/мин/IP; API доверяет X-Forwarded-For от nginx (`trustProxy: true`).
 - `appointments.client_id` nullable: запись из валидной сессии привязывается к аккаунту, гостевая остаётся NULL; удаление аккаунта сохраняет историю записи через `ON DELETE SET NULL`.
 - Ограничение email enumeration на регистрации: занятый адрес по-прежнему даёт HTTP 409 `conflict`, это осознанное решение. Нейтральный ответ «письмо отправлено» пробовали в #35 и откатили: он требует одинакового ответа для занятого и свободного адреса, а вместе с ним — отказа от сессионной cookie при регистрации, что ломает уже установленные PWA-клиенты (для них `201` — успешный вход, и они остаются неавторизованными). Скрытие факта существования адреса — отдельная версионированная задача (новый эндпоинт «отправить письмо»), а не смена семантики `POST /auth/register`. Регистрацию ограничивает rate limit 5/час/IP.
-- Production использует прямой путь nginx → API; web Route Handlers работают как dev-прокси и передают Cookie/Origin/Set-Cookie; cookie имеет Path=/ для SSR и будущего кабинета.
+- Production использует прямой путь nginx → API; web Route Handlers работают как dev-прокси и передают Cookie/Origin/Set-Cookie; cookie имеет Path=/ для SSR и запросов кабинета.
 - #35 (реализовано): вход по одноразовой ссылке и подтверждение почты. `login_tokens` (SHA-256 от токена, TTL 15 минут, single-use, новый запрос гасит прежние), `POST /auth/magic-link` (202, одинаковый ответ для любого адреса, rate limit 3/час на пару IP+хэш адреса) и `/auth/magic-link/consume` (200 + сессия в httpOnly cookie). Сырой токен живёт только в памяти процесса: в outbox уходят `email` и `loginTokenId`, письмо собирается при отправке. `emailVerifiedAt` заполняется при погашении ссылки, в той же транзакции — автопривязка гостевых записей по адресу (`appointments.client_id IS NULL AND lower(client_email) = lower(email)`). Парольный вход требует подтверждённого адреса.
+
+## Схема БД: что зафиксировано
+
+Схема живёт в `apps/api/prisma/schema.prisma` и меняется только миграциями
+(`apps/api/prisma/migrations`, 7 версий на 2026-11-15): `ServiceCategory`, `Service`, `Master`,
+`MasterService`, `MasterWorkingHours`, `ScheduleException`, `Appointment`, `Client`, `Session`,
+`LoginToken`, `Payment`, `OutboxMessage`. Отдельной модели `Slot` нет: свободное время выводится
+из рабочих часов и исключений расписания, занятость — из `appointments.starts_at/ends_at`
+(непересечение слотов мастера держит EXCLUDE-констрейнт из миграции).
 
 ## Открытые вопросы
 
-- Схема БД и Prisma-миграции: модель филиалов, услуг и слотов ещё не зафиксирована.
-  До этого `apps/api` работает без БД (только `/health`).
-- Мультилокация: у референса два адреса — влияет на структуру `branch`, `master`, `slot`.
+- Мультилокация: у референса два адреса. Модели филиала в схеме нет; когда понадобится,
+  это `branch` и `master.branch_id` отдельными миграциями expand/contract, а не правка
+  текущих таблиц.

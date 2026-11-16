@@ -8,11 +8,17 @@
 ## Что уже есть
 
 - pnpm workspaces + Turborepo, единый тулинг (`tooling/*`)
-- `packages/contracts` — Zod-схемы публичного API, собираются в ESM + d.ts
-- `apps/api` — Fastify 5, слои `app → features → shared`, `GET /health`, единый формат ошибок
-- `apps/web` — Next.js App Router, Tailwind v4, бренд из окружения (`NEXT_PUBLIC_SITE_*`)
+- `packages/contracts` — Zod-схемы публичного API (каталог, слоты и записи, аккаунт, оплата),
+  собираются в ESM + d.ts и общие для web и будущих клиентов
+- `apps/api` — Fastify 5, слои `app → features → shared`: каталог услуг и мастеров, слоты
+  и создание записи, кабинет клиента, вход по паролю и по одноразовой ссылке, оплата ЮKassa
+  (холд, вебхук, свипер), почта через transactional outbox, `GET /health`, единый формат ошибок
+- PostgreSQL + Prisma, схема меняется только миграциями (`apps/api/prisma/migrations`)
+- `apps/web` — Next.js App Router (PWA, Tailwind v4): каталог и мастера, визард записи, кабинет,
+  вход и регистрация, экран оплаты, офлайн-страница; бренд из окружения (`NEXT_PUBLIC_SITE_*`)
 - проверка границ слоёв и пакетов — `pnpm check:arch`
-- Docker-образы `api`/`web`, пайплайн CI → GHCR → VPS ([docs/deploy.md](./docs/deploy.md))
+- Docker-образы `api`/`web` (+ образ миграций), CI → GHCR → preprod/staging
+  ([docs/deploy.md](./docs/deploy.md))
 
 ## Быстрый старт
 
