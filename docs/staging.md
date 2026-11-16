@@ -62,6 +62,11 @@ wildcard-сертификат `*.dnikulshin.ru` (`/etc/ssl/dnikulshin/{fullchain
   иначе после изменения команд на хосте оставалась бы старая и деплой падал бы на «разрешена только
   команда …».
 - **Коммит и время деплоя**: `/home/deployer/hair-lab-staging/.deployed-sha`.
+- **Плашка стенда**: в левом верхнем углу страницы — `staging`, идущие часы (МСК),
+  короткий sha и время деплоя. Значения — runtime-переменные `DEPLOY_ENV`, `DEPLOY_SHA`,
+  `DEPLOY_AT` в `.env` стека (их пишет `scripts/deploy-staging.sh`), поэтому тот же образ
+  на проде плашку не рисует. `DEPLOY_ENV=preprod` даёт ту же плашку с меткой preprod
+  (`docs/preprod.md`).
 - **Откат**: Actions → Staging → _Run workflow_, `ref` = sha предыдущего коммита из истории `main`.
 - **Лог прогона на хосте**: `journalctl` не нужен, всё в Actions; при падении healthcheck в лог
   попадают последние 60 строк `docker compose logs api web`.
