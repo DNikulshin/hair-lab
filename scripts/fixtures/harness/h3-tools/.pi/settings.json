@@ -1,0 +1,11 @@
+{
+  "$schema": "https://pi.dev/schemas/settings.schema.json",
+  "defaultProvider": "polza-ai",
+  "defaultModel": "polza-ai/alpha/a-1",
+  "defaultThinkingLevel": "low",
+  "subagents": {
+    "defaultModel": "polza-ai/alpha/a-1",
+    "defaultThinking": "low",
+    "maxSubagentSpawnsPerRun": 7
+  }
+}
