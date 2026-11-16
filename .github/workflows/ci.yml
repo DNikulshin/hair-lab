@@ -68,6 +68,7 @@ jobs:
       # находит только при запуске; actionlint ловит их до мержа.
       - run: pnpm lint:workflows
       - run: pnpm test
+      - run: pnpm test:scripts
       - run: pnpm format:check
 
   # Проверка Dockerfile на каждом PR: собираем только образы затронутых компонентов.

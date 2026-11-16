@@ -13,6 +13,7 @@
     "typecheck": "turbo run typecheck",
     "lint": "turbo run lint && eslint scripts eslint.config.mjs",
     "test": "turbo run test",
+    "test:scripts": "node --test \"scripts/**/*.test.mjs\"",
     "test:int": "turbo run test:int",
     "check:arch": "node scripts/check-arch.mjs",
     "check:prod-urls": "node scripts/check-prod-urls.mjs",
