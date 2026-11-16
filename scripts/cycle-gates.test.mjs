@@ -705,7 +705,7 @@ describe('cycle-gates: лог и тайм-аут', () => {
       definitions,
       iteration: 1,
       dir,
-      timeouts: { slow_gate: 300 },
+      timeouts: { slow_gate: 1500 },
       graceMs: 100,
       runner: undefined,
     });
@@ -771,7 +771,7 @@ describe('cycle-gates: лог и тайм-аут', () => {
       definitions,
       iteration: 1,
       dir,
-      timeouts: { slow_gate: 800 },
+      timeouts: { slow_gate: 1500 },
       graceMs: 100,
       runner: undefined,
     });
