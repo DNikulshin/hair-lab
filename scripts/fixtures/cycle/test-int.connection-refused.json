@@ -1,0 +1,13 @@
+[
+  "• Packages in scope: @hair-lab/api",
+  "• Running test:int in 1 packages",
+  "@hair-lab/api:test:int: cache miss, executing 6f1c2d3e4a5b6c7d",
+  "@hair-lab/api:test:int: FAIL  src/bookings/bookings.test.ts > creating a booking",
+  "@hair-lab/api:test:int: Error: connect ECONNREFUSED 127.0.0.1:55432",
+  "@hair-lab/api:test:int:     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1300:16)",
+  "@hair-lab/api:test:int:     at PrismaClient._request (src/generated/prisma/index.ts:412:20)",
+  "@hair-lab/api:test:int:  Tests: 1 failed, 0 passed",
+  "@hair-lab/api:test:int:  ELIFECYCLE  Test failed. See above for more details.",
+  "Tasks:    0 successful, 1 total",
+  "Failed:    @hair-lab/api#test:int"
+]

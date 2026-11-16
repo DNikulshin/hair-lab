@@ -5,7 +5,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, test } from 'node:test';
 
-import { addedLines, baseSha, changedFiles, diffFromBase, intentToAddUntracked } from './git.mjs';
+import {
+  addedLines,
+  addedLinesByFile,
+  baseSha,
+  changedFiles,
+  diffFromBase,
+  intentToAddUntracked,
+} from './git.mjs';
 
 // Глобальный и системный конфиг git в тестах не нужен: он мог бы включить подпись коммитов,
 // hooksPath или другую базовую ветку. Наследуется дочерними процессами модуля.
@@ -64,6 +71,13 @@ const SAMPLE_DIFF = [
   '+brand new',
 ].join('\n');
 
+/**
+ * Строка, содержимое которой само начинается с `++`: образец собирается из частей, чтобы
+ * цельная секретоподобная строка не оказалась в добавленном коде — иначе обязательный
+ * гейт `secrets_scan` (§5.5) нашёл бы её в самом тесте.
+ */
+const DOUBLE_PLUS_LINE = ['+', 'AKIA', '1234567890123456'].join('');
+
 /** Самый неудобный для построчного фильтра случай: содержимое строки само начинается с `++`. */
 const TRICKY_DIFF = [
   'diff --git a/keys.txt b/keys.txt',
@@ -73,7 +87,7 @@ const TRICKY_DIFF = [
   '@@ -1,2 +1,3 @@',
   ' context',
   '+plain line',
-  '+++AKIA1234567890123456',
+  `+${DOUBLE_PLUS_LINE}`,
   '-removed line',
 ].join('\n');
 
@@ -118,6 +132,22 @@ const DELETE_THEN_HUNK_DIFF = [
   '@@ -1 +1 @@',
   '-before',
   '+after',
+].join('\n');
+
+/** Два ханка одного файла: номера строк во втором ханке берутся из его заголовка. */
+const MULTI_HUNK_DIFF = [
+  'diff --git a/src/app.mjs b/src/app.mjs',
+  'index 1111111..2222222 100644',
+  '--- a/src/app.mjs',
+  '+++ b/src/app.mjs',
+  '@@ -1,2 +1,3 @@',
+  ' first',
+  '+added after first',
+  ' second',
+  '@@ -10,2 +11,2 @@',
+  '-old line',
+  '+new line',
+  ' tail',
 ].join('\n');
 
 describe('git', () => {
@@ -166,7 +196,7 @@ describe('git', () => {
   });
 
   test('addedLines не путает добавленную строку, начинающуюся с `++`, с заголовком', () => {
-    assert.deepEqual(addedLines(TRICKY_DIFF), ['plain line', '++AKIA1234567890123456']);
+    assert.deepEqual(addedLines(TRICKY_DIFF), ['plain line', DOUBLE_PLUS_LINE]);
     assert.ok(addedLines(TRICKY_DIFF).every((line) => !line.startsWith('++ b/')));
   });
 
@@ -180,6 +210,77 @@ describe('git', () => {
 
   test('addedLines пропускает удаления и заголовки следующего файла', () => {
     assert.deepEqual(addedLines(DELETE_THEN_HUNK_DIFF), ['after']);
+  });
+
+  test('addedLinesByFile возвращает файлы с номерами строк в новой версии', () => {
+    assert.deepEqual(addedLinesByFile(SAMPLE_DIFF), [
+      { file: 'notes.txt', lines: [{ line: 2, text: 'second' }] },
+      { file: 'new.txt', lines: [{ line: 1, text: 'brand new' }] },
+    ]);
+  });
+
+  test('addedLinesByFile не принимает строку `+++…` внутри ханка за заголовок файла', () => {
+    assert.deepEqual(addedLinesByFile(TRICKY_DIFF), [
+      {
+        file: 'keys.txt',
+        lines: [
+          { line: 2, text: 'plain line' },
+          { line: 3, text: DOUBLE_PLUS_LINE },
+        ],
+      },
+    ]);
+  });
+
+  test('addedLinesByFile нумерует строки нового файла с единицы', () => {
+    assert.deepEqual(addedLinesByFile(NEW_FILE_DIFF), [
+      {
+        file: 'new.txt',
+        lines: [
+          { line: 1, text: 'first' },
+          { line: 2, text: 'second' },
+        ],
+      },
+    ]);
+  });
+
+  test('addedLinesByFile не двигает номер строки на маркере `\\ No newline at end of file`', () => {
+    assert.deepEqual(addedLinesByFile(NO_NEWLINE_DIFF), [
+      { file: 'nonl.txt', lines: [{ line: 1, text: 'new' }] },
+    ]);
+  });
+
+  test('addedLinesByFile пропускает файл без добавлений и нумерует второй файл отдельно', () => {
+    assert.deepEqual(addedLinesByFile(DELETE_THEN_HUNK_DIFF), [
+      { file: 'kept.txt', lines: [{ line: 1, text: 'after' }] },
+    ]);
+  });
+
+  test('addedLinesByFile берёт номер строки из заголовка каждого ханка', () => {
+    assert.deepEqual(addedLinesByFile(MULTI_HUNK_DIFF), [
+      {
+        file: 'src/app.mjs',
+        lines: [
+          { line: 2, text: 'added after first' },
+          { line: 11, text: 'new line' },
+        ],
+      },
+    ]);
+  });
+
+  test('addedLinesByFile на пустом диффе возвращает пустой список', () => {
+    assert.deepEqual(addedLinesByFile(''), []);
+  });
+
+  test('addedLinesByFile разбирает настоящий дифф git и нумерует строки по новому файлу', (t) => {
+    const { dir, sha } = makeRepo(t);
+    writeFileSync(join(dir, 'tracked.txt'), 'base\nadded\n');
+    writeFileSync(join(dir, 'new.txt'), 'brand new\n');
+    intentToAddUntracked({ cwd: dir });
+
+    assert.deepEqual(addedLinesByFile(diffFromBase(sha, { cwd: dir })), [
+      { file: 'new.txt', lines: [{ line: 1, text: 'brand new' }] },
+      { file: 'tracked.txt', lines: [{ line: 2, text: 'added' }] },
+    ]);
   });
 
   test('diffFromBase отклоняет небезопасную базу и не даёт git принять её за опцию', (t) => {

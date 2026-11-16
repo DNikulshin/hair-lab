@@ -1,0 +1,11 @@
+[
+  "@hair-lab/api:test:int: PrismaClientInitializationError: ",
+  "@hair-lab/api:test:int: Invalid `prisma.user.findMany()` invocation in",
+  "@hair-lab/api:test:int: /repo/apps/api/src/auth/auth.test.ts:18:20",
+  "@hair-lab/api:test:int: ",
+  "@hair-lab/api:test:int: error: password authentication failed for user \"app\"",
+  "@hair-lab/api:test:int: error code: P1000",
+  "@hair-lab/api:test:int:  Tests: 1 failed, 0 passed",
+  "Tasks:    0 successful, 1 total",
+  "Failed:    @hair-lab/api#test:int"
+]
