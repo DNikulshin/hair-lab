@@ -1,0 +1,51 @@
+# Ревью, итерация 1
+
+Независимое ревью диффа. Финальный блок — машинный формат Приложения A.
+
+```json
+{
+  "verdict": "needs-changes",
+  "findings": [
+    {
+      "id": "R1",
+      "severity": "BLOCKER",
+      "file": "scripts/lib/cycle/refs.mjs",
+      "line": 118,
+      "summary": "Файл без завершающего перевода строки принимает ссылку на несуществующую строку",
+      "repro": "Файл из двух строк без \\n в конце: resolveRef('src/a.mjs:3') возвращает ok: true",
+      "in_scope": true,
+      "preexisting": false
+    },
+    {
+      "id": "R2",
+      "severity": "MAJOR",
+      "file": "scripts/lib/cycle/redact.mjs",
+      "line": 64,
+      "summary": "Маскирование телефона склеивает соседние строки лога",
+      "repro": "redactLog('+79990000000\\nтелефон выше') возвращает одну строку",
+      "in_scope": true,
+      "preexisting": false
+    },
+    {
+      "id": "R3",
+      "severity": "MINOR",
+      "file": "",
+      "line": null,
+      "summary": "В сообщении об ошибке нет пути файла",
+      "repro": "",
+      "in_scope": true,
+      "preexisting": false
+    },
+    {
+      "id": "R4",
+      "severity": "FOLLOW-UP",
+      "file": "",
+      "line": "",
+      "summary": "Прогнать маскирование на логах vitest",
+      "repro": "",
+      "in_scope": false,
+      "preexisting": true
+    }
+  ]
+}
+```
