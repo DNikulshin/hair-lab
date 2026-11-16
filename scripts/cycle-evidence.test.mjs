@@ -636,6 +636,77 @@ describe('CLI: ограничение --dir (§4)', () => {
     assert.equal(runCli(root, ['packet', '--dir', cycle]).status, 0);
   });
 
+  test('симлинк из .pi/artifacts/ наружу — код 2, вне репозитория ничего не создаётся', (t) => {
+    const { root } = makeRepo(t);
+    const outside = mkdtempSync(join(tmpdir(), 'hair-lab-evidence-escape-'));
+    t.after(() => rmSync(outside, { recursive: true, force: true }));
+    writeFileSync(join(outside, 'issue.json'), `${JSON.stringify(FEATURE_ISSUE, null, 2)}\n`);
+
+    const link = join(root, '.pi', 'artifacts', 'link');
+    mkdirSync(join(root, '.pi', 'artifacts'), { recursive: true });
+    try {
+      symlinkSync(outside, link);
+    } catch {
+      t.skip('создание символических ссылок недоступно');
+      return;
+    }
+
+    const result = runCli(root, ['criteria', '--dir', link]);
+
+    assert.equal(result.status, 2, result.stderr);
+    assert.match(result.stderr, /\.pi\/artifacts/, result.stderr);
+    assert.equal(existsSync(join(outside, 'evidence')), false);
+  });
+
+  test('.pi/artifacts — симлинк наружу: --dir внутри него отвергается', (t) => {
+    const { root } = makeRepo(t);
+    const outside = mkdtempSync(join(tmpdir(), 'hair-lab-evidence-artifacts-link-'));
+    t.after(() => rmSync(outside, { recursive: true, force: true }));
+    mkdirSync(join(outside, 'cycle'), { recursive: true });
+    writeFileSync(
+      join(outside, 'cycle', 'issue.json'),
+      `${JSON.stringify(FEATURE_ISSUE, null, 2)}\n`,
+    );
+
+    // Весь каталог артефактов репозитория уводим симлинком наружу.
+    mkdirSync(join(root, '.pi'), { recursive: true });
+    try {
+      symlinkSync(outside, join(root, '.pi', 'artifacts'));
+    } catch {
+      t.skip('создание символических ссылок недоступно');
+      return;
+    }
+
+    const lexical = join(root, '.pi', 'artifacts', 'cycle');
+    const result = runCli(root, ['criteria', '--dir', lexical]);
+
+    assert.equal(result.status, 2, result.stderr);
+    assert.match(result.stderr, /символическая ссылка недопустима/, result.stderr);
+    assert.equal(existsSync(join(outside, 'cycle', 'evidence')), false);
+  });
+
+  test('симлинк из /tmp внутрь репозитория вне .pi/artifacts — тоже код 2', (t) => {
+    const { root } = makeRepo(t);
+    const outside = mkdtempSync(join(tmpdir(), 'hair-lab-evidence-indirect-'));
+    t.after(() => rmSync(outside, { recursive: true, force: true }));
+    const target = join(root, 'apps', 'web');
+    mkdirSync(target, { recursive: true });
+    writeFileSync(join(target, 'issue.json'), `${JSON.stringify(FEATURE_ISSUE, null, 2)}\n`);
+
+    const link = join(outside, 'link');
+    try {
+      symlinkSync(target, link);
+    } catch {
+      t.skip('создание символических ссылок недоступно');
+      return;
+    }
+
+    const result = runCli(root, ['criteria', '--dir', link]);
+
+    assert.equal(result.status, 2, result.stderr);
+    assert.equal(existsSync(join(target, 'evidence')), false);
+  });
+
   test('каталог вне корня репозитория разрешён (smoke на временном каталоге)', (t) => {
     const { root } = makeRepo(t);
     const outside = mkdtempSync(join(tmpdir(), 'hair-lab-evidence-outside-'));

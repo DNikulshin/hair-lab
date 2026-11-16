@@ -475,17 +475,45 @@ function canonicalPath(path) {
  * @returns {void}
  */
 function assertWritableDir(dir, root) {
+  const allowed = artifactsDir(root);
+  const canonicalAllowed = canonicalPath(allowed);
   const canonicalRoot = canonicalPath(root);
   const canonicalDir = canonicalPath(dir);
-  if (!isInside(canonicalRoot, canonicalDir)) return;
+  // Лексический путь сравниваем с лексическим корнем: каталог может ещё не существовать.
+  const lexicalRoot = resolve(root);
+  const lexicalDir = resolve(dir);
 
-  const allowed = artifactsDir(root);
-  if (isInside(canonicalPath(allowed), canonicalDir)) return;
+  // Сам каталог артефактов обязан канонически лежать внутри репозитория. Иначе `.pi/artifacts`,
+  // подменённый симлинком наружу, уводит и `canonicalAllowed` наружу — и «внутри артефактов»
+  // перестаёт означать «внутри репозитория» (issue #155, ревью итерации 3).
+  if (!isInside(canonicalRoot, canonicalAllowed)) {
+    throw new Error(
+      `--dir: каталог артефактов ${allowed} канонически вне репозитория (${canonicalAllowed}) — ` +
+        `символическая ссылка недопустима (§4)`,
+    );
+  }
 
-  throw new Error(
-    `--dir: каталог внутри репозитория должен лежать в ${allowed}, получено: ${dir} (§4) ` +
-      `(корень репозитория: ${canonicalRoot})`,
-  );
+  // Каталог лексически внутри репозитория (или таковым кажется): писать можно только в
+  // `<root>/.pi/artifacts/` — и по записи пути, и по каноническому пути. Раньше проверялся
+  // только канонический путь, поэтому симлинк из `.pi/artifacts/` наружу выглядел как «каталог
+  // вне репозитория» и разрешался — запись уходила за пределы репозитория (issue #155).
+  if (isInside(lexicalRoot, lexicalDir) || isInside(canonicalRoot, lexicalDir)) {
+    if (isInside(allowed, lexicalDir) && isInside(canonicalAllowed, canonicalDir)) return;
+
+    throw new Error(
+      `--dir: каталог внутри репозитория должен лежать в ${allowed}, получено: ${dir} (§4) ` +
+        `(корень репозитория: ${canonicalRoot})`,
+    );
+  }
+
+  // Лексически вне репозитория (временные каталоги тестов и вызывающего) — как раньше. Но если
+  // такая ссылка ведёт канонически внутрь репозитория, запись тоже запрещаем: иначе симлинк
+  // из `/tmp` возвращал бы запись в репозиторий мимо проверки выше.
+  if (isInside(canonicalRoot, canonicalDir) && !isInside(canonicalAllowed, canonicalDir)) {
+    throw new Error(
+      `--dir: символическая ссылка ведёт внутрь репозитория вне ${allowed}: ${dir} (§4)`,
+    );
+  }
 }
 
 /**
