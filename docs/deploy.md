@@ -269,12 +269,14 @@ deploy` завершился ошибкой, шаг краснеет, `up -d` н
 - порты `127.0.0.1:3010` (web) и `127.0.0.1:3011` (api) — через `API_PORT`/`WEB_PORT`; 3000/3001
   остаются для `pnpm dev`;
 - `APP_URL` и `CORS_ORIGINS` — `https://hair-lab.dnikulshin.ru:8443` (порт обязателен);
-- `PAYMENTS_MODE=off` до появления тестовых ключей ЮKassa; адрес уведомлений в кабинете:
-  `https://hair-lab.dnikulshin.ru:8443/api/payments/webhooks/yookassa`
-  (`PAYMENTS_MODE=test` — когда ключи лежат в `.env` на хосте).
+- платежи — проверены живьём в `test` (2026-11-14, холд → оплата → вебхук, см. `docs/staging.md`,
+  «Режимы и проверенное поведение»); адрес уведомлений в кабинете магазина —
+  `https://hair-lab.dnikulshin.ru:8443/api/payments/webhooks/yookassa`. Переключение режима —
+  правкой `.env` на хосте (`off | test | live`), ключи магазина в репозиторий не попадают.
 
 Файл `/home/deployer/hair-lab-staging/.env` (не в git). Образы локальные, поэтому `GHCR_IMAGE_*` —
-локальные имена, а `IMAGE_TAG=local`; секретов нет, кроме пароля БД:
+локальные имена, а `IMAGE_TAG=local`; секреты — пароль БД и ключи магазина ЮKassa, когда платежи
+включены (в репозиторий не попадают):
 
 ```bash
 GHCR_IMAGE_API=hair-lab-api
@@ -287,7 +289,7 @@ API_PORT=3011
 WEB_PORT=3010
 APP_URL=https://hair-lab.dnikulshin.ru:8443
 CORS_ORIGINS=https://hair-lab.dnikulshin.ru:8443
-PAYMENTS_MODE=off
+PAYMENTS_MODE=off   # off | test | live — текущий режим стенда: docs/staging.md
 SMTP_HOST=
 SALON_TIMEZONE=Europe/Moscow
 LOG_LEVEL=info
@@ -379,5 +381,8 @@ curl -sS https://hair-lab.dnikulshin.ru:8443/api/health   # снаружи, stag
 
 - Обновление wildcard-сертификата `*.dnikulshin.ru` на этом хосте не автоматизировано: `certbot`
   не установлен, `/etc/letsencrypt` отсутствует. Где и как сертификат выпускался
-  (DNS-01) — открытый вопрос к владельцу; срок действия текущего — до 2027-01-30.
-- Откат: `IMAGE_TAG=<предыдущий sha> docker compose up -d`; процедура будет описана после первого релиза.
+  (DNS-01) — открытый вопрос к владельцу; срок действия текущего — до 2027-01-30 (issue #112).
+- Прод ни разу не поднимался: код деплоя и автооткат готовы (раздел 5), но секреты и переменные
+  `VPS_*`, `DEPLOY_ENABLED` не заданы — это issue #148.
+- Откат автоматизирован (`scripts/deploy-prod.sh`: healthcheck → возврат на `IMAGE_TAG` из
+  `.deployed-sha`); ручной откат — тем же скриптом с нужным тегом, отдельная процедура не нужна.
