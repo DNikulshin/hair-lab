@@ -607,6 +607,27 @@ A1–A9 статически; запуск `node --test` и `gh` остаётс�
 
 **escalation.json**: `{ reason ∈ D7, detail, draft_pr_allowed, open_items[] }`.
 
+**metrics.json** (добавлено в T8): счётчики и длительности завершённого цикла. Значения
+длительностей — секунды с точностью до 3 знаков; `cycle_duration_s` равен сумме
+`stage_durations_s`, `gate_total_s` — сумме `gate_durations_s`.
+
+| Поле                                          | Тип и правила                                                                                                            |
+| --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `iterations`, `max_iterations`                | целые ≥ 1 (из `state.json`)                                                                                              |
+| `final_stage`                                 | `state.stage`: INIT, PLAN, …, DONE, ESCALATED                                                                            |
+| `stage_durations_s`                           | объект `<STAGE>` → число ≥ 0: сумма `finished_at - started_at` по `state.history`                                        |
+| `cycle_duration_s`                            | число ≥ 0: сумма `stage_durations_s`                                                                                     |
+| `gate_durations_s`                            | объект `<id гейта>` → число ≥ 0: сумма `duration_s` по всем итерациям                                                    |
+| `gate_total_s`                                | число ≥ 0: сумма `gate_durations_s`                                                                                      |
+| `gate_outcomes`                               | объект `<id гейта>` → `{ pass, fail, skipped, not_run }`, целые ≥ 0 (по всем итерациям)                                  |
+| `review_findings`                             | `{ BLOCKER, MAJOR, MINOR, FOLLOW-UP }`, целые ≥ 0                                                                        |
+| `evaluator_defects`                           | `{ BLOCKER, MAJOR, MINOR }`, целые ≥ 0                                                                                   |
+| `only_review`, `only_evaluator`, `both`       | целые ≥ 0: сопоставление находок и дефектов внутри итерации по правилу §5.6 (разница строк ≤ 5, каждый элемент один раз) |
+| `unresolved_refs`, `verdict_without_evidence` | целые ≥ 0: суммы из `decision.<n>.json`                                                                                  |
+| `unclosed_stages`                             | целое ≥ 0: записи `state.history` без `finished_at`                                                                      |
+| `evaluator_shares_family_with_plan`           | boolean: семейство — второй сегмент `model` (§5.9); нет ключа `evaluate` — `true` (R2)                                   |
+| `tokens`, `cost_rub`                          | строго `null` в фазе 1 (R5: usage и бюджеты не собираются)                                                               |
+
 ## Приложение B. Протокол супервизора (канонический порядок команд)
 
 Супервизор вызывает команды и выполняет `action` из `decision`, ничего не решая сам.

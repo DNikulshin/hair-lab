@@ -1,0 +1,45 @@
+{
+  "issue": 160,
+  "slug": "cycle-metrics",
+  "branch": "chore/160-cycle-metrics",
+  "base_sha": "0123456789abcdef0123456789abcdef01234567",
+  "iteration": 1,
+  "max_iterations": 2,
+  "stage": "ESCALATED",
+  "stage_status": "done",
+  "criteria_source": "issue",
+  "retries": {
+    "REVIEW": 0,
+    "EVALUATE": 0,
+    "evidence": 0
+  },
+  "owner_approved": false,
+  "models": {
+    "plan": "polza-ai/deepseek/planner-lite",
+    "code": "polza-ai/deepseek/coder-lite",
+    "review": "polza-ai/openai/reviewer-lite"
+  },
+  "history": [
+    {
+      "stage": "INIT",
+      "iteration": 1,
+      "started_at": "2026-11-16T09:00:00Z",
+      "finished_at": "2026-11-16T09:00:45Z",
+      "status": "done"
+    },
+    {
+      "stage": "GATES",
+      "iteration": 1,
+      "started_at": "2026-11-16T09:30:00Z",
+      "finished_at": "2026-11-16T09:30:10Z",
+      "status": "error"
+    }
+  ],
+  "escalation": {
+    "reason": "agent_output_invalid",
+    "detail": "ревью и оценка не получены: цикл остановлен до REVIEW",
+    "draft_pr_allowed": false
+  },
+  "started_at": "2026-11-16T09:00:00Z",
+  "updated_at": "2026-11-16T09:30:10Z"
+}

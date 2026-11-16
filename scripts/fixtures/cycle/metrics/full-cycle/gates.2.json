@@ -1,0 +1,68 @@
+{
+  "iteration": 2,
+  "base_sha": "0123456789abcdef0123456789abcdef01234567",
+  "head": "fedcba9876543210fedcba9876543210fedcba98",
+  "started_at": "2026-11-16T22:40:00Z",
+  "gates": [
+    {
+      "id": "secrets_scan",
+      "cmd": null,
+      "required": true,
+      "status": "pass",
+      "exit": null,
+      "duration_s": 0.1,
+      "log": null,
+      "reason": null
+    },
+    {
+      "id": "contracts_build",
+      "cmd": "pnpm --filter @hair-lab/contracts build",
+      "required": true,
+      "status": "pass",
+      "exit": 0,
+      "duration_s": 11.75,
+      "log": null,
+      "reason": null
+    },
+    {
+      "id": "typecheck",
+      "cmd": "pnpm typecheck",
+      "required": true,
+      "status": "pass",
+      "exit": 0,
+      "duration_s": 60.25,
+      "log": null,
+      "reason": null
+    },
+    {
+      "id": "lint",
+      "cmd": "pnpm lint",
+      "required": true,
+      "status": "pass",
+      "exit": 0,
+      "duration_s": 8.75,
+      "log": null,
+      "reason": null
+    },
+    {
+      "id": "test_scripts",
+      "cmd": "pnpm test:scripts",
+      "required": true,
+      "status": "pass",
+      "exit": 0,
+      "duration_s": 39.75,
+      "log": null,
+      "reason": null
+    },
+    {
+      "id": "lint_workflows",
+      "cmd": "pnpm lint:workflows",
+      "required": true,
+      "status": "skipped",
+      "exit": null,
+      "duration_s": 0,
+      "log": null,
+      "reason": "not_applicable"
+    }
+  ]
+}

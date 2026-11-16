@@ -1,0 +1,38 @@
+{
+  "verdict": "ACCEPT_WITH_FOLLOWUPS",
+  "criteria": [
+    {
+      "id": "C1",
+      "status": "met",
+      "evidence": ["scripts/cycle-metrics.mjs:40", "gate:test_scripts"],
+      "note": "Длительности с точностью до миллисекунд"
+    },
+    {
+      "id": "C2",
+      "status": "met",
+      "evidence": ["scripts/lib/cycle/validate.mjs:220"],
+      "note": "Валидатор метрик есть"
+    }
+  ],
+  "scores": {
+    "coverage": 3,
+    "correctness": 3,
+    "tests": 3,
+    "data": 3,
+    "pii_security": 3,
+    "architecture": 3,
+    "scope": 3,
+    "docs": 2,
+    "evidence": 3
+  },
+  "defects": [
+    {
+      "id": "D4",
+      "severity": "MAJOR",
+      "claim": "Схема в Приложении A описана без пометки о фазе 1 для tokens",
+      "evidence": ["docs/orchestrator-core.md:570"],
+      "repro": "открыть Приложение A"
+    }
+  ],
+  "unverified": []
+}

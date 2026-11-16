@@ -1,0 +1,58 @@
+{
+  "verdict": "REWORK",
+  "criteria": [
+    {
+      "id": "C1",
+      "status": "unmet",
+      "evidence": ["scripts/cycle-metrics.mjs:40"],
+      "note": "Длительности теряют точность"
+    },
+    {
+      "id": "C2",
+      "status": "met",
+      "evidence": ["scripts/lib/cycle/validate.mjs:220", "gate:test_scripts"],
+      "note": "Валидатор метрик есть"
+    }
+  ],
+  "scores": {
+    "coverage": 2,
+    "correctness": 2,
+    "tests": 2,
+    "data": 3,
+    "pii_security": 3,
+    "architecture": 3,
+    "scope": 3,
+    "docs": 2,
+    "evidence": 2
+  },
+  "defects": [
+    {
+      "id": "D1",
+      "severity": "BLOCKER",
+      "claim": "Округление до целых секунд искажает короткие этапы",
+      "evidence": ["scripts/cycle-metrics.mjs:45"],
+      "repro": "node scripts/cycle-metrics.mjs --dir <каталог цикла>"
+    },
+    {
+      "id": "D2",
+      "severity": "MINOR",
+      "claim": "В диагностике остаётся абсолютный путь каталога",
+      "evidence": ["scripts/other-metrics.mjs:10"],
+      "repro": ""
+    },
+    {
+      "id": "D3",
+      "severity": "MAJOR",
+      "claim": "Падение обязательного гейта не влияет на итог метрик",
+      "evidence": ["gate:lint"],
+      "repro": "подложить gates.<n>.json с fail и без review"
+    }
+  ],
+  "unverified": [
+    {
+      "what": "Повторный запуск на досрочном состоянии цикла",
+      "why": "в фикстуре цикл уже завершён",
+      "how_to_verify": "node --test scripts/cycle-metrics.test.mjs"
+    }
+  ]
+}
