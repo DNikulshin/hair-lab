@@ -470,11 +470,13 @@ function canonicalPath(path) {
  * Проверка каталога цикла на право записи (§4: скрипты пишут только в `.pi/artifacts/<…>/`).
  * Каталог вне корня репозитория разрешён: так работают тесты и ручной smoke на временных
  * git-репозиториях. Каталог внутри корня обязан лежать в `<root>/.pi/artifacts/`.
+ * Экспортируется, чтобы тот же гард (с уроком issue #155 про символические ссылки)
+ * использовал `cycle-state.mjs`, а не дублировал защиту.
  * @param {string} dir каталог цикла
  * @param {string} root корень репозитория
  * @returns {void}
  */
-function assertWritableDir(dir, root) {
+export function assertWritableDir(dir, root) {
   const allowed = artifactsDir(root);
   const canonicalAllowed = canonicalPath(allowed);
   const canonicalRoot = canonicalPath(root);
