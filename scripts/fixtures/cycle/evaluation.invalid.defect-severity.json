@@ -1,0 +1,50 @@
+{
+  "verdict": "ACCEPT_WITH_FOLLOWUPS",
+  "criteria": [
+    {
+      "id": "C1",
+      "status": "met",
+      "evidence": ["scripts/lib/cycle/validate.mjs:1", "gate:test_scripts"],
+      "note": "Семь валидаторов Приложения A"
+    },
+    {
+      "id": "C2",
+      "status": "partial",
+      "evidence": [],
+      "note": "Нет кейса с файлом без завершающего перевода строки"
+    },
+    {
+      "id": "C3",
+      "status": "unverified",
+      "evidence": ["gate:test_int"],
+      "note": "Интеграционные тесты не запускались"
+    }
+  ],
+  "scores": {
+    "coverage": 2,
+    "correctness": 3,
+    "tests": 2,
+    "data": 3,
+    "pii_security": 3,
+    "architecture": 3,
+    "scope": 3,
+    "docs": 1,
+    "evidence": null
+  },
+  "defects": [
+    {
+      "id": "D1",
+      "severity": "FOLLOW-UP",
+      "claim": "В сообщении об ошибке нет пути файла",
+      "evidence": ["scripts/lib/cycle/refs.mjs:141"],
+      "repro": ""
+    }
+  ],
+  "unverified": [
+    {
+      "what": "Поведение на битом JSON артефакта",
+      "why": "нет фикстуры",
+      "how_to_verify": "node --test scripts/lib/cycle/validate.test.mjs"
+    }
+  ]
+}

@@ -1,0 +1,6 @@
+{
+  "reason": "iteration_limit",
+  "detail": 42,
+  "draft_pr_allowed": true,
+  "open_items": ["R1: подсчёт строк в refs.resolveRef", "D1: в сообщении нет пути файла"]
+}
