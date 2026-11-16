@@ -7,6 +7,7 @@ import {
   validateEscalation,
   validateEvaluation,
   validateGates,
+  validateMetrics,
   validateQaWeb,
   validateReview,
   validateState,
@@ -164,6 +165,25 @@ const DECISION_INVALID = {
   'decision.invalid.reasons-empty.json': /decision\.reasons\[1\]: пустая строка недопустима/,
   'decision.invalid.counts.json': /decision\.counts\.blockers: ожидается целое ≥ 0/,
   'decision.invalid.unresolved-refs.json': /decision\.unresolved_refs: ожидается целое ≥ 0/,
+};
+
+/**
+ * `metrics.json` живёт в подкаталоге: это артефакт завершённого цикла, а не схема
+ * отдельного этапа (issue #160, T8). Пути — от `scripts/fixtures/cycle/`.
+ */
+const METRICS_INVALID = {
+  'metrics/metrics.invalid.tokens.json': /metrics\.tokens: в фазе 1 ожидается null, получено 4242/,
+  'metrics/metrics.invalid.cost-rub.json': /metrics\.cost_rub: в фазе 1 ожидается null/,
+  'metrics/metrics.invalid.stage-duration.json':
+    /metrics\.stage_durations_s\.PLAN: ожидается число ≥ 0, получено -1/,
+  'metrics/metrics.invalid.unknown-stage.json':
+    /metrics\.stage_durations_s: неизвестный этап "FINAL"/,
+  'metrics/metrics.invalid.gate-outcomes.json':
+    /metrics\.gate_outcomes\.lint\.not_run: обязательное поле отсутствует/,
+  'metrics/metrics.invalid.only-review.json': /metrics\.only_review: ожидается целое ≥ 0/,
+  'metrics/metrics.invalid.final-stage.json': /metrics\.final_stage: ожидается одно из INIT/,
+  'metrics/metrics.invalid.family.json':
+    /metrics\.evaluator_shares_family_with_plan: ожидается boolean/,
 };
 
 /** Нарушения `escalation.json`: по одному на файл. */
@@ -380,6 +400,100 @@ describe('validateDecision', () => {
       ok: true,
       errors: [],
     });
+  });
+});
+
+describe('validateMetrics', () => {
+  test('валидный документ проходит', () => {
+    assert.deepEqual(validateMetrics(fixture('metrics/metrics.valid.json')), {
+      ok: true,
+      errors: [],
+    });
+  });
+
+  // Каждый файл — отдельный тест: одна фикстура, одно нарушение Приложения A.
+  checkInvalidFixtures(validateMetrics, METRICS_INVALID);
+
+  test('tokens и cost_rub в фазе 1 строго null, а не отсутствуют', () => {
+    const doc = fixture('metrics/metrics.valid.json');
+    delete doc.tokens;
+
+    assertSingleError(validateMetrics(doc), /metrics\.tokens: обязательное поле отсутствует/);
+  });
+
+  test('отрицательный исход гейта недопустим', () => {
+    const doc = fixture('metrics/metrics.valid.json');
+    doc.gate_outcomes.lint.pass = -1;
+
+    assertSingleError(
+      validateMetrics(doc),
+      /metrics\.gate_outcomes\.lint\.pass: ожидается целое ≥ 0/,
+    );
+  });
+
+  test('лишние поля и лишние ключи счётчиков игнорируются', () => {
+    const doc = fixture('metrics/metrics.valid.json');
+    doc.future_field = { anything: [1, 2] };
+    doc.review_findings.EXTRA = 0;
+
+    assert.deepEqual(validateMetrics(doc), { ok: true, errors: [] });
+  });
+
+  test('cycle_duration_s равен сумме stage_durations_s', () => {
+    const doc = fixture('metrics/metrics.valid.json');
+    doc.cycle_duration_s = 6749;
+
+    assertSingleError(
+      validateMetrics(doc),
+      /metrics\.cycle_duration_s: не равен сумме stage_durations_s \(6749 ≠ 6750\)/,
+    );
+  });
+
+  test('gate_total_s равен сумме gate_durations_s', () => {
+    const doc = fixture('metrics/metrics.valid.json');
+    doc.gate_total_s = 244.35;
+
+    assertSingleError(
+      validateMetrics(doc),
+      /metrics\.gate_total_s: не равен сумме gate_durations_s \(244\.35 ≠ 245\.35\)/,
+    );
+  });
+
+  test('равенство проверяется с допуском на плавающую точку', () => {
+    const doc = fixture('metrics/metrics.valid.json');
+    doc.cycle_duration_s = 6750.0000005;
+
+    assert.deepEqual(validateMetrics(doc), { ok: true, errors: [] });
+  });
+
+  test('битая карта длительностей: одна внятная ошибка без расхождения с итогом', () => {
+    for (const [value, pattern] of [
+      [[], /metrics\.stage_durations_s: ожидается объект, получено массив/],
+      [null, /metrics\.stage_durations_s: ожидается объект, получено null/],
+      [42, /metrics\.stage_durations_s: ожидается объект, получено 42/],
+    ]) {
+      const doc = { ...fixture('metrics/metrics.valid.json'), stage_durations_s: value };
+      assertSingleError(validateMetrics(doc), pattern);
+    }
+
+    const negativeStage = fixture('metrics/metrics.valid.json');
+    negativeStage.stage_durations_s.PLAN = -1;
+    assertSingleError(
+      validateMetrics(negativeStage),
+      /metrics\.stage_durations_s\.PLAN: ожидается число ≥ 0, получено -1/,
+    );
+
+    const negativeGate = fixture('metrics/metrics.valid.json');
+    negativeGate.gate_durations_s.lint = -1;
+    assertSingleError(
+      validateMetrics(negativeGate),
+      /metrics\.gate_durations_s\.lint: ожидается число ≥ 0, получено -1/,
+    );
+  });
+
+  test('не объект — ошибка', () => {
+    assertInvalidWith(validateMetrics([]), /metrics: ожидается объект, получено массив/);
+    assertInvalidWith(validateMetrics(null), /metrics: ожидается объект, получено null/);
   });
 });
 

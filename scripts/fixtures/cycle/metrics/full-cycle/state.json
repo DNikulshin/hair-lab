@@ -1,0 +1,126 @@
+{
+  "issue": 160,
+  "slug": "cycle-metrics",
+  "branch": "chore/160-cycle-metrics",
+  "base_sha": "0123456789abcdef0123456789abcdef01234567",
+  "iteration": 2,
+  "max_iterations": 2,
+  "stage": "DONE",
+  "stage_status": "done",
+  "criteria_source": "issue",
+  "retries": {
+    "REVIEW": 0,
+    "EVALUATE": 0,
+    "evidence": 0
+  },
+  "owner_approved": false,
+  "models": {
+    "plan": "polza-ai/deepseek/planner-lite",
+    "code": "polza-ai/deepseek/coder-lite",
+    "review": "polza-ai/openai/reviewer-lite",
+    "evaluate": "polza-ai/deepseek/evaluator-lite"
+  },
+  "history": [
+    {
+      "stage": "INIT",
+      "iteration": 1,
+      "started_at": "2026-11-16T23:58:00+03:00",
+      "finished_at": "2026-11-17T00:00:30+03:00",
+      "status": "done"
+    },
+    {
+      "stage": "PLAN",
+      "iteration": 1,
+      "started_at": "2026-11-17T00:00:30+03:00",
+      "finished_at": "2026-11-17T00:10:30+03:00",
+      "status": "done"
+    },
+    {
+      "stage": "CODE",
+      "iteration": 1,
+      "started_at": "2026-11-16T21:20:00Z",
+      "finished_at": "2026-11-16T21:50:00Z",
+      "status": "done"
+    },
+    {
+      "stage": "GATES",
+      "iteration": 1,
+      "started_at": "2026-11-16T21:50:00Z",
+      "finished_at": "2026-11-16T21:56:00Z",
+      "status": "done"
+    },
+    {
+      "stage": "REVIEW",
+      "iteration": 1,
+      "started_at": "2026-11-16T21:56:00Z",
+      "finished_at": "2026-11-16T22:06:00Z",
+      "status": "done"
+    },
+    {
+      "stage": "EVALUATE",
+      "iteration": 1,
+      "started_at": "2026-11-16T22:06:00Z",
+      "finished_at": "2026-11-16T22:10:00Z",
+      "status": "done"
+    },
+    {
+      "stage": "DECIDE",
+      "iteration": 1,
+      "started_at": "2026-11-16T22:10:00Z",
+      "finished_at": "2026-11-16T22:10:05Z",
+      "status": "done"
+    },
+    {
+      "stage": "REWORK",
+      "iteration": 1,
+      "started_at": "2026-11-16T22:10:05Z",
+      "finished_at": "2026-11-16T22:10:10Z",
+      "status": "done"
+    },
+    {
+      "stage": "CODE",
+      "iteration": 2,
+      "started_at": "2026-11-16T22:10:10Z",
+      "finished_at": "2026-11-16T22:40:00Z",
+      "status": "done"
+    },
+    {
+      "stage": "GATES",
+      "iteration": 2,
+      "started_at": "2026-11-16T22:40:00Z",
+      "finished_at": "2026-11-16T22:45:00Z",
+      "status": "done"
+    },
+    {
+      "stage": "REVIEW",
+      "iteration": 2,
+      "started_at": "2026-11-16T22:45:00Z",
+      "finished_at": "2026-11-16T22:55:00Z",
+      "status": "done"
+    },
+    {
+      "stage": "EVALUATE",
+      "iteration": 2,
+      "started_at": "2026-11-16T22:55:00Z",
+      "finished_at": "2026-11-16T22:59:00Z",
+      "status": "done"
+    },
+    {
+      "stage": "DECIDE",
+      "iteration": 2,
+      "started_at": "2026-11-16T22:59:00Z",
+      "finished_at": "2026-11-16T23:00:00Z",
+      "status": "done"
+    },
+    {
+      "stage": "PR",
+      "iteration": 2,
+      "started_at": "2026-11-16T23:00:00Z",
+      "finished_at": null,
+      "status": "running"
+    }
+  ],
+  "escalation": null,
+  "started_at": "2026-11-16T23:58:00+03:00",
+  "updated_at": "2026-11-16T23:00:00Z"
+}

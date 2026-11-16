@@ -97,6 +97,13 @@ const ESCALATION_REASONS = Object.freeze([
 /** Этапы, которые можно повторить через `RETRY_STAGE` (§5.6, правило 1). */
 const RETRY_STAGES = Object.freeze(['REVIEW', 'EVALUATE']);
 
+/**
+ * Допуск сравнения итоговых длительностей с суммой слагаемых. Писатель округляет
+ * каждое слагаемое до 3 знаков и складывает уже округлённые значения, поэтому
+ * точного совпадения ждать нельзя — только совпадения в пределах хвоста плавающей точки.
+ */
+const DURATION_TOLERANCE = 1e-6;
+
 const SLUG_PATTERN = /^[a-z0-9-]{1,60}$/;
 const SHA40_PATTERN = /^[0-9a-f]{40}$/;
 /**
@@ -369,6 +376,22 @@ function reqOneOf(parent, key, prefix, errors, allowed) {
 /** Обязательное поле + `bool`. */
 function reqBool(parent, key, prefix, errors) {
   return bool(req(parent, key, `${prefix}.${key}`, errors), `${prefix}.${key}`, errors);
+}
+
+/**
+ * Обязательное поле, которое в фазе 1 допускает только `null` (R5: сбора usage токенов
+ * и стоимости в этой поставке нет — `docs/orchestrator-core.md` §5.8).
+ * @param {unknown} parent
+ * @param {string} key
+ * @param {string} prefix
+ * @param {string[]} errors
+ * @returns {void}
+ */
+function reqNull(parent, key, prefix, errors) {
+  const path = `${prefix}.${key}`;
+  const value = req(parent, key, path, errors);
+  if (value === undefined || value === null) return;
+  errors.push(`${path}: в фазе 1 ожидается null, получено ${describe(value)}`);
 }
 
 /** Обязательное поле + `list`. */
@@ -798,6 +821,169 @@ export function validateEscalation(doc) {
 
   escalationFields(doc, 'escalation', errors);
   reqList(doc, 'open_items', 'escalation', errors, textItem);
+
+  return { ok: errors.length === 0, errors };
+}
+
+/**
+ * Одно поле-счётчик серьёзности: объект `{ <SEVERITY>: целое ≥ 0 }` (Приложение A,
+ * `metrics.json`). Лишние ключи игнорируются, как и во всех остальных схемах.
+ * @param {unknown} parent
+ * @param {string} key
+ * @param {string} prefix
+ * @param {string[]} errors
+ * @param {readonly string[]} severities
+ * @returns {void}
+ */
+function reqSeverityCounts(parent, key, prefix, errors, severities) {
+  reqRecord(parent, key, prefix, errors, (counts, path, errs) => {
+    for (const severity of severities) reqInt(counts, severity, path, errs, { min: 0 });
+  });
+}
+
+/**
+ * Сумма длительностей карты. Ключи сортируются, чтобы порядок полей в файле не влиял
+ * ни на результат сравнения, ни на текст сообщения об ошибке.
+ * @param {Record<string, number>} map проверенная карта длительностей
+ * @returns {number}
+ */
+function sumDurations(map) {
+  const total = Object.keys(map)
+    .sort()
+    .reduce((sum, key) => sum + map[key], 0);
+  return Math.round(total * 1e6) / 1e6;
+}
+
+/**
+ * Обязательное равенство из Приложения A: итог равен сумме карты длительностей
+ * (`cycle_duration_s` → `stage_durations_s`, `gate_total_s` → `gate_durations_s`).
+ * Вызывается только если карта и итог прошли проверку по отдельности: иначе поверх
+ * уже найденных ошибок появилось бы шумное расхождение с суммой.
+ * @param {Record<string, number>} map карта длительностей
+ * @param {number} total итог
+ * @param {string} mapName имя карты для сообщения
+ * @param {string} totalPath путь итога для сообщения
+ * @param {string[]} errors накопитель ошибок
+ * @returns {void}
+ */
+function requireTotalOfMap(map, total, mapName, totalPath, errors) {
+  const sum = sumDurations(map);
+  if (Math.abs(total - sum) <= DURATION_TOLERANCE) return;
+  errors.push(`${totalPath}: не равен сумме ${mapName} (${total} ≠ ${sum})`);
+}
+
+/**
+ * `metrics.json` (Приложение A, §5.8). Метрика считается за весь цикл: длительности
+ * этапов и гейтов, исходы гейтов, счётчики серьёзности, сопоставление находок ревью
+ * с дефектами оценщика. `tokens` и `cost_rub` в фазе 1 строго `null` (R5): бюджет
+ * и сбор usage в поставку не входят, поэтому число здесь означало бы выдуманные данные.
+ *
+ * Ключи `stage_durations_s` — имена этапов автомата §5.3, ключи `gate_durations_s`
+ * и `gate_outcomes` — идентификаторы гейтов §5.5. Значения длительностей — секунды
+ * (число ≥ 0 c точностью до 3 знаков; точность держит писатель, схема её не проверяет).
+ *
+ * Кроме типов проверяются обязательные равенства Приложения A: `cycle_duration_s`
+ * равен сумме `stage_durations_s`, `gate_total_s` — сумме `gate_durations_s`. Сравнение
+ * с допуском `DURATION_TOLERANCE` (писатель складывает уже округлённые слагаемые)
+ * и только для тех карт, которые прошли проверку целиком.
+ * @param {unknown} doc
+ * @returns {ValidationResult}
+ */
+export function validateMetrics(doc) {
+  const errors = [];
+  if (!isRecord(doc)) {
+    return { ok: false, errors: [`metrics: ожидается объект, получено ${describe(doc)}`] };
+  }
+
+  reqInt(doc, 'iterations', 'metrics', errors, { min: 1 });
+  reqInt(doc, 'max_iterations', 'metrics', errors, { min: 1 });
+  reqOneOf(doc, 'final_stage', 'metrics', errors, STAGES);
+
+  // Карта проверяется целиком: пока в ней есть ошибка, сумму не считаем — иначе
+  // поверх найденного добавилось бы шумное расхождение с итогом.
+  let stageEntriesOk = true;
+  const stagesRecorded = reqRecord(
+    doc,
+    'stage_durations_s',
+    'metrics',
+    errors,
+    (map, path, errs) => {
+      for (const [stage, value] of Object.entries(map)) {
+        if (!STAGES.includes(stage)) {
+          errs.push(`${path}: неизвестный этап ${describe(stage)}`);
+          stageEntriesOk = false;
+        }
+        if (!num(value, `${path}.${stage}`, errs, { min: 0 })) stageEntriesOk = false;
+      }
+    },
+  );
+
+  const totalPath = 'metrics.cycle_duration_s';
+  const cycleDurationOk = num(req(doc, 'cycle_duration_s', totalPath, errors), totalPath, errors, {
+    min: 0,
+  });
+
+  if (stagesRecorded && stageEntriesOk && cycleDurationOk) {
+    requireTotalOfMap(
+      /** @type {Record<string, number>} */ (doc.stage_durations_s),
+      /** @type {number} */ (doc.cycle_duration_s),
+      'stage_durations_s',
+      totalPath,
+      errors,
+    );
+  }
+
+  let gateEntriesOk = true;
+  const gatesRecorded = reqRecord(doc, 'gate_durations_s', 'metrics', errors, (map, path, errs) => {
+    for (const [id, value] of Object.entries(map)) {
+      if (!GATE_ID_PATTERN.test(id)) {
+        errs.push(`${path}: недопустимый id гейта ${describe(id)}`);
+        gateEntriesOk = false;
+      }
+      if (!num(value, `${path}.${id}`, errs, { min: 0 })) gateEntriesOk = false;
+    }
+  });
+
+  const gateTotalPath = 'metrics.gate_total_s';
+  const gateTotalOk = num(req(doc, 'gate_total_s', gateTotalPath, errors), gateTotalPath, errors, {
+    min: 0,
+  });
+
+  if (gatesRecorded && gateEntriesOk && gateTotalOk) {
+    requireTotalOfMap(
+      /** @type {Record<string, number>} */ (doc.gate_durations_s),
+      /** @type {number} */ (doc.gate_total_s),
+      'gate_durations_s',
+      gateTotalPath,
+      errors,
+    );
+  }
+
+  reqRecord(doc, 'gate_outcomes', 'metrics', errors, (map, path, errs) => {
+    for (const [id, value] of Object.entries(map)) {
+      const valuePath = `${path}.${id}`;
+      if (!GATE_ID_PATTERN.test(id)) errs.push(`${path}: недопустимый id гейта ${describe(id)}`);
+      record(value, valuePath, errs, (counts, countsPath, countErrs) => {
+        for (const status of GATE_STATUSES)
+          reqInt(counts, status, countsPath, countErrs, { min: 0 });
+      });
+    }
+  });
+
+  reqSeverityCounts(doc, 'review_findings', 'metrics', errors, SEVERITIES);
+  reqSeverityCounts(doc, 'evaluator_defects', 'metrics', errors, DEFECT_SEVERITIES);
+
+  reqInt(doc, 'only_review', 'metrics', errors, { min: 0 });
+  reqInt(doc, 'only_evaluator', 'metrics', errors, { min: 0 });
+  reqInt(doc, 'both', 'metrics', errors, { min: 0 });
+  reqInt(doc, 'unresolved_refs', 'metrics', errors, { min: 0 });
+  reqInt(doc, 'verdict_without_evidence', 'metrics', errors, { min: 0 });
+  reqInt(doc, 'unclosed_stages', 'metrics', errors, { min: 0 });
+
+  reqBool(doc, 'evaluator_shares_family_with_plan', 'metrics', errors);
+
+  reqNull(doc, 'tokens', 'metrics', errors);
+  reqNull(doc, 'cost_rub', 'metrics', errors);
 
   return { ok: errors.length === 0, errors };
 }

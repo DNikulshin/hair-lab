@@ -1,0 +1,25 @@
+{
+  "verdict": "merge-ready",
+  "findings": [
+    {
+      "id": "R5",
+      "severity": "MINOR",
+      "file": "scripts/cycle-metrics.mjs",
+      "line": 120,
+      "summary": "Сообщение об ошибке дублирует имя артефакта",
+      "repro": "",
+      "in_scope": true,
+      "preexisting": false
+    },
+    {
+      "id": "R6",
+      "severity": "FOLLOW-UP",
+      "file": "docs/orchestrator-core.md",
+      "line": 565,
+      "summary": "Схема метрик в Приложении A дополнена PR T8",
+      "repro": "",
+      "in_scope": false,
+      "preexisting": true
+    }
+  ]
+}

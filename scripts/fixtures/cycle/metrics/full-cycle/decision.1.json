@@ -1,0 +1,23 @@
+{
+  "iteration": 1,
+  "action": "REWORK",
+  "retry_stage": null,
+  "acquire": [],
+  "reasons": ["gate:lint: fail", "review:BLOCKER R1", "review:MAJOR R2", "evaluation:BLOCKER D1"],
+  "rework_items": [
+    "R1 [BLOCKER] scripts/cycle-metrics.mjs:40 — Длительность округляется до целых секунд; сценарий: node scripts/cycle-metrics.mjs --dir <каталог цикла>",
+    "R2 [MAJOR] scripts/lib/cycle/validate.mjs:220 — validateMetrics не требует tokens = null; сценарий: validateMetrics({ tokens: 10 }) возвращает ok",
+    "D1 [BLOCKER] scripts/cycle-metrics.mjs:45 — Округление до целых секунд искажает короткие этапы; сценарий: node scripts/cycle-metrics.mjs --dir <каталог цикла>"
+  ],
+  "unverified": [],
+  "downgraded": ["D3 [MAJOR] нет свидетельства"],
+  "counts": {
+    "blockers": 2,
+    "major": 1,
+    "minor": 2,
+    "followups": 3,
+    "partial_criteria": 0,
+    "verdict_without_evidence": 0
+  },
+  "unresolved_refs": 2
+}

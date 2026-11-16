@@ -1,0 +1,84 @@
+{
+  "iterations": 2,
+  "max_iterations": 2,
+  "final_stage": "DONE",
+  "stage_durations_s": {
+    "CODE": 3590,
+    "DECIDE": 65,
+    "EVALUATE": 480,
+    "GATES": 660,
+    "INIT": 150,
+    "PLAN": 600,
+    "REVIEW": 1200,
+    "REWORK": 5,
+    "FINAL": 1
+  },
+  "cycle_duration_s": 6750,
+  "gate_durations_s": {
+    "contracts_build": 24.25,
+    "lint": 17,
+    "lint_workflows": 0,
+    "secrets_scan": 0.2,
+    "test_scripts": 80.25,
+    "typecheck": 123.65
+  },
+  "gate_total_s": 245.35,
+  "gate_outcomes": {
+    "contracts_build": {
+      "pass": 2,
+      "fail": 0,
+      "skipped": 0,
+      "not_run": 0
+    },
+    "lint": {
+      "pass": 1,
+      "fail": 1,
+      "skipped": 0,
+      "not_run": 0
+    },
+    "lint_workflows": {
+      "pass": 0,
+      "fail": 0,
+      "skipped": 2,
+      "not_run": 0
+    },
+    "secrets_scan": {
+      "pass": 2,
+      "fail": 0,
+      "skipped": 0,
+      "not_run": 0
+    },
+    "test_scripts": {
+      "pass": 2,
+      "fail": 0,
+      "skipped": 0,
+      "not_run": 0
+    },
+    "typecheck": {
+      "pass": 2,
+      "fail": 0,
+      "skipped": 0,
+      "not_run": 0
+    }
+  },
+  "review_findings": {
+    "BLOCKER": 1,
+    "MAJOR": 1,
+    "MINOR": 2,
+    "FOLLOW-UP": 2
+  },
+  "evaluator_defects": {
+    "BLOCKER": 1,
+    "MAJOR": 2,
+    "MINOR": 1
+  },
+  "only_review": 4,
+  "only_evaluator": 2,
+  "both": 2,
+  "unresolved_refs": 2,
+  "verdict_without_evidence": 1,
+  "unclosed_stages": 1,
+  "evaluator_shares_family_with_plan": true,
+  "tokens": null,
+  "cost_rub": null
+}

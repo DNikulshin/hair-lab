@@ -1,0 +1,19 @@
+{
+  "iteration": 2,
+  "action": "PROCEED",
+  "retry_stage": null,
+  "acquire": [],
+  "reasons": [],
+  "rework_items": [],
+  "unverified": [],
+  "downgraded": [],
+  "counts": {
+    "blockers": 0,
+    "major": 0,
+    "minor": 1,
+    "followups": 2,
+    "partial_criteria": 0,
+    "verdict_without_evidence": 1
+  },
+  "unresolved_refs": 0
+}

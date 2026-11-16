@@ -1,0 +1,45 @@
+{
+  "verdict": "needs-changes",
+  "findings": [
+    {
+      "id": "R1",
+      "severity": "BLOCKER",
+      "file": "scripts/cycle-metrics.mjs",
+      "line": 40,
+      "summary": "Длительность округляется до целых секунд",
+      "repro": "node scripts/cycle-metrics.mjs --dir <каталог цикла>; в metrics.json 1 вместо 1.25",
+      "in_scope": true,
+      "preexisting": false
+    },
+    {
+      "id": "R2",
+      "severity": "MAJOR",
+      "file": "scripts/lib/cycle/validate.mjs",
+      "line": 220,
+      "summary": "validateMetrics не требует tokens = null",
+      "repro": "validateMetrics({ tokens: 10 }) возвращает ok",
+      "in_scope": true,
+      "preexisting": false
+    },
+    {
+      "id": "R3",
+      "severity": "MINOR",
+      "file": "",
+      "line": "",
+      "summary": "В JSDoc нет ссылки на §5.6",
+      "repro": "",
+      "in_scope": true,
+      "preexisting": false
+    },
+    {
+      "id": "R4",
+      "severity": "FOLLOW-UP",
+      "file": "docs/orchestrator-core.md",
+      "line": 565,
+      "summary": "Приложение A дополнено в этом же PR, хотя спека правится в T7",
+      "repro": "",
+      "in_scope": false,
+      "preexisting": true
+    }
+  ]
+}
