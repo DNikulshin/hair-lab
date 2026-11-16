@@ -10,11 +10,28 @@ Closes #
 
 ## Проверки
 
+<!-- Для PR из /cycle раздел собирается из gates.<n>.json (cycle-pr-body), чекбоксы не ставятся руками. -->
+
 - [ ] `pnpm --filter @hair-lab/contracts build`
 - [ ] `pnpm typecheck`
-- [ ] `pnpm lint` + `pnpm check:arch`
+- [ ] `pnpm lint` + `pnpm check:arch` + `pnpm check:harness`
 - [ ] `pnpm test` (и `pnpm test:int`, если затронуты БД/миграции)
 - [ ] CI зелёный
+
+## Независимая оценка
+
+<!-- Для PR из /cycle раздел собирает cycle-pr-body из review.<n>.json, evaluation.<n>.json
+     и decision.<n>.json: вердикты, таблица критериев, «не проверено». -->
+
+| Источник | Вердикт                                                                  |
+| -------- | ------------------------------------------------------------------------ |
+| Ревью    | <!-- merge-ready / needs-changes -->                                     |
+| Оценка   | <!-- ACCEPT / ACCEPT_WITH_FOLLOWUPS / REWORK / INSUFFICIENT_EVIDENCE --> |
+| Итераций | <!-- n из max_iterations -->                                             |
+
+- Критерии приёмки: <!-- таблица C1…Cn: статус met|partial|unmet|unverified и ссылка на свидетельство (file:line, gate:<id>, qa:<id>) -->
+- Расхождения ревью и оценки: <!-- что один нашёл, а другой нет; нет — «нет» -->
+- Не проверено: <!-- что осталось и почему; при PROCEED_WITH_UNVERIFIED — чекбоксы для владельца -->
 
 ## Риски
 

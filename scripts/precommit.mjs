@@ -10,6 +10,7 @@
  * - prettier и eslint запускаются с `--write`/`--fix`, исправленные файлы возвращаются в индекс;
  * - `.prettierignore` и `ignores` из eslint-конфига действуют как обычно (сгенерированное не трогаем);
  * - `check:arch` — только если тронуты `apps/<app>/src` или `packages/<pkg>/src`;
+ * - `check:harness` — только если тронут `.pi/**` (агенты, настройки, промпт цикла);
  * - `actionlint` — только если тронуты `.github/workflows/*.yml`;
  * - полный `typecheck` и тесты осознанно не запускаем: это делает CI, иначе коммит станет медленным.
  *
@@ -23,6 +24,8 @@ const PRETTIER_FILES = /\.(?:md|mdx|json|jsonc|ya?ml|ts|tsx|mts|cts|js|jsx|mjs|c
 const ESLINT_FILES = /\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs)$/;
 const ARCH_FILES = /^(?:apps|packages)\/[^/]+\/src\//;
 const WORKFLOW_FILES = /^\.github\/workflows\/.*\.ya?ml$/;
+/** Harness агентов: правка `.pi/**` может сломать H1–H6 (docs/orchestrator-core.md §5.9). */
+const HARNESS_FILES = /^\.pi\//;
 
 /** @param {string[]} args */
 function git(args) {
@@ -108,6 +111,12 @@ function main() {
   if (arch.length > 0) {
     console.log('pre-commit: check:arch');
     run('pnpm', ['check:arch']);
+  }
+
+  const harness = staged.filter((file) => HARNESS_FILES.test(file));
+  if (harness.length > 0) {
+    console.log(`pre-commit: check:harness — ${harness.length} файл(ов) в .pi/`);
+    run('pnpm', ['check:harness']);
   }
 
   console.log('pre-commit: готово');
