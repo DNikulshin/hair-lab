@@ -30,6 +30,11 @@ function makeRoot(t) {
   writeFileSync(join(root, 'node_modules', 'left-pad', 'index.js'), 'module.exports = 1;\n');
   mkdirSync(join(root, '.pi', 'artifacts', '2026-11-16-1-slug'), { recursive: true });
   writeFileSync(join(root, '.pi', 'artifacts', '2026-11-16-1-slug', 'state.json'), '{}\n');
+  // Файлы окружения: `.env.example` читать разрешено, остальные `.env*` — нет.
+  writeFileSync(join(root, '.env.local'), 'DB_PASSWORD=example\nAPI_TOKEN=example\n');
+  writeFileSync(join(root, '.env.example'), 'DB_PASSWORD=\nAPI_TOKEN=\n');
+  mkdirSync(join(root, 'apps', 'api'), { recursive: true });
+  writeFileSync(join(root, 'apps', 'api', '.env.production'), 'DB_PASSWORD=example\n');
 
   return root;
 }
@@ -170,6 +175,31 @@ describe('resolveRef: path:line', () => {
     assert.equal(result.ok, false);
     assert.match(result.error, /не файл: src/);
   });
+
+  test('`.env*` не читается ни в одном виде ссылки', (t) => {
+    const root = makeRoot(t);
+
+    // Прямой, вложенный и с `./`: любая форма не должна доходить до чтения файла.
+    assert.match(
+      resolveRef('.env.local:1', { root }).error,
+      /чтение \.env\.local запрещено \(разрешён только \.env\.example\)/,
+    );
+    assert.match(
+      resolveRef('apps/api/.env.production:1', { root }).error,
+      /чтение \.env\.production запрещено/,
+    );
+    assert.match(resolveRef('./.env.local:1', { root }).error, /чтение \.env\.local запрещено/);
+  });
+
+  test('`.env.example` разрешён: номер строки проверяется по файлу', (t) => {
+    const root = makeRoot(t);
+
+    const result = resolveRef('.env.example:2', { root });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.value, '.env.example');
+    assert.equal(result.line, 2);
+  });
 });
 
 describe('resolveRef: символические ссылки', () => {
@@ -216,6 +246,16 @@ describe('resolveRef: символические ссылки', () => {
     if (!linkOrSkip(t, outside, join(root, 'linked-dir'))) return;
 
     assert.equal(resolveRef('linked-dir:1', { root }).ok, false);
+  });
+
+  test('симлинк на `.env*` не обходит запрет', (t) => {
+    const root = makeRoot(t);
+    if (!linkOrSkip(t, join(root, '.env.local'), join(root, 'src', 'config.mjs'))) return;
+
+    const result = resolveRef('src/config.mjs:1', { root });
+
+    assert.equal(result.ok, false);
+    assert.match(result.error, /символическая ссылка ведёт в запрещённый путь/);
   });
 });
 
