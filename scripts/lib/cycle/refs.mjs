@@ -3,8 +3,12 @@
  *
  * Формы: `path:line` (файл репозитория и номер строки), `gate:<id>` (гейт из
  * `gates.<n>.json`), `qa:<id>` (шаг из `qa-web.json`). Ссылки приходят из вывода
- * агентов, поэтому разрешение защитное: абсолютные пути, `..`, `.pi/artifacts/` и
- * `node_modules/` запрещены, файл должен существовать, строка — попадать в файл.
+ * агентов, поэтому разрешение защитное: абсолютные пути, `..`, `.pi/artifacts/`,
+ * `node_modules/` и `.env*` (кроме `.env.example`) запрещены, файл должен
+ * существовать, строка — попадать в файл. Запрет `.env*` живёт здесь, а не в
+ * потребителях: `resolveRef` открывает файл, чтобы проверить номер строки, значит
+ * проверка обязана быть до чтения и в одном месте для всех вызывающих (AGENTS.md,
+ * «Персональные данные и безопасность»).
  * Проверки пути идут по каноническому пути (`realpathSync`): символическая ссылка
  * не должна выводить за корень репозитория или в запрещённую область.
  * Shebang не нужен: модуль подключается из CLI-скриптов `cycle-*.mjs`.
@@ -21,6 +25,21 @@ const PATH_REF = /^(.+):(\d+)$/;
 
 /** Привод Windows-пути: `C:\repo` абсолютен, хотя posix `isAbsolute` этого не видит. */
 const WINDOWS_ABSOLUTE = /^[A-Za-z]:/;
+
+/** Единственный разрешённый к чтению файл окружения (AGENTS.md, «Персональные данные»). */
+const ENV_EXAMPLE = '.env.example';
+
+/**
+ * Сегмент запрещённого файла окружения: `.env`, `.env.local`, `.env.production`.
+ * Регистр не важен: агент может ошибиться в написании, а на регистронезависимых ФС
+ * `.ENV` — тот же файл.
+ * @param {string} segment
+ * @returns {boolean}
+ */
+function isEnvSegment(segment) {
+  const lower = segment.trim().toLowerCase();
+  return lower.startsWith('.env') && lower !== ENV_EXAMPLE;
+}
 
 /**
  * @typedef {object} ParsedRef
@@ -110,6 +129,12 @@ function safeSegments(value) {
   }
   if (segments.includes('node_modules')) {
     return { problem: `путь в node_modules/ запрещён: ${value}` };
+  }
+  // `.env*` открывается только как `.env.example`: `resolveRef` читает файл ради номера
+  // строки, а это нарушило бы AGENTS.md («.env*, кроме .env.example, не читать»).
+  const env = segments.find(isEnvSegment);
+  if (env !== undefined) {
+    return { problem: `чтение ${env} запрещено (разрешён только ${ENV_EXAMPLE}): ${value}` };
   }
 
   return { segments };
