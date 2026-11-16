@@ -1,0 +1,12 @@
+[
+  "@hair-lab/api:test:int: PrismaClientInitializationError: ",
+  "@hair-lab/api:test:int: Invalid `prisma.booking.create()` invocation in",
+  "@hair-lab/api:test:int: /repo/apps/api/src/bookings/bookings.test.ts:42:24",
+  "@hair-lab/api:test:int: ",
+  "@hair-lab/api:test:int: Can't reach database server at `127.0.0.1:55432`",
+  "@hair-lab/api:test:int: ",
+  "@hair-lab/api:test:int: Please make sure your database server is running at `127.0.0.1:55432`.",
+  "@hair-lab/api:test:int: error code: P1001",
+  "Tasks:    0 successful, 1 total",
+  "Failed:    @hair-lab/api#test:int"
+]
