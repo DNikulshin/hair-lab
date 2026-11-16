@@ -44,8 +44,9 @@
 - на хосте: `cat /home/deployer/hair-lab-preprod/.deployed-sha` — sha совпадает с выбранным `ref`;
 - healthcheck: `curl -sS http://127.0.0.1:3021/api/health` (с хоста) или
   `curl -sS https://preprod.dnikulshin.ru:8443/api/health` (если поднят nginx, см. `install.md`);
-- плашка стенда в левом верхнем углу страницы: `preprod`, идущие часы (МСК), короткий sha и время
-  деплоя (issue #170). Значения — runtime-переменные `DEPLOY_ENV=preprod`, `DEPLOY_SHA`,
+- плашка стенда в левом верхнем углу страницы: `preprod` и идущие часы (МСК); свёрнута в строку,
+  тап раскрывает короткий sha и время деплоя, перетаскивается, позиция запоминается в браузере
+  (issue #170, доработка #176). Значения — runtime-переменные `DEPLOY_ENV=preprod`, `DEPLOY_SHA`,
   `DEPLOY_AT` в `.env` стека, их пишет `scripts/deploy-preprod.sh`; образы тут из GHCR, то есть
   совпадают с продом — различие только в этих переменных, на проде их нет и плашки нет.
 
