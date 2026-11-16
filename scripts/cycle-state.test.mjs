@@ -7,6 +7,7 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  renameSync,
   rmSync,
   statSync,
   utimesSync,
@@ -1542,8 +1543,11 @@ describe('cycle-state: lock', () => {
     const inspected = statSync(file).ino;
 
     // Конкурентный процесс успел заменить файл: другой inode по тому же пути.
-    rmSync(file);
-    writeFileSync(file, 'чужой свежий\n');
+    // Замена идёт переименованием существующего файла, а не rm + create: освобождённый inode
+    // может быть выдан заново (так бывает в CI), и подмена осталась бы незамеченной.
+    const replacement = join(dirname(file), 'replacement.tmp');
+    writeFileSync(replacement, 'чужой свежий\n');
+    renameSync(replacement, file);
 
     assert.equal(claimStaleFile(file, inspected), 'other');
     assert.equal(readFileSync(file, 'utf8'), 'чужой свежий\n', 'чужой файл остался на месте');
