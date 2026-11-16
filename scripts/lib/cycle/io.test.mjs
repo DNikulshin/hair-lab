@@ -13,7 +13,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, test } from 'node:test';
 
-import { extractLastJsonBlock, readJson, tail, writeJsonAtomic } from './io.mjs';
+import { extractLastJsonBlock, readJson, tail, writeJsonAtomic, writeTextAtomic } from './io.mjs';
 
 /**
  * Временный каталог, удаляется после теста.
@@ -122,6 +122,50 @@ describe('writeJsonAtomic', () => {
       assert.deepEqual(readdirSync(dir), ['state.json']);
     },
   );
+});
+
+describe('writeTextAtomic', () => {
+  test('пишет текст байт-в-байт и не оставляет временных файлов', (t) => {
+    const dir = makeDir(t);
+    const file = join(dir, 'diff.patch');
+    const text = 'diff --git a/a.txt b/a.txt\n+строка\n';
+
+    writeTextAtomic(file, text);
+
+    assert.equal(readFileSync(file, 'utf8'), text);
+    assert.deepEqual(readdirSync(dir), ['diff.patch']);
+  });
+
+  test('перезапись заменяет содержимое целиком', (t) => {
+    const dir = makeDir(t);
+    const file = join(dir, 'gates.json');
+    writeTextAtomic(file, 'длинное содержимое\n');
+
+    writeTextAtomic(file, '{}\n');
+
+    assert.equal(readFileSync(file, 'utf8'), '{}\n');
+    assert.deepEqual(readdirSync(dir), ['gates.json']);
+  });
+
+  test('сбой rename не трогает цель и не оставляет tmp', (t) => {
+    const dir = makeDir(t);
+    // Цель — каталог: tmp записывается успешно, а renameSync падает.
+    const target = join(dir, 'criteria.md');
+    mkdirSync(target);
+
+    assert.throws(() => writeTextAtomic(target, '# Критерии\n'));
+
+    assert.equal(statSync(target).isDirectory(), true);
+    assert.deepEqual(readdirSync(dir), ['criteria.md']);
+  });
+
+  test('нестроковое значение — ошибка без записи', (t) => {
+    const dir = makeDir(t);
+    const file = join(dir, 'diff.patch');
+
+    assert.throws(() => writeTextAtomic(file, { text: 'x' }), /ожидается строка/);
+    assert.deepEqual(readdirSync(dir), []);
+  });
 });
 
 describe('tail', () => {

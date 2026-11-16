@@ -23,19 +23,18 @@ export function readJson(file) {
 }
 
 /**
- * Атомарно пишет данные как JSON: `tmp` в каталоге цели → `renameSync`.
- * Если сериализация или запись падает, целевой файл остаётся прежним,
- * а временный файл удаляется; ошибка пробрасывается вызывающему.
+ * Атомарно пишет текст: `tmp` в каталоге цели → `renameSync`.
+ * Если запись падает, целевой файл остаётся прежним, а временный файл удаляется;
+ * ошибка пробрасывается вызывающему. Переводы строк не меняются: `diff.patch`
+ * и логи гейтов должны попадать в пакет свидетельств байт-в-байт.
  * @param {string} file целевой путь
- * @param {unknown} data данные
- * @param {{ serialize?: (data: unknown) => string }} [options]
- *   `serialize` — способ представления (по умолчанию компактный `JSON.stringify`;
- *   для читаемых артефактов вызывающий передаёт сериализатор с отступами)
+ * @param {string} text содержимое целиком
  * @returns {void}
  */
-export function writeJsonAtomic(file, data, { serialize = JSON.stringify } = {}) {
-  // Сериализация выполняется до любой записи: сбой не должен трогать существующий файл.
-  const text = serialize(data);
+export function writeTextAtomic(file, text) {
+  if (typeof text !== 'string') {
+    throw new TypeError('writeTextAtomic: ожидается строка');
+  }
   const tmp = join(dirname(file), `.${basename(file)}.${process.pid}.${(tmpCounter += 1)}.tmp`);
 
   try {
@@ -49,6 +48,20 @@ export function writeJsonAtomic(file, data, { serialize = JSON.stringify } = {})
     }
     throw error;
   }
+}
+
+/**
+ * Атомарно пишет данные как JSON: сериализация, затем `writeTextAtomic`.
+ * Сериализация идёт до записи, поэтому её сбой не трогает существующий файл.
+ * @param {string} file целевой путь
+ * @param {unknown} data данные
+ * @param {{ serialize?: (data: unknown) => string }} [options]
+ *   `serialize` — способ представления (по умолчанию компактный `JSON.stringify`;
+ *   для читаемых артефактов вызывающий передаёт сериализатор с отступами)
+ * @returns {void}
+ */
+export function writeJsonAtomic(file, data, { serialize = JSON.stringify } = {}) {
+  writeTextAtomic(file, serialize(data));
 }
 
 /**
