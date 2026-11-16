@@ -1,0 +1,18 @@
+{
+  "iteration": 1,
+  "base_sha": "0123456789abcdef0123456789abcdef01234567",
+  "head": "89abcdef0123456789abcdef0123456789abcdef",
+  "started_at": "2026-11-16T09:20:00Z",
+  "gates": [
+    {
+      "id": "typecheck",
+      "cmd": "pnpm typecheck",
+      "required": true,
+      "status": "pass",
+      "exit": 0,
+      "duration_s": 63.4,
+      "log": null,
+      "reason": null
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "verdict": "needs-changes",
+  "findings": [
+    {
+      "id": "R1",
+      "severity": "BLOCKER",
+      "file": "scripts/lib/cycle/redact.mjs",
+      "line": 64,
+      "summary": "Номер клиента +79990000000 попадает в отчёт без маскирования",
+      "repro": "redactLog('+79990000000') в отчёте не применяется",
+      "in_scope": true,
+      "preexisting": false
+    }
+  ]
+}

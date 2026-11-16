@@ -1,0 +1,25 @@
+{
+  "verdict": "needs-changes",
+  "findings": [
+    {
+      "id": "R1",
+      "severity": "MINOR",
+      "file": "scripts/lib/cycle/redact.mjs",
+      "line": 64,
+      "summary": "В отчёте остался телефон +79990000000 и адрес user@example.com",
+      "repro": "redactLog('+79990000000') в отчёте не применяется",
+      "in_scope": true,
+      "preexisting": false
+    },
+    {
+      "id": "R2",
+      "severity": "FOLLOW-UP",
+      "file": "",
+      "line": "",
+      "summary": "Прогнать маскирование на логах vitest",
+      "repro": "",
+      "in_scope": false,
+      "preexisting": true
+    }
+  ]
+}

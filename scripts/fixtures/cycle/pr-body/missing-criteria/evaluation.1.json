@@ -1,0 +1,17 @@
+{
+  "verdict": "ACCEPT",
+  "criteria": [],
+  "scores": {
+    "coverage": 3,
+    "correctness": 3,
+    "tests": 3,
+    "data": 3,
+    "pii_security": 3,
+    "architecture": 3,
+    "scope": 3,
+    "docs": 3,
+    "evidence": 3
+  },
+  "defects": [],
+  "unverified": []
+}
