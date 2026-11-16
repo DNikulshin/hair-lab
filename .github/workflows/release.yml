@@ -89,10 +89,12 @@ jobs:
 
       # guard: прод-адреса не должны содержать порт стенда (`:8443`) — иначе он вшивается
       # в web-бандл на сборке (issue #142).
+      # Запуск через `node`, а не `pnpm`: в этом job нет pnpm/action-setup и установки
+      # зависимостей, а сам скрипт использует только node builtins (issue #164).
       - name: Проверить прод-адреса
         env:
           NEXT_PUBLIC_SITE_URL: ${{ vars.NEXT_PUBLIC_SITE_URL || 'https://strizhlab.ru' }}
-        run: pnpm check:prod-urls
+        run: node scripts/check-prod-urls.mjs
 
       # Docker требует lowercase в имени образа, а github.repository содержит owner как есть.
       - name: Нормализовать имя образа
@@ -184,13 +186,14 @@ jobs:
 
       # guard: адреса уходят в письма (APP_URL), CORS и `return_url` ЮKassa — порт стенда
       # `:8443` здесь недопустим (issue #142).
+      # Запуск через `node`, а не `pnpm`: в этом job нет pnpm/action-setup (issue #164).
       - name: Проверить прод-адреса
         env:
           NEXT_PUBLIC_SITE_URL: ${{ vars.NEXT_PUBLIC_SITE_URL || 'https://strizhlab.ru' }}
           APP_URL: ${{ vars.APP_URL || vars.NEXT_PUBLIC_SITE_URL || 'https://strizhlab.ru' }}
           CORS_ORIGINS: ${{ vars.NEXT_PUBLIC_SITE_URL || 'https://strizhlab.ru' }}
           YOOKASSA_RETURN_URL: ${{ vars.YOOKASSA_RETURN_URL || '' }}
-        run: pnpm check:prod-urls
+        run: node scripts/check-prod-urls.mjs
 
       - name: Подготовить SSH
         env:
