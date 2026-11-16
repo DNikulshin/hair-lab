@@ -3,8 +3,10 @@ import Link from 'next/link';
 import type { ReactNode } from 'react';
 import { SwRegister } from '@/features/pwa';
 import { withBasePath } from '@/shared/config/api';
+import { readDeployInfo } from '@/shared/config/deploy';
 import { siteConfig } from '@/shared/config/site';
 import { Container } from '@/shared/ui/container';
+import { DeployBadge } from '@/shared/ui/deploy-badge';
 import './globals.css';
 
 export const metadata: Metadata = {
@@ -55,10 +57,21 @@ const navigation = [
 ] as const;
 
 export default function RootLayout({ children }: { children: ReactNode }) {
+  // Плашка стенда (issue #170): только staging и preprod. Значения читаются из runtime-окружения
+  // контейнера, поэтому один и тот же образ на проде ничего не рисует — переменных там нет.
+  const deployInfo = readDeployInfo();
+
   return (
     <html lang="ru">
       <body>
         <SwRegister />
+        {deployInfo ? (
+          <DeployBadge
+            env={deployInfo.env}
+            sha={deployInfo.sha}
+            deployedAt={deployInfo.at?.toISOString() ?? null}
+          />
+        ) : null}
         <header className="border-b border-ink">
           <Container className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2 py-4">
             <Link
