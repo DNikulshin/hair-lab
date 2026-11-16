@@ -145,3 +145,86 @@ export function addedLines(diff) {
 
   return added;
 }
+
+/**
+ * @typedef {object} AddedLine
+ * @property {number} line номер строки в новой версии файла (из заголовка ханка)
+ * @property {string} text содержимое строки без префикса `+`
+ */
+
+/**
+ * Отрезает префикс стороны диффа (`a/` или `b/`), если он есть.
+ * @param {string} path путь из заголовка `+++`
+ * @returns {string}
+ */
+function stripSidePrefix(path) {
+  return path.startsWith('a/') || path.startsWith('b/') ? path.slice(2) : path;
+}
+
+/**
+ * Заголовок ханка: `@@ -a,b +c,d @@` (счётчики `,b`/`,d` необязательны).
+ * Нужен номер `c` — первая строка ханка в новой версии файла.
+ */
+const HUNK_HEADER = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/;
+
+/**
+ * Добавленные строки диффа с именами файлов и номерами строк в новой версии файла.
+ * Вход для `secrets_scan` (§5.5): в логе находки нужен `file:line`, а `addedLines`
+ * отдаёт только текст. Разбор структурный, как у `addedLines`: вне ханка встречаются
+ * только заголовки (`diff --git`, `index`, `---`, `+++`, `new file mode`, `rename from/to`,
+ * `Binary files`), поэтому имя файла берётся из `+++ b/…`, а нумерация — из `@@ … +c,d @@`.
+ * Внутри ханка добавление (`+`), удаление (`-`, номер новой версии не двигает), контекст
+ * (двигает) и `\ No newline at end of file` (не двигает). Файлы без добавленных строк
+ * (удаление, бинарный дифф, смена режима) в результат не попадают.
+ * @param {string} diff вывод `git diff`
+ * @returns {{ file: string, lines: AddedLine[] }[]}
+ */
+export function addedLinesByFile(diff) {
+  /** @type {{ file: string, lines: AddedLine[] }[]} */
+  const result = [];
+  /** @type {string|null} путь нового файла из `+++`; `null` — `/dev/null` */
+  let file = null;
+  /** @type {{ file: string, lines: AddedLine[] }|null} текущий файл результата */
+  let bucket = null;
+  let inHunk = false;
+  let newLine = 0;
+
+  for (const line of diff.split('\n')) {
+    if (line.startsWith('diff --git ')) {
+      inHunk = false;
+      file = null;
+      bucket = null;
+      continue;
+    }
+    // `+++ b/…` встречается только в заголовке файла: внутри ханка это добавление,
+    // содержимое которого начинается с `++`.
+    if (!inHunk && line.startsWith('+++ ')) {
+      const path = line.slice(4);
+      file = path === '/dev/null' ? null : stripSidePrefix(path);
+      continue;
+    }
+    const hunk = HUNK_HEADER.exec(line);
+    if (hunk !== null) {
+      inHunk = true;
+      newLine = Number(hunk[1]);
+      continue;
+    }
+    if (!inHunk) continue;
+    if (line.startsWith('-') || line.startsWith('\\')) continue;
+    if (line.startsWith('+')) {
+      if (file !== null) {
+        if (bucket === null) {
+          bucket = { file, lines: [] };
+          result.push(bucket);
+        }
+        bucket.lines.push({ line: newLine, text: line.slice(1) });
+      }
+      newLine += 1;
+      continue;
+    }
+    // Контекстная строка есть и в новой версии файла: номер строки растёт.
+    newLine += 1;
+  }
+
+  return result;
+}
