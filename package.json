@@ -16,6 +16,7 @@
     "test:scripts": "node --test \"scripts/**/*.test.mjs\"",
     "test:int": "turbo run test:int",
     "check:arch": "node scripts/check-arch.mjs",
+    "check:harness": "node scripts/check-harness.mjs",
     "check:prod-urls": "node scripts/check-prod-urls.mjs",
     "format": "prettier --write .",
     "format:check": "prettier --check .",

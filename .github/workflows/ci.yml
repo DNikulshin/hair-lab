@@ -56,6 +56,10 @@ jobs:
       - run: pnpm lint
       - run: pnpm check:arch
 
+      # Harness агентов: независимость семейств моделей, права ролей, отсутствие
+      # названий моделей в AGENTS.md (docs/orchestrator-core.md §5.9).
+      - run: pnpm check:harness
+
       # Бинарник actionlint кэшируется между прогонами: сам скрипт скачивает его
       # с GitHub Releases, а не тянет Docker-образ (Docker Hub отдаёт 502 и лимитирует пуллы).
       - name: Кэш actionlint

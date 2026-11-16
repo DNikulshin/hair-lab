@@ -36,6 +36,7 @@
 | Форматирование (проверка / автофикс)                   | `pnpm format:check` / `pnpm format`                       |
 | Workflow GitHub Actions                                | `pnpm lint:workflows`                                     |
 | Границы слоёв и пакетов                                | `pnpm check:arch`                                         |
+| Harness агентов и моделей                              | `pnpm check:harness`                                      |
 | Unit-тесты                                             | `pnpm test`                                               |
 | Интеграционные тесты (нужны Postgres и окружение)      | `pnpm test:int`                                           |
 | Новая миграция (dev)                                   | `pnpm --filter @hair-lab/api db:migrate:dev --name <имя>` |
@@ -43,7 +44,7 @@
 | Запуск в dev                                           | `pnpm dev`                                                |
 
 Порядок проверки после правок: `contracts build` → `format:check` → `typecheck` → `lint` +
-`check:arch` → `lint:workflows` → затронутые тесты.
+`check:arch` + `check:harness` → `lint:workflows` → затронутые тесты.
 Проверку, которую нельзя выполнить (нет БД, окружения), помечай «не проверено» и называй причину.
 Не заявляй «проверено» без фактического запуска.
 
@@ -51,7 +52,8 @@
 
 Хук `.githooks/pre-commit` запускает `scripts/precommit.mjs` (`pnpm precommit`) по staged-файлам:
 prettier `--write`, eslint `--fix` (исправления возвращаются в индекс), `pnpm check:arch`, если тронуты
-`apps/*/src` или `packages/*/src`, и `pnpm lint:workflows` (`actionlint`), если тронуты
+`apps/*/src` или `packages/*/src`, `pnpm check:harness`, если тронут `.pi/**`, и `pnpm lint:workflows`
+(`actionlint`), если тронуты
 `.github/workflows/*.yml`. Полный `typecheck` и тесты остаются в CI: на каждый коммит это слишком
 медленно. Хук подключается автоматически на `pnpm install` (`prepare` → `git config core.hooksPath .githooks`);
 вручную — та же команда. Обход: `git commit --no-verify` (только осознанно). В CI хук не запускается —
@@ -142,15 +144,27 @@ prettier `--write`, eslint `--fix` (исправления возвращают�
 `.pi/artifacts/<YYYY-MM-DD>-<номер>-<slug>/` (каталог в `.gitignore`):
 `plan.md` → `code-report.md` → `review.md` → `followups.md`.
 
-Субагенты проекта лежат в `.pi/agents/` (`plan`, `code`, `review`) — они перекрывают
+Субагенты проекта лежат в `.pi/agents/` (`plan`, `code`, `review`, `evaluate`) — они перекрывают
 одноимённых глобальных, поэтому модели и промпты правятся под проект здесь.
 Команда `/cycle` — `.pi/prompts/cycle.md`, настройки моделей и лимитов — `.pi/settings.json`.
-Действующая раскладка моделей: главная модель и `code` — DeepSeek v4.1 Flash (thinking low),
-план — GLM-5.3 (thinking high), ревью — GPT-6 Luna Pro (thinking medium); глобальные значения —
-в `~/.pi/agent/settings.json`, проектные их перекрывают. За цикл работают три семейства: ревьюер
-намеренно не из того, что у автора кода (OpenAI против DeepSeek). Модели правятся под бюджет владельца —
-снижение thinking или переезд на более дешёвое семейство допустимы, но ревьюер не должен оказаться
-в одном семействе с `code`: тогда независимость ревью теряется и это фиксируется в `followups.md`.
+Протокол и стадии — `docs/orchestrator.md` и `docs/orchestrator-core.md`; политику цикла
+принимают скрипты `cycle-*`, а не супервизор.
+
+Модели указаны только в `.pi/agents/*.md` и `.pi/settings.json` (глобальные значения — в
+`~/.pi/agent/settings.json`, проектные их перекрывают). В этом файле имена моделей не
+пишем: их проверяет и запрещает `pnpm check:harness` (правило H6). Независимость ревью —
+требование процесса: семейство `review` не должно совпадать с `code`, а `evaluate` — ни с
+`code`, ни с `review`; это проверяют H1–H4, а не глазомер. Смена модели под бюджет допустима,
+но проверка должна остаться зелёной.
+
+### Harness агентов
+
+`pnpm check:harness` проверяет `.pi/agents/*.md`, `.pi/settings.json`, `.pi/prompts/cycle.md`
+и этот файл по правилам H1–H6 (`docs/orchestrator-core.md` §5.9): наличие и поля агентов,
+независимость семейств моделей, права ролей (у `plan`/`review`/`evaluate` нет правок файлов),
+провайдер, лимит субагентов, имена этапов в `cycle.md` и отсутствие идентификаторов моделей
+здесь. Запускается в CI после `check:arch` и в pre-commit при правке `.pi/**`. Название
+продукта «Claude Code» нарушением не считается.
 
 Проектные скиллы — `.pi/skills/`: `hair-lab-data-migration` (схема БД и Prisma-миграции)
 и `hair-lab-api-contract` (контракты → `api` → `web`). В доверенном проекте подхватываются
@@ -197,8 +211,12 @@ prettier `--write`, eslint `--fix` (исправления возвращают�
 
 Почему именно супервизор: у субагентов `code`/`review` MCP-инструментов нет (только
 `read/grep/find/ls/bash`), поэтому браузер — единственная часть проверки, которую они закрыть
-не могут. Результат (что открывали, что увидели) прикладывается к `code-report.md`. Если MCP
-недоступен — пишем «браузерная проверка не выполнена» с причиной; E2E в CI пока нет (follow-up).
+не могут. Результат (что открывали, что увидели) прикладывается к `code-report.md` и
+**сырыми фактами** в `qa-web.json` каталога артефактов: `status`, `reason`, `steps[]` с `id`
+шагов `s1`, `s2`, … — формат и правила в `docs/qa-web.md`. Этот файл — единственный вход
+гейта QA: `cycle-decide` считает шаги невыполненной проверкой, а `refs.mjs` разрешает
+ссылки `qa:<id>` из оценки. ПДн и секреты в него не пишем. Если MCP
+недоступен — `{"status": "not_run", "reason": "<причина>", "steps": []}`; E2E в CI пока нет (follow-up).
 
 ### Другие MCP и инструменты
 
