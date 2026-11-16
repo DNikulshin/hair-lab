@@ -66,6 +66,24 @@ git -c advice.detachedHead=false checkout --force --detach "$TARGET"
 git clean -fdq
 log "деплой $TARGET: $(git log -1 --pretty=%s)"
 
+# --- compose стека из репозитория (issue #173) ------------------------------
+# compose живёт в каталоге стека копией, а не в git: без синхронизации изменения из `main`
+# (например, новые переменные окружения `web`) до стенда не доезжают — внешне деплой зелёный,
+# а внутри старый конфиг. Берём файл именно из целевого коммита и накатываем только при отличии;
+# предыдущая копия сохраняется с меткой времени.
+DESIRED_COMPOSE="$STACK_DIR/docker-compose.prod.yml.desired"
+git -C "$STAGING_DEPLOY_DIR" show "$TARGET:docker-compose.prod.yml" >"$DESIRED_COMPOSE" ||
+  fail "в коммите $TARGET нет docker-compose.prod.yml"
+if cmp -s "$DESIRED_COMPOSE" "$STACK_DIR/docker-compose.prod.yml"; then
+  rm -f "$DESIRED_COMPOSE"
+else
+  cp -a "$STACK_DIR/docker-compose.prod.yml" \
+    "$STACK_DIR/docker-compose.prod.yml.bak.$(date -u +%Y%m%d-%H%M%S)" 2>/dev/null || true
+  mv "$DESIRED_COMPOSE" "$STACK_DIR/docker-compose.prod.yml"
+  log "compose стека обновлён из коммита $TARGET"
+fi
+"${COMPOSE[@]}" config -q || fail "compose стека невалиден: $STACK_DIR/docker-compose.prod.yml"
+
 # --- сборка образов ---------------------------------------------------------
 log "сборка api"
 docker build -q -f apps/api/Dockerfile -t hair-lab-api:local .

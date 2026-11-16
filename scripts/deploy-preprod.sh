@@ -55,6 +55,24 @@ IMAGE_TAG="${TAG_PREFIX}${TARGET}"
 export IMAGE_TAG
 log "деплой preprod из GHCR, тег $IMAGE_TAG: $(git log -1 --pretty=%s "$TARGET")"
 
+# --- compose стека из репозитория (issue #173) ------------------------------
+# Образы тут из GHCR, но compose — копия в каталоге стека: без синхронизации изменения из
+# `main` (например, новые переменные окружения `web`) до контура не доезжают. Берём файл из
+# целевого коммита (без checkout: рабочее дерево деплой-клона не трогаем) и накатываем только
+# при отличии; старую копию сохраняем.
+DESIRED_COMPOSE="$STACK_DIR/docker-compose.prod.yml.desired"
+git -C "$STAGING_DEPLOY_DIR" show "$TARGET:docker-compose.prod.yml" >"$DESIRED_COMPOSE" ||
+  fail "в коммите $TARGET нет docker-compose.prod.yml"
+if cmp -s "$DESIRED_COMPOSE" "$STACK_DIR/docker-compose.prod.yml"; then
+  rm -f "$DESIRED_COMPOSE"
+else
+  cp -a "$STACK_DIR/docker-compose.prod.yml" \
+    "$STACK_DIR/docker-compose.prod.yml.bak.$(date -u +%Y%m%d-%H%M%S)" 2>/dev/null || true
+  mv "$DESIRED_COMPOSE" "$STACK_DIR/docker-compose.prod.yml"
+  log "compose стека обновлён из коммита $TARGET"
+fi
+"${COMPOSE[@]}" config -q || fail "compose стека невалиден: $STACK_DIR/docker-compose.prod.yml"
+
 # Сверяем, что compose берёт образы именно с этим тегом: разошедшийся `.env` иначе молча
 # поднял бы старую версию (как в staging, но здесь тег приходит извне, а не собирается).
 actual="$("${COMPOSE[@]}" config --images | grep -E '^ghcr\.io/' | sort || true)"

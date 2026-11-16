@@ -29,9 +29,10 @@
    SSH `deploy-image <sha>`.
 2. На хосте принудительная команда (`deploy/staging/ssh-deploy.sh`, режим `deploy-image`) берёт
    `scripts/deploy-preprod.sh` из `origin/main` деплой-клона и запускает его.
-3. `scripts/deploy-preprod.sh`: `compose pull` → сверка тегов с `.env` → `run --rm -T migrations`
-   → `up -d --remove-orphans` → healthcheck на loopback (`:3021/api/health`, `:3020/`) →
-   запись `.deployed-sha` в каталог стека.
+3. `scripts/deploy-preprod.sh`: синхронизация `docker-compose.prod.yml` из деплой-клона на нужном
+   коммите (issue #173: с бэкапом и проверкой `docker compose config -q`) → `compose pull` →
+   сверка тегов с `.env` → `run --rm -T migrations` → `up -d --remove-orphans` →
+   healthcheck на loopback (`:3021/api/health`, `:3020/`) → запись `.deployed-sha` в каталог стека.
 
 Почему тег `preprod-<sha>`, а не отдельные пакеты: preprod тренирует ровно те же GHCR-пакеты,
 что и прод (`hair-lab-api`, `hair-lab-api-migrations`, `hair-lab-web`), просто с другим префиксом

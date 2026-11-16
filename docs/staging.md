@@ -52,6 +52,11 @@ wildcard-сертификат `*.dnikulshin.ru` (`/etc/ssl/dnikulshin/{fullchain
 - **Docs-only коммиты стенд не трогают**: job `deploy` пропускается по `scripts/changed-components.mjs`.
 - **Деплой берёт код из `/home/deployer/hair-lab-deploy`**, а не из рабочего клона агента: CD
   переключает коммиты только там. Незакоммиченные правки на стенд не попадают — сначала merge.
+- **Compose-файл стека синхронизируется автоматически** (issue #173): `scripts/deploy-staging.sh`
+  берёт `docker-compose.prod.yml` из деплой-клона на нужном коммите и накатывает в каталог стека,
+  если файл отличается (старая версия остаётся рядом как `docker-compose.prod.yml.bak.<время>`,
+  затем `docker compose config -q`). Поэтому правка compose в `main` доезжает деплоем, ручного
+  `scp` на хост больше не нужно.
 - **Ключ Actions не даёт шелла**: в `authorized_keys` он ограничен принудительной командой
   и опцией `restrict` — украденный ключ умеет только задеплоить коммит из `main`. У команды два
   режима: `deploy <ref>` (staging, сборка на хосте) и `deploy-image <ref>` (preprod, образы
