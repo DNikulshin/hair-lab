@@ -78,6 +78,8 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { changedFiles } from './lib/cycle/git.mjs';
+import { cycleCostRub, readPriceSnapshot } from './lib/cycle/cost.mjs';
+import { LIMITS } from './lib/cycle/config.mjs';
 import { extractLastJsonBlock, readJson, writeJsonAtomic } from './lib/cycle/io.mjs';
 import { FIXED_NAMES, findActiveCycle, iterNames, repoRoot } from './lib/cycle/paths.mjs';
 import { redactLog } from './lib/cycle/redact.mjs';
@@ -135,6 +137,9 @@ const DOWNGRADE_REASONS = Object.freeze({
  *   проверенный `qa-web.json` или `null`, если файла нет
  * @property {boolean} webDiff дифф затрагивает `apps/web`
  * @property {string} root корень репозитория для разрешения ссылок
+ * @property {number|null} [costRub] стоимость цикла по `usage.json` и `evals/prices.json`:
+ *   `null` (по умолчанию) — замера нет (нет `usage.json`, неизвестна модель или цены),
+ *   и тогда бюджетный порог не проверяется: ноль был бы выдуманными данными
  */
 
 /**
@@ -314,8 +319,18 @@ function defectDowngradeReason(defect, resolvedRefs) {
  * @returns {Decision}
  */
 export function decide(inputs) {
-  const { iteration, maxIterations, retries, gates, review, evaluation, qaWeb, webDiff, root } =
-    inputs;
+  const {
+    iteration,
+    maxIterations,
+    retries,
+    gates,
+    review,
+    evaluation,
+    qaWeb,
+    webDiff,
+    root,
+    costRub = null,
+  } = inputs;
 
   /** @type {Record<string, number>} */
   const counts = {
@@ -361,6 +376,15 @@ export function decide(inputs) {
       counts,
       unresolved_refs: unresolvedRefs,
     };
+  }
+
+  // Правило 7 (§5.6, §11): жёсткий бюджетный порог проверяется первым — цикл дороже
+  // порога останавливается до любых доработок, ведь каждая из них тратит ещё. `null` —
+  // замера нет, проверять нечего: порог не срабатывает, решение идёт по общим правилам.
+  if (costRub !== null && costRub > LIMITS.maxCycleCostRub) {
+    reasons.push(`budget: ${costRub} ₽ > ${LIMITS.maxCycleCostRub} ₽ (правило 7 §5.6)`);
+    reasons.push('escalate:budget');
+    return finalize('ESCALATE');
   }
 
   // Правило 1: невалидный вывод агента. Первым проверяется REVIEW (§5.6).
@@ -660,6 +684,10 @@ function main() {
     // Web-дифф читается от базы цикла; индекс не меняется (его готовит супервизор).
     const webDiff = diffTouchesWeb(changedFiles(state.base_sha, { cwd: root }));
 
+    // Бюджет (правило 7 §5.6): на момент DECIDE `metrics.json` ещё не написан, поэтому
+    // стоимость считается по накопленному `usage.json`. Нет замера — `null`, не ноль.
+    const costRub = cycleCostRub({ dir, models: state.models, prices: readPriceSnapshot(root) });
+
     const decision = decide({
       iteration,
       maxIterations: state.max_iterations,
@@ -670,6 +698,7 @@ function main() {
       qaWeb,
       webDiff,
       root,
+      costRub,
     });
 
     // Артефакты из md пишутся только при валидном блоке (D4): иначе оставляем

@@ -762,6 +762,53 @@ describe('decide: правило 5 — PROCEED', () => {
   });
 });
 
+describe('decide: правило 7 — бюджетный порог (§5.6, §11)', () => {
+  test('costRub выше порога — ESCALATE с причиной budget', (t) => {
+    const result = decide(inputs(makeWorkspace(t), { costRub: 30.01 }));
+
+    assert.equal(result.action, 'ESCALATE');
+    assert.equal(result.retry_stage, null);
+
+    assert.deepEqual(result.reasons, [
+      'budget: 30.01 ₽ > 30 ₽ (правило 7 §5.6)',
+      'escalate:budget',
+    ]);
+    assert.equal(validateDecision(result).ok, true, validateDecision(result).errors.join('\n'));
+  });
+
+  test('ровно порог и ниже — обычное решение: сравнение строгое', (t) => {
+    const root = makeWorkspace(t);
+
+    for (const costRub of [30, 29.99, 0]) {
+      const result = decide(inputs(root, { costRub }));
+      assert.equal(result.action, 'PROCEED', `costRub = ${costRub}`);
+      assert.deepEqual(result.reasons, []);
+    }
+  });
+
+  test('без замера порог не применяется: null — это «неизвестно», а не ноль', (t) => {
+    const root = makeWorkspace(t);
+
+    for (const costRub of [null, undefined]) {
+      const result = decide(inputs(root, { costRub }));
+      assert.equal(result.action, 'PROCEED', `costRub = ${costRub}`);
+    }
+  });
+
+  test('порог останавливает цикл раньше доработки: блокер не даёт REWORK', (t) => {
+    const root = makeWorkspace(t);
+    const result = decide(
+      inputs(root, {
+        gates: gatesDoc([gate('typecheck', 'fail')]),
+        costRub: 45,
+      }),
+    );
+
+    assert.equal(result.action, 'ESCALATE', 'жёсткий порог важнее правила 2');
+    assert.ok(result.reasons.includes('escalate:budget'));
+  });
+});
+
 describe('decide: маскирование свободного текста из вывода агентов (§5.4)', () => {
   /** JWT, который обязан превратиться в `[secret]`. */
   const TOKEN = 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.c2lnbmF0dXJl';
@@ -1421,5 +1468,86 @@ describe('CLI: ошибки использования (код 2)', () => {
       assert.equal(result.status, 2, `аргументы ${args.join(' ')}`);
       assert.notEqual(result.stderr, '');
     }
+  });
+});
+
+describe('CLI: бюджет по usage.json (правило 7 §5.6)', () => {
+  /** Снапшот цен: только модели тестового `state.json`, рубли за 1M токенов. */
+  const PRICES = {
+    _meta: { currency: 'RUB' },
+    models: {
+      'vendor/plan': { input: 100, output: 100, cache_read: 100, cache_write: 0, context: 1000 },
+    },
+  };
+
+  /**
+   * Кладёт `evals/prices.json` в тестовый репозиторий.
+   * @param {string} root
+   * @returns {void}
+   */
+  function writePrices(root) {
+    mkdirSync(join(root, 'evals'), { recursive: true });
+    writeFileSync(join(root, 'evals', 'prices.json'), `${JSON.stringify(PRICES, null, 2)}\n`);
+  }
+
+  test('расход выше порога — ESCALATE(budget), хотя блокеров нет', (t) => {
+    const repo = makeRepo(t);
+    writePrices(repo.root);
+
+    const dir = makeCycleDir(repo.root, {
+      gates: gatesDoc([gate('typecheck', 'pass')]),
+      reviewMd: mdBlock(reviewDoc()),
+      evaluationMd: mdBlock(evaluationDoc()),
+    });
+    // 1M входных токенов по 100 ₽ за 1M = 100 ₽ > 30 ₽ (§5.2, LIMITS.maxCycleCostRub).
+    writeFileSync(
+      join(dir, 'usage.json'),
+      `${JSON.stringify({ plan: { runs: 1, input: 1_000_000 } }, null, 2)}\n`,
+    );
+
+    const result = runCli(repo.root, ['--dir', dir]);
+
+    assert.equal(result.status, 0, result.stderr);
+    const decision = JSON.parse(result.stdout.trim());
+    assert.deepEqual(validateDecision(decision), { ok: true, errors: [] });
+    assert.equal(decision.action, 'ESCALATE');
+    assert.ok(decision.reasons.includes('escalate:budget'), decision.reasons.join(' | '));
+    assert.deepEqual(JSON.parse(readFileSync(join(dir, 'decision.1.json'), 'utf8')), decision);
+  });
+
+  test('без usage.json стоимость — null, решение идёт по общим правилам', (t) => {
+    const repo = makeRepo(t);
+    writePrices(repo.root);
+
+    const dir = makeCycleDir(repo.root, {
+      gates: gatesDoc([gate('typecheck', 'pass')]),
+      reviewMd: mdBlock(reviewDoc()),
+      evaluationMd: mdBlock(evaluationDoc()),
+    });
+
+    const result = runCli(repo.root, ['--dir', dir]);
+
+    assert.equal(result.status, 0, result.stderr);
+    const decision = JSON.parse(result.stdout.trim());
+    assert.equal(decision.action, 'PROCEED', 'нет замера — нет повода эскалировать');
+    assert.deepEqual(decision.reasons, []);
+  });
+
+  test('битый usage.json — код 2, а не тихий ноль в бюджете', (t) => {
+    const repo = makeRepo(t);
+    writePrices(repo.root);
+
+    const dir = makeCycleDir(repo.root, {
+      gates: gatesDoc([gate('typecheck', 'pass')]),
+      reviewMd: mdBlock(reviewDoc()),
+      evaluationMd: mdBlock(evaluationDoc()),
+    });
+    writeFileSync(join(dir, 'usage.json'), '{"plan": \n');
+
+    const result = runCli(repo.root, ['--dir', dir]);
+
+    assert.equal(result.status, 2);
+    assert.match(result.stderr, /usage\.json: не читается/u);
+    assert.equal(existsSync(join(dir, 'decision.1.json')), false);
   });
 });
