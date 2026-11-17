@@ -57,7 +57,7 @@ const EXPECTED_TRANSITIONS = Object.freeze({
   PLAN: Object.freeze(['CODE', 'ESCALATED']),
   CODE: Object.freeze(['GATES']),
   GATES: Object.freeze(['QA_WEB', 'REVIEW', 'ESCALATED']),
-  QA_WEB: Object.freeze(['REVIEW']),
+  QA_WEB: Object.freeze(['REVIEW', 'ESCALATED']),
   REVIEW: Object.freeze(['EVALUATE', 'DECIDE']),
   EVALUATE: Object.freeze(['REVIEW', 'DECIDE']),
   DECIDE: Object.freeze(['REWORK', 'ACQUIRE_EVIDENCE', 'REVIEW', 'EVALUATE', 'PR', 'ESCALATED']),
@@ -1273,6 +1273,70 @@ describe('cycle-state: escalate и draft_pr_allowed', () => {
       2,
     );
     assert.equal(stateText(plan), planBefore);
+  });
+
+  test('escalate с QA_WEB (#202): код 0, открытый этап закрыт, unlock работает', (t) => {
+    const { root, baseSha } = makeRepo(t);
+
+    // `advance --to ESCALATED` остаётся запрещён: ребро только через `escalate`.
+    const done = makeCycle(root, {
+      state: stateDoc(baseSha, {
+        stage: 'QA_WEB',
+        stage_status: 'done',
+        history: [historyEntry('GATES', 'done'), historyEntry('QA_WEB', 'done')],
+      }),
+      name: '2026-11-17-202-qa-done',
+    });
+    const advance = runCli(root, ['advance', '--dir', done, '--to', 'ESCALATED', '--now', LATER]);
+    assert.equal(advance.status, 3, 'advance в ESCALATED по-прежнему отклоняется');
+
+    // Открытый этап `finish` не требует: эскалация закрывает запись сама.
+    const dir = makeCycle(root, {
+      state: stateDoc(baseSha, {
+        stage: 'QA_WEB',
+        stage_status: 'running',
+        history: [
+          historyEntry('CODE', 'done'),
+          historyEntry('GATES', 'done'),
+          historyEntry('QA_WEB', 'running', { finished: false }),
+        ],
+      }),
+      files: {
+        'gates.1.json': `${JSON.stringify(gatesDoc(baseSha, [gate('lint', 'pass')]), null, 2)}\n`,
+      },
+      name: '2026-11-17-202-qa-running',
+    });
+
+    const result = runCli(root, [
+      'escalate',
+      '--dir',
+      dir,
+      '--reason',
+      'diff_too_large',
+      '--detail',
+      'дифф вырос после QA_WEB',
+      '--now',
+      LATER,
+    ]);
+    assert.equal(result.status, 0, result.stderr);
+
+    const state = stateJson(dir);
+    assert.equal(state.stage, 'ESCALATED');
+    assert.equal(state.history.at(-2).stage, 'QA_WEB');
+    assert.equal(state.history.at(-2).status, 'error', 'открытая запись закрывается error');
+    assert.equal(state.history.at(-2).finished_at, LATER);
+    assert.equal(state.history.at(-2).detail, 'diff_too_large');
+
+    const escalation = JSON.parse(readFileSync(join(dir, 'escalation.json'), 'utf8'));
+    assert.equal(escalation.reason, 'diff_too_large');
+    assert.equal(
+      escalation.draft_pr_allowed,
+      false,
+      'diff_too_large не входит в причины draft PR (§9)',
+    );
+
+    assert.equal(runCli(root, ['lock', '--slug', 'cycle-state', '--now', NOW]).status, 0);
+    assert.equal(runCli(root, ['unlock']).status, 0, 'unlock работает после ESCALATED');
   });
 });
 

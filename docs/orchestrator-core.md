@@ -138,8 +138,9 @@ lock [--dir D] [--slug S] | unlock [--dir D]  блокировка дерева,
 Допустимые переходы (всё остальное → код 3). В `ESCALATED` ведёт только `escalate`
 (и `apply-decision` с `ESCALATE`): `advance --to ESCALATED` отклоняется — у эскалации свои
 защиты и `escalation.json`. Эскалация с `QA_WEB` нужна, например, для `diff_too_large`,
-обнаруженного на ANALYSIS уже после браузерной проверки; код этот переход пока не
-поддерживает — см. пометку под таблицей.
+обнаруженного на ANALYSIS уже после браузерной проверки: `escalate` закрывает открытую
+запись этапа `error` (отдельный `finish` не требуется) и считает `draft_pr_allowed` по
+общим правилам ниже.
 
 | Из               | В                                                         |
 | ---------------- | --------------------------------------------------------- |
@@ -155,13 +156,9 @@ lock [--dir D] [--slug S] | unlock [--dir D]  блокировка дерева,
 | ACQUIRE_EVIDENCE | GATES, QA_WEB                                             |
 | PR               | DONE                                                      |
 
-**`QA_WEB → ESCALATED` нормативен, но пока не реализован (issue #202).** Ребро остаётся в
-таблице: его требуют Приложение B (`escalate --reason diff_too_large` на ANALYSIS уже после
-QA_WEB) и issue #178. Однако `TRANSITIONS.QA_WEB` в `scripts/cycle-state.mjs` содержит только
-`REVIEW`, поэтому `cycle-state escalate` с этапа `QA_WEB` завершается кодом 3 («эскалация из
-QA_WEB недопустима»). Правка кода — `TRANSITIONS` и независимый литерал таблицы в тесте —
-issue #202; до неё таблицу читать как нормативное требование к автомату, а не как описание
-текущего скрипта.
+**`QA_WEB → ESCALATED`** реализовано (issue #202): ребро есть в `TRANSITIONS.QA_WEB`, его
+требует Приложение B (`escalate --reason diff_too_large` на ANALYSIS уже после QA_WEB).
+`advance --to ESCALATED` при этом остаётся запрещён на любом этапе.
 
 Защиты:
 

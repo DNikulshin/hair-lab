@@ -61,7 +61,9 @@
  *   `stage_status = 'error'`; при `running` сначала нужен `finish`.
  * - **Защиты §5.3.** `→ DECIDE` требует `review.<n>.md` и `evaluation.<n>.md` текущей
  *   итерации; `→ PR` — `decision.<n>.json` с `action` `PROCEED` или
- *   `PROCEED_WITH_UNVERIFIED`; `advance --to ESCALATED` запрещён — только `escalate`.
+ *   `PROCEED_WITH_UNVERIFIED`; `advance --to ESCALATED` запрещён — только `escalate`
+ *   (эскалация допустима из любого этапа таблицы, включая `QA_WEB`: причина
+ *   `diff_too_large` может выясниться уже после браузерной проверки, #202).
  * - **`escalate`.** `draft_pr_allowed` = проход `code` завершён (`history` содержит запись
  *   `CODE` со `status = 'done'`) ∧ обязательные гейты зелёные (`mandatoryGatesGreen`) ∧
  *   причина ∈ {`iteration_limit`, `budget`, `agent_output_invalid`}. «Зелёные» — fail-safe
@@ -267,7 +269,7 @@ export const TRANSITIONS = Object.freeze({
   PLAN: Object.freeze(['CODE', 'ESCALATED']),
   CODE: Object.freeze(['GATES']),
   GATES: Object.freeze(['QA_WEB', 'REVIEW', 'ESCALATED']),
-  QA_WEB: Object.freeze(['REVIEW']),
+  QA_WEB: Object.freeze(['REVIEW', 'ESCALATED']),
   REVIEW: Object.freeze(['EVALUATE', 'DECIDE']),
   EVALUATE: Object.freeze(['REVIEW', 'DECIDE']),
   DECIDE: Object.freeze(['REWORK', 'ACQUIRE_EVIDENCE', 'REVIEW', 'EVALUATE', 'PR', 'ESCALATED']),
