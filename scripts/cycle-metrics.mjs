@@ -66,7 +66,15 @@ import { join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { normalizeDoc } from './cycle-decide.mjs';
-import { priceStage, readPrices } from './lib/evals/cost.mjs';
+import {
+  describeJsonError,
+  describeReadError,
+  isRecord,
+  normalizeUsage,
+  priceUsage,
+  readPriceSnapshot,
+  readUsage,
+} from './lib/cycle/cost.mjs';
 import { readJson, writeJsonAtomic } from './lib/cycle/io.mjs';
 import {
   FIXED_NAMES,
@@ -83,6 +91,12 @@ import {
   validateReview,
   validateState,
 } from './lib/cycle/validate.mjs';
+
+/**
+ * Стоимость и расход: те же функции, что у бюджетного порога `cycle-decide` —
+ * реэкспорт ради тестов и внешних читателей. Источник истины — `lib/cycle/cost.mjs`.
+ */
+export { normalizeUsage, priceKeyFor, priceUsage } from './lib/cycle/cost.mjs';
 
 /** Серьёзность находки ревью (Приложение A): все четыре значения считаются. */
 const REVIEW_SEVERITIES = Object.freeze(['BLOCKER', 'MAJOR', 'MINOR', 'FOLLOW-UP']);
@@ -133,105 +147,6 @@ const DURATION_FACTOR = 10 ** DURATION_DIGITS;
  * @property {Record<string, { runs: number, input: number, cache_read: number, cache_write: number, output: number, reasoning: number }>|null} tokens
  * @property {number|null} cost_rub
  */
-
-/** Этапы, на которых вызывается модель: только у них бывает расход токенов. */
-const MODEL_STAGES = Object.freeze(['plan', 'code', 'review', 'evaluate']);
-
-/**
- * Токены из `usage.json` в вид `metrics.json`: целые числа, ключи стадий в порядке
- * автомата. Лишние ключи — ошибка данных: неизвестный этап означал бы, что расход
- * посчитан не по тому словарю, и молча потерять его нельзя.
- * @param {unknown} usage содержимое `usage.json`
- * @returns {Record<string, { runs: number, input: number, cache_read: number, cache_write: number, output: number, reasoning: number }>}
- */
-export function normalizeUsage(usage) {
-  if (!isRecord(usage)) throw new Error('usage.json: ожидается объект этапов');
-
-  /** @type {Record<string, any>} */
-  const tokens = {};
-  for (const [stage, value] of Object.entries(usage)) {
-    if (!MODEL_STAGES.includes(stage)) {
-      throw new Error(`usage.json: неизвестный этап ${stage}`);
-    }
-    if (!isRecord(value)) throw new Error(`usage.json.${stage}: ожидается объект`);
-    /** @type {Record<string, number>} */
-    const entry = {};
-    for (const field of ['runs', 'input', 'cache_read', 'cache_write', 'output', 'reasoning']) {
-      const number = value[field] ?? 0;
-      if (!Number.isInteger(number) || number < 0) {
-        throw new Error(`usage.json.${stage}.${field}: ожидается целое ≥ 0`);
-      }
-      entry[field] = number;
-    }
-    tokens[stage] = entry;
-  }
-
-  return tokens;
-}
-
-/**
- * Ключ модели в снапшоте цен.
- *
- * `state.models` хранит идентификатор с префиксом провайдера (`polza-ai/z-ai/glm-5.3` —
- * этого требует H4), а `evals/prices.json` — без него. Точное совпадение проверяется
- * первым, чтобы не зависеть от формы записи; затем пробуется вариант без первого сегмента.
- * `null` — модели нет в снапшоте, считать не по чему.
- * @param {string} model как записано в `state.models`
- * @param {Record<string, unknown>} prices снапшот цен
- * @returns {string|null}
- */
-export function priceKeyFor(model, prices) {
-  if (typeof model !== 'string' || model === '') return null;
-  if (Object.hasOwn(prices, model)) return model;
-
-  const slash = model.indexOf('/');
-  if (slash > 0) {
-    const withoutProvider = model.slice(slash + 1);
-    if (Object.hasOwn(prices, withoutProvider)) return withoutProvider;
-  }
-
-  return null;
-}
-
-/**
- * Стоимость расхода по ценам и моделям этапов.
- * @param {Record<string, Record<string, number>>} tokens нормализованный расход
- * @param {Record<string, unknown>} models `state.models`
- * @param {Record<string, import('./lib/evals/cost.mjs').ModelPrice>} prices снапшот цен
- * @returns {number|null} рубли с копейками или `null`, если считать не по чему
- */
-export function priceUsage(tokens, models, prices) {
-  if (!isRecord(tokens) || !isRecord(models) || !isRecord(prices)) return null;
-  const stages = Object.keys(tokens);
-  if (stages.length === 0) return null;
-
-  let total = 0;
-  for (const stage of stages) {
-    const key = priceKeyFor(models[stage], prices);
-    if (key === null) return null;
-
-    const entry = tokens[stage];
-    const priced = priceStage({ prices }, key, {
-      calls_per_run: 0,
-      input: entry.input,
-      cache_read: entry.cache_read,
-      output: entry.output,
-      reasoning: entry.reasoning,
-    });
-    total += priced.total;
-  }
-
-  return Math.round(total * 100) / 100;
-}
-
-/**
- * Плоский объект: массивы и `null` объектами не считаются.
- * @param {unknown} value
- * @returns {boolean}
- */
-function isRecord(value) {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
 
 /**
  * Секунды с фиксированной точностью. `-0` приводится к `0`, нечисло — исключение:
@@ -589,41 +504,6 @@ function serializeArtifact(data) {
   return `${JSON.stringify(data, null, 2)}\n`;
 }
 
-/** Причины ошибок чтения по `error.code`: системный текст Node содержит абсолютный путь. */
-const READ_ERROR_REASONS = Object.freeze({
-  ENOENT: 'файл не найден',
-  EACCES: 'нет доступа на чтение',
-  EPERM: 'нет доступа на чтение',
-  EISDIR: 'ожидался файл, а не каталог',
-});
-
-/**
- * Человекочитаемая причина ошибки чтения.
- * @param {unknown} error
- * @returns {string}
- */
-function describeReadError(error) {
-  const code = /** @type {{ code?: unknown } | null | undefined} */ (error)?.code;
-  if (typeof code !== 'string' || code === '') return 'ошибка чтения';
-  return Object.hasOwn(READ_ERROR_REASONS, code) ? READ_ERROR_REASONS[code] : code;
-}
-
-/**
- * Причина ошибки разбора JSON без пути и без фрагмента текста: сообщение парсера
- * содержит начало файла, а в нём может оказаться путь.
- * @param {unknown} error
- * @returns {string}
- */
-function describeJsonError(error) {
-  if (!(error instanceof Error)) return 'ошибка разбора JSON';
-  const reason = error.message
-    .split(/\r?\n/u)[0]
-    .replace(/,\s*".*$/u, '')
-    .replace(/ in JSON at position.*$/u, '')
-    .trim();
-  return reason === '' ? 'ошибка разбора JSON' : reason;
-}
-
 /**
  * Читает обязательный JSON-артефакт и проверяет схему. Сообщения содержат только имя
  * артефакта внутри каталога цикла — без абсолютных путей.
@@ -707,48 +587,6 @@ export function resolveCycleDir(root) {
     const message = error instanceof Error ? error.message : String(error);
     throw new Error(message.split(dir).join(relative(root, dir) || dir), { cause: error });
   }
-}
-
-/**
- * Необязательный `usage.json` каталога цикла: файла нет — замера нет (`null`),
- * битый файл — отказ: испорченный расход исказил бы стоимость молча.
- * @param {string} dir каталог цикла
- * @returns {Record<string, any>|null}
- */
-function readUsage(dir) {
-  const file = join(dir, FIXED_NAMES.usage);
-  if (!existsSync(file)) return null;
-  try {
-    return /** @type {Record<string, any>} */ (readJson(file));
-  } catch (error) {
-    const code = /** @type {{ code?: unknown } | undefined} */ (error)?.code;
-    const reason = typeof code === 'string' ? describeReadError(error) : describeJsonError(error);
-    throw new Error(`${FIXED_NAMES.usage}: не читается (${reason})`, { cause: error });
-  }
-}
-
-/**
- * Снапшот цен из репозитория. Отсутствие файла — не ошибка: цикл мог пройти до
- * появления снапшота, и тогда стоимость остаётся `null`, а токены заполняются.
- * Битый снапшот — отказ: цены влияют на бюджетные пороги, тихо игнорировать их нельзя.
- * @param {string} root корень репозитория
- * @returns {Record<string, import('./lib/evals/cost.mjs').ModelPrice>|null}
- */
-function readPriceSnapshot(root) {
-  const file = join(root, 'evals', 'prices.json');
-  if (!existsSync(file)) return null;
-
-  /** @type {unknown} */
-  let doc;
-  try {
-    doc = readJson(file);
-  } catch (error) {
-    const code = /** @type {{ code?: unknown } | undefined} */ (error)?.code;
-    const reason = typeof code === 'string' ? describeReadError(error) : describeJsonError(error);
-    throw new Error(`evals/prices.json: не читается (${reason})`, { cause: error });
-  }
-
-  return readPrices(doc).models;
 }
 
 /**

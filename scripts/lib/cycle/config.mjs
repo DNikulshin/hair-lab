@@ -108,7 +108,12 @@ export const GATES = Object.freeze([
  * Лимиты §5.2. `maxDiffLines`/`maxDiffBytes` — порог `diff_too_large` (код 4);
  * `logMaxBytes` — при превышении в логе гейта сохраняется хвост;
  * `evidenceTailLines` — хвост логов в пакете для оценщика;
- * `defaultMaxIterations` — `--max-iterations` по умолчанию.
+ * `defaultMaxIterations` — `--max-iterations` по умолчанию;
+ * `maxCycleCostRub` — жёсткий бюджетный порог цикла (правило 7 §5.6, §11): расход выше
+ * него даёт `ESCALATE (budget)`. Значение — стартовое, по факту худшего наблюдённого
+ * цикла: 21.36 ₽ за две итерации (#178, 2026-11-17), то есть 30 ₽ ≈ 1.5 × его. До пяти
+ * циклов база для `2 × медиана`/`4 × медиана` (§11) не набрана; пересмотр — в ежемесячном
+ * цикле калибровки.
  */
 export const LIMITS = Object.freeze({
   maxDiffLines: 2000,
@@ -116,6 +121,7 @@ export const LIMITS = Object.freeze({
   logMaxBytes: 5 * 1024 * 1024,
   evidenceTailLines: 200,
   defaultMaxIterations: 2,
+  maxCycleCostRub: 30,
 });
 
 /**

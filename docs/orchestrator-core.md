@@ -107,7 +107,8 @@ scripts/
 | `refs.mjs`     | `parseRef(str)` и `resolveRef(ref, ctx)`: `path:line`, `gate:<id>`, `qa:<id>`; запрещены абсолютные пути, `..`, `.pi/artifacts/`, `node_modules/`; файл существует, строка не больше числа строк; гейт есть в `gates.<n>.json`; шаг есть в `qa-web.json` |
 | `git.mjs`      | `baseSha()`, `intentToAddUntracked()`, `diffFromBase(base)`, `changedFiles(base)`, `addedLines(diff)`; все вызовы через `execFileSync('git', …)`                                                                                                         |
 | `redact.mjs`   | `redactLog(text)`, `redactQa(obj)`, `scanSecrets(addedLines)` (§5.4, §5.5)                                                                                                                                                                               |
-| `config.mjs`   | определения гейтов, пути-условия, лимиты (диф ≤ 2000 изменённых строк и ≤ 400 КБ), стартовые тайм-ауты                                                                                                                                                   |
+| `config.mjs`   | определения гейтов, пути-условия, лимиты (диф ≤ 2000 изменённых строк и ≤ 400 КБ), бюджетный порог цикла (`maxCycleCostRub`), стартовые тайм-ауты                                                                                                        |
+| `cost.mjs`     | `normalizeUsage`, `priceUsage`, `priceKeyFor`, `readUsage`, `readPriceSnapshot`, `cycleCostRub`: расход и его стоимость по `usage.json` и `evals/prices.json` — одна формула и для `metrics.json`, и для бюджетного порога                               |
 
 ### 5.3 `cycle-state.mjs`
 
@@ -289,6 +290,8 @@ node scripts/cycle-decide.mjs --dir D [--iteration N]
 `review.<n>.json` / `evaluation.<n>.json`. Пишет `decision.<n>.json`.
 
 ```
+0. Стоимость цикла по `usage.json` выше `LIMITS.maxCycleCostRub` (§5.2, §11)
+     → ESCALATE(budget). Проверяется первым: цикл дороже порога не тратит на доработки.
 1. Невалидный вывод агента (нет блока, JSON не парсится, схема нарушена):
      stage = первый невалидный из [REVIEW, EVALUATE]
      retries[stage] < 1  → RETRY_STAGE(stage)
@@ -314,8 +317,14 @@ node scripts/cycle-decide.mjs --dir D [--iteration N]
 
 `partial` у критерия блоком не является: попадает в `notes`. Вердикт модели
 `REWORK` без валидного блокера записывается как `verdict_without_evidence` и не блокирует.
-Бюджет (правило 7 спеки) применяется по данным `metrics.json`: `cost_rub` заполняется из
-`usage.json` (см. §5.8), поэтому бюджетный порог можно калибровать по фактическим прогонам.
+Бюджет (правило 7 спеки, правило 0 этого расчёта) — единственное правило, которое
+проверяется раньше агентских: стоимость считается по накопленному `usage.json` и
+`evals/prices.json` (`cost.mjs`), потому что на момент DECIDE `metrics.json` ещё не
+написан (§5.8). Порог — `LIMITS.maxCycleCostRub` (30 ₽, обоснование в §11
+`docs/orchestrator.md`); сравнение строгое (`> `), `costRub = null` (нет замера,
+неизвестна модель или цены) означает «проверять нечего», а не ноль. В `reasons[]`
+причина эскалации пишется как `escalate:budget` — её разбирает `cycle-state`;
+строка с числами (`budget: 31.05 ₽ > 30 ₽`) идёт рядом для владельца.
 Сопоставление находок для метрик: тот же файл и разница строк ≤ 5 → «совпали».
 
 Результат `decision.<n>.json`:
