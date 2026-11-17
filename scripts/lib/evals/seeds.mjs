@@ -26,10 +26,15 @@ const KINDS = Object.freeze(['clean', 'defect']);
 /** Серьёзность, при которой дефект считается найденным: замечание и блокер. */
 export const HIT_SEVERITIES = Object.freeze(['BLOCKER', 'MAJOR']);
 
+/** Все серьёзности, допустимые в `expect.severities`: у оценщика нет FOLLOW-UP, у ревью есть. */
+export const ALL_SEVERITIES = Object.freeze(['BLOCKER', 'MAJOR', 'MINOR', 'FOLLOW-UP']);
+
 /**
  * @typedef {object} SeedExpectation
  * @property {'clean'|'defect'} kind вид сида
  * @property {'BLOCKER'|'MAJOR'} [severity] минимальная серьёзность находки
+ * @property {string[]} [severities] точный набор допустимых серьёзностей (для сидов вроде E1,
+ *   где ожидается MAJOR или FOLLOW-UP, а не «не ниже BLOCKER»)
  * @property {string} [file] файл дефекта относительно корня дерева
  * @property {number} [line] строка дефекта в файле «после»
  */
@@ -144,7 +149,22 @@ export function readSeed(doc) {
   } else if (rawExpect.kind === 'defect') {
     /** @type {SeedExpectation} */
     const parsed = { kind: 'defect' };
-    if (!HIT_SEVERITIES.includes(/** @type {any} */ (rawExpect.severity))) {
+    if (rawExpect.severities !== undefined) {
+      if (!Array.isArray(rawExpect.severities) || rawExpect.severities.length === 0) {
+        errors.push('expect.severities: ожидается непустой массив серьёзностей');
+      } else {
+        const unknown = rawExpect.severities.filter(
+          (item) => !ALL_SEVERITIES.includes(/** @type {any} */ (item)),
+        );
+        if (unknown.length > 0) {
+          errors.push(`expect.severities: неизвестные значения ${unknown.join(', ')}`);
+        }
+        if (rawExpect.severity !== undefined) {
+          errors.push('expect: severity и severities одновременно не задаются');
+        }
+        parsed.severities = rawExpect.severities.map(String);
+      }
+    } else if (!HIT_SEVERITIES.includes(/** @type {any} */ (rawExpect.severity))) {
       errors.push(`expect.severity: ожидается ${HIT_SEVERITIES.join('|')}`);
     } else {
       parsed.severity = /** @type {'BLOCKER'|'MAJOR'} */ (rawExpect.severity);

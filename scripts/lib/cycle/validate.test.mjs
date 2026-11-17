@@ -172,8 +172,10 @@ const DECISION_INVALID = {
  * отдельного этапа (issue #160, T8). Пути — от `scripts/fixtures/cycle/`.
  */
 const METRICS_INVALID = {
-  'metrics/metrics.invalid.tokens.json': /metrics\.tokens: в фазе 1 ожидается null, получено 4242/,
-  'metrics/metrics.invalid.cost-rub.json': /metrics\.cost_rub: в фазе 1 ожидается null/,
+  'metrics/metrics.invalid.tokens.json': /metrics\.tokens: ожидается объект этапов или null/,
+  'metrics/metrics.invalid.cost-rub.json': /metrics\.cost_rub: ожидается число ≥ 0, получено -1/,
+  'metrics/metrics.invalid.usage-stage.json':
+    /metrics\.tokens\.gates: неизвестный этап \(ожидается plan\|code\|review\|evaluate\)/,
   'metrics/metrics.invalid.stage-duration.json':
     /metrics\.stage_durations_s\.PLAN: ожидается число ≥ 0, получено -1/,
   'metrics/metrics.invalid.unknown-stage.json':

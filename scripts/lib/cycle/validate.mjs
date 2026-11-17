@@ -41,6 +41,19 @@ const SEVERITIES = Object.freeze(['BLOCKER', 'MAJOR', 'MINOR', 'FOLLOW-UP']);
 /** Серьёзность дефекта независимой оценки: `FOLLOW-UP` у оценщика не бывает. */
 const DEFECT_SEVERITIES = Object.freeze(['BLOCKER', 'MAJOR', 'MINOR']);
 
+/** Этапы, на которых вызывается модель: только у них есть расход токенов (§5.8). */
+const MODEL_STAGES = Object.freeze(['plan', 'code', 'review', 'evaluate']);
+
+/** Поля сумм расхода одного этапа в `metrics.tokens`. */
+const MODEL_USAGE_FIELDS = Object.freeze([
+  'runs',
+  'input',
+  'cache_read',
+  'cache_write',
+  'output',
+  'reasoning',
+]);
+
 const GATE_STATUSES = Object.freeze(['pass', 'fail', 'skipped', 'not_run']);
 
 /** Причины гейтов, не зависящие от другого гейта; `blocked_by:<id>` проверяется отдельно. */
@@ -376,22 +389,6 @@ function reqOneOf(parent, key, prefix, errors, allowed) {
 /** Обязательное поле + `bool`. */
 function reqBool(parent, key, prefix, errors) {
   return bool(req(parent, key, `${prefix}.${key}`, errors), `${prefix}.${key}`, errors);
-}
-
-/**
- * Обязательное поле, которое в фазе 1 допускает только `null` (R5: сбора usage токенов
- * и стоимости в этой поставке нет — `docs/orchestrator-core.md` §5.8).
- * @param {unknown} parent
- * @param {string} key
- * @param {string} prefix
- * @param {string[]} errors
- * @returns {void}
- */
-function reqNull(parent, key, prefix, errors) {
-  const path = `${prefix}.${key}`;
-  const value = req(parent, key, path, errors);
-  if (value === undefined || value === null) return;
-  errors.push(`${path}: в фазе 1 ожидается null, получено ${describe(value)}`);
 }
 
 /** Обязательное поле + `list`. */
@@ -875,8 +872,11 @@ function requireTotalOfMap(map, total, mapName, totalPath, errors) {
 /**
  * `metrics.json` (Приложение A, §5.8). Метрика считается за весь цикл: длительности
  * этапов и гейтов, исходы гейтов, счётчики серьёзности, сопоставление находок ревью
- * с дефектами оценщика. `tokens` и `cost_rub` в фазе 1 строго `null` (R5): бюджет
- * и сбор usage в поставку не входят, поэтому число здесь означало бы выдуманные данные.
+ * с дефектами оценщика. `tokens` и `cost_rub` — факты расхода (§5.8): `tokens`
+ * заполняется из `usage.json` (пишет `cycle-usage` по транскриптам субагентов),
+ * `cost_rub` — те же токены по `evals/prices.json`. Оба `null`, когда замера нет:
+ * `null` значит «не измеряли», а не «ноль». Частичный расход тоже даёт `null`:
+ * неполная сумма выдавала бы себя за полную.
  *
  * Ключи `stage_durations_s` — имена этапов автомата §5.3, ключи `gate_durations_s`
  * и `gate_outcomes` — идентификаторы гейтов §5.5. Значения длительностей — секунды
@@ -982,8 +982,32 @@ export function validateMetrics(doc) {
 
   reqBool(doc, 'evaluator_shares_family_with_plan', 'metrics', errors);
 
-  reqNull(doc, 'tokens', 'metrics', errors);
-  reqNull(doc, 'cost_rub', 'metrics', errors);
+  // `tokens`: null либо карта «этап → суммы». Этапы — только те, где вызывается модель:
+  // у гейтов и QA токенов нет, и лишний ключ означал бы расход не по тому словарю.
+  reqNullable(doc, 'tokens', 'metrics', errors, (value, valuePath, errs) => {
+    if (!isRecord(value)) {
+      errs.push(`${valuePath}: ожидается объект этапов или null`);
+      return;
+    }
+    for (const [stage, entry] of Object.entries(value)) {
+      const stagePath = `${valuePath}.${stage}`;
+      if (!MODEL_STAGES.includes(stage)) {
+        errs.push(`${stagePath}: неизвестный этап (ожидается ${MODEL_STAGES.join('|')})`);
+        continue;
+      }
+      if (!isRecord(entry)) {
+        errs.push(`${stagePath}: ожидается объект сумм`);
+        continue;
+      }
+      for (const field of MODEL_USAGE_FIELDS) {
+        reqInt(entry, field, stagePath, errs, { min: 0 });
+      }
+    }
+  });
+
+  reqNullable(doc, 'cost_rub', 'metrics', errors, (value, valuePath, errs) => {
+    num(value, valuePath, errs, { min: 0 });
+  });
 
   return { ok: errors.length === 0, errors };
 }

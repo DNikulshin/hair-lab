@@ -189,16 +189,21 @@ export function scoreRun(seed, stage, markdown) {
   }
 
   const expected = seed.expect;
-  const severity = expected.severity ?? 'BLOCKER';
+  const accepted = expected.severities ?? null;
+  const minimum = expected.severity ?? 'BLOCKER';
+  const severityOk = (severity) =>
+    accepted === null ? severityAtLeast(severity, minimum) : accepted.includes(severity);
+
   const candidate = positions.find((item) => {
-    if (!severityAtLeast(item.severity, severity)) return false;
+    if (!severityOk(item.severity)) return false;
     if (expected.file !== undefined && item.file !== expected.file) return false;
     if (expected.line === undefined) return true;
     return Math.abs(item.line - expected.line) <= LINE_TOLERANCE;
   });
 
+  const wanted = accepted === null ? minimum : accepted.join('|');
   if (candidate === undefined) {
-    return { status: 'miss', reason: `ожидался ${severity} в ${expected.file ?? 'любом файле'}` };
+    return { status: 'miss', reason: `ожидался ${wanted} в ${expected.file ?? 'любом файле'}` };
   }
   return { status: 'hit', reason: `${candidate.severity} в ${candidate.file}:${candidate.line}` };
 }

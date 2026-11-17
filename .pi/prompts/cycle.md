@@ -81,6 +81,16 @@ MCP недоступен — `{"status": "not_run", "reason": "<причина>"
 
 `review.<n>.json` и `evaluation.<n>.json` руками не пишет никто: их извлекает `cycle-decide`.
 
+## Расход токенов
+
+После каждого этапа, где работал субагент (`PLAN`, `CODE`, `REVIEW`, `EVALUATE`), собери расход:
+
+`node scripts/cycle-usage.mjs --dir <dir> --stage <plan|code|review|evaluate> --transcript <id>_<agent>_transcript.jsonl`
+
+Транскрипт лежит в `~/.pi/agent/sessions/<проект>/subagent-artifacts/`. Прогонов бывает
+несколько (итерации `CODE`, повтор `REVIEW`) — вызывай для каждого, суммы складываются.
+Без этого `metrics.json` пишет `tokens` и `cost_rub` как `null`: «не измеряли», а не «ноль».
+
 ## DECIDE
 
 `advance --to DECIDE` → `node scripts/cycle-decide.mjs --dir <dir>` →

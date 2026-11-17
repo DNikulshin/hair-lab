@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { describe, test } from 'node:test';
 
-import { lastAssistantText, sumUsage } from './evals-collect.mjs';
+import { lastAssistantText, sumUsage } from './lib/evals/usage.mjs';
 
 const SCRIPT = resolve(import.meta.dirname, 'evals-collect.mjs');
 
@@ -162,6 +162,7 @@ describe('evals-collect CLI', () => {
       cache_write: 0,
       output: 33,
       reasoning: 4,
+      runs: 1,
     });
   });
 

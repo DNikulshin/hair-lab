@@ -156,6 +156,28 @@ describe('scoreRun', () => {
     assert.equal(scoreRun(defectSeed, 'review', reviewAnswer({ line: 30 })).status, 'miss');
   });
 
+  test('severities: попадание по любому значению из набора', () => {
+    const scopeSeed = {
+      id: 'E1',
+      expect: {
+        kind: 'defect',
+        severities: ['MAJOR', 'FOLLOW-UP'],
+        file: 'apps/api/src/x.ts',
+        line: 11,
+      },
+    };
+    assert.equal(scoreRun(scopeSeed, 'review', reviewAnswer({ severity: 'MAJOR' })).status, 'hit');
+    assert.equal(
+      scoreRun(scopeSeed, 'review', reviewAnswer({ severity: 'FOLLOW-UP' })).status,
+      'hit',
+    );
+    // BLOCKER в набор не входит: сид требует назвать границы, а не эскалировать.
+    assert.equal(
+      scoreRun(scopeSeed, 'review', reviewAnswer({ severity: 'BLOCKER' })).status,
+      'miss',
+    );
+  });
+
   test('серьёзность ниже ожидаемой — промах', () => {
     assert.equal(
       scoreRun(defectSeed, 'review', reviewAnswer({ severity: 'MINOR' })).status,

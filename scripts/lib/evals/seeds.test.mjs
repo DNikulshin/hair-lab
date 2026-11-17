@@ -83,6 +83,31 @@ describe('readSeed', () => {
     assert.match(text, /criteria/u);
   });
 
+  test('severities: точный набор допустимых серьёзностей вместо порога', () => {
+    const seed = defectSeed();
+    seed.expect = {
+      kind: 'defect',
+      severities: ['MAJOR', 'FOLLOW-UP'],
+      file: 'apps/api/src/x.ts',
+      line: 3,
+    };
+    const result = readSeed(seed);
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.seed?.expect.severities, ['MAJOR', 'FOLLOW-UP']);
+  });
+
+  test('severities и severity вместе — ошибка схемы', () => {
+    const seed = defectSeed();
+    seed.expect.severities = ['MAJOR'];
+    assert.match(readSeed(seed).errors.join('\n'), /одновременно/u);
+  });
+
+  test('неизвестная серьёзность в severities отклоняется', () => {
+    const seed = defectSeed();
+    seed.expect = { kind: 'defect', severities: ['CRITICAL'], file: 'apps/api/src/x.ts' };
+    assert.match(readSeed(seed).errors.join('\n'), /неизвестные значения CRITICAL/u);
+  });
+
   test('нечисловая строка дефекта отклоняется', () => {
     const seed = defectSeed();
     seed.expect.line = 0;
@@ -101,7 +126,7 @@ describe('loadSeeds', () => {
     );
     assert.deepEqual(
       seeds.map((seed) => seed.id),
-      ['E2', 'E5', 'E6', 'E10'],
+      ['E1', 'E2', 'E3', 'E4', 'E5', 'E6', 'E9', 'E10'],
     );
     for (const seed of seeds) {
       assert.ok(seed.criteria.length > 0, `${seed.id}: критерии`);

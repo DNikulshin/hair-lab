@@ -21,11 +21,18 @@
  * Коды выхода: `0` — ответ собран; `2` — ошибка использования или данных.
  * Shebang нужен: файл запускается напрямую.
  */
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { SCORED_STAGES } from './lib/evals/score.mjs';
+import {
+  addUsage,
+  emptyUsage,
+  lastAssistantText,
+  readTranscript,
+  sumUsage,
+} from './lib/evals/usage.mjs';
 import { readJson, writeJsonAtomic, writeTextAtomic } from './lib/cycle/io.mjs';
 import { artifactsDir, repoRoot } from './lib/cycle/paths.mjs';
 
@@ -63,74 +70,6 @@ export function parseArgs(argv) {
 }
 
 /**
- * Записи транскрипта. Битые строки пропускаются: файл пишется во время работы агента,
- * и последняя строка может быть недописана.
- * @param {string} file
- * @returns {Array<Record<string, any>>}
- */
-function readTranscript(file) {
-  /** @type {Array<Record<string, any>>} */
-  const records = [];
-  for (const line of readFileSync(file, 'utf8').split('\n')) {
-    if (line.trim() === '') continue;
-    try {
-      records.push(JSON.parse(line));
-    } catch {
-      // Недописанная строка — не повод терять весь прогон.
-    }
-  }
-  return records;
-}
-
-/**
- * Текст последнего ответа ассистента. Собираются только текстовые части: вызовы
- * инструментов в ответ не входят, как и в живой записи `review.<n>.md`.
- * @param {Array<Record<string, any>>} records
- * @returns {string}
- */
-export function lastAssistantText(records) {
-  /** @type {string[]} */
-  const texts = [];
-
-  for (const record of records) {
-    if (record.recordType !== 'message' || record.role !== 'assistant') continue;
-    const content = record.message?.content;
-    if (!Array.isArray(content)) continue;
-
-    const parts = content
-      .filter((part) => part?.type === 'text' && typeof part.text === 'string')
-      .map((part) => part.text);
-    if (parts.length === 0) continue;
-    texts.push(parts.join('\n'));
-  }
-
-  return texts.length === 0 ? '' : /** @type {string} */ (texts[texts.length - 1]);
-}
-
-/**
- * Суммарные токены прогона: каждая запись ответа ассистента несёт `usage` своего запроса,
- * сумма по ним — стоимость всего прогона, включая промежуточные шаги с инструментами.
- * @param {Array<Record<string, any>>} records
- * @returns {{ input: number, cache_read: number, cache_write: number, output: number, reasoning: number } }
- */
-export function sumUsage(records) {
-  const total = { input: 0, cache_read: 0, cache_write: 0, output: 0, reasoning: 0 };
-
-  for (const record of records) {
-    if (record.recordType !== 'message' || record.role !== 'assistant') continue;
-    const usage = record.message?.usage ?? record.usage;
-    if (usage === null || typeof usage !== 'object') continue;
-    total.input += Number(usage.input ?? 0);
-    total.cache_read += Number(usage.cacheRead ?? 0);
-    total.cache_write += Number(usage.cacheWrite ?? 0);
-    total.output += Number(usage.output ?? 0);
-    total.reasoning += Number(usage.reasoning ?? 0);
-  }
-
-  return total;
-}
-
-/**
  * Точка входа CLI.
  * @returns {void}
  */
@@ -165,7 +104,9 @@ function main() {
     const usageFile = join(runDir, 'usage.json');
     /** @type {Record<string, unknown>} */
     const usage = existsSync(usageFile) ? /** @type {any} */ (readJson(usageFile)) : {};
-    usage[args.stage] = sumUsage(records);
+    const previous = /** @type {any} */ (usage[args.stage]);
+    const base = previous === undefined ? emptyUsage() : { ...emptyUsage(), ...previous };
+    usage[args.stage] = addUsage(base, sumUsage(records));
     writeJsonAtomic(usageFile, usage, {
       serialize: (data) => `${JSON.stringify(data, null, 2)}\n`,
     });
