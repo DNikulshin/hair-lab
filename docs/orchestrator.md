@@ -1,7 +1,8 @@
 # Спецификация оркестратора цикла разработки hair-lab
 
 Версия: 0.2 (принята владельцем) · Дата: 2026-11-14
-Реализация и декомпозиция: [docs/orchestrator-core.md](./orchestrator-core.md) — дельта D1–D10 к версии 0.1 (временный документ, удаляется после T9).
+Реализация и декомпозиция: [docs/orchestrator-core.md](./docs/orchestrator-core.md) — дизайн ядра
+цикла, форматы артефактов (Приложение A) и протокол супервизора (Приложение B).
 Основание: снимок репозитория (repomix от 2026-11-14): `.pi/agents/*`, `.pi/prompts/cycle.md`,
 `.pi/settings.json`, `AGENTS.md`, `docs/workflow.md`, `docs/qa-web.md`, `.github/*`, `scripts/*`.
 Решение зафиксировано в [adr/0006](./adr/0006-independent-evaluation.md).
