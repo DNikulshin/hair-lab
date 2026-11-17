@@ -19,3 +19,4 @@ export * from './common/phone';
 export * from './common/time';
 export * from './health/health.contract';
 export * from './payments/payment.contract';
+export * from './staff/staff.contract';

@@ -18,6 +18,7 @@
     "check:arch": "node scripts/check-arch.mjs",
     "check:harness": "node scripts/check-harness.mjs",
     "check:prod-urls": "node scripts/check-prod-urls.mjs",
+    "create:staff": "node scripts/create-staff.mjs",
     "evals:cost": "node scripts/evals-cost.mjs",
     "evals:collect": "node scripts/evals-collect.mjs",
     "evals:pack": "node scripts/evals-pack.mjs",

@@ -12,8 +12,10 @@ export {
 } from './password';
 export {
   default as authPlugin,
+  makeRequireStaff,
   requireAuth,
   SESSION_COOKIE_NAME,
+  STAFF_SESSION_COOKIE_NAME,
   type AuthPluginOptions,
 } from './plugin';
 export {
@@ -29,3 +31,16 @@ export {
   type FoundSession,
 } from './session';
 export { createSessionToken, hashToken, SESSION_TOKEN_BYTES } from './tokens';
+export {
+  createStaffSession,
+  findStaffSession,
+  isStaffSessionExpired,
+  revokeStaffSession,
+  STAFF_SESSION_ABSOLUTE_TTL_MS,
+  STAFF_SESSION_IDLE_TTL_MS,
+  staffAbsoluteDeadline,
+  staffIdleExpiresAt,
+  type AuthStaff,
+  type CreatedStaffSession,
+  type FoundStaffSession,
+} from './staff-session';
