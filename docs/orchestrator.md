@@ -371,9 +371,12 @@ EVALUATE. Повторные проверки ограничены: ревью �
 ### ESCALATE
 
 Всегда: комментарий в issue со сводкой причин и ссылками на артефакты, метки `status:blocked`
-и `needs-owner`, снятие блокировки (`cycle-state unlock`). Причины: неоднозначный план, нет
-критериев, невалидный вывод агента, лимит итераций, бюджет, слишком большой дифф
-(`diff_too_large`), необходимость расширить скоуп.
+и `needs-owner`, снятие блокировки (`cycle-state unlock`). Причины (словарь D7 —
+`docs/orchestrator-core.md`): неоднозначный план (`plan_ambiguous`), нет критериев
+(`criteria_missing`), невалидный вывод агента (`agent_output_invalid`), лимит итераций
+(`iteration_limit`), бюджет (`budget`), слишком большой дифф (`diff_too_large`),
+необходимость расширить скоуп (`scope_expansion_required`), внутренняя ошибка
+(`internal_error` — в том числе неизвестная причина из решения).
 
 **Draft PR** открывается, только если одновременно: проход `code` завершён, обязательные
 гейты зелёные, причина — `iteration_limit`, `budget` или `agent_output_invalid` (после
@@ -424,6 +427,8 @@ EVALUATE. Повторные проверки ограничены: ревью �
 
 `scripts/cycle-report.mjs` сводит метрики по циклам: расход, число итераций, процент
 блокеров, найденных только оценщиком. Эти данные нужны для решения в §15: оставлять ли этап.
+**Скрипт не реализован** (фаза 1 закрыта без него, см. §17): сводка собирается вручную по
+`metrics.json`; задача — #224.
 
 ## 12. Проверка конфигурации (`scripts/check-harness.mjs`, `pnpm check:harness`)
 
@@ -512,8 +517,9 @@ EVALUATE. Повторные проверки ограничены: ревью �
 
 **Новые файлы:** `docs/orchestrator.md`, `docs/adr/0006-independent-evaluation.md`,
 `.pi/agents/evaluate.md`, `scripts/cycle-gates.mjs`, `scripts/cycle-evidence.mjs`,
-`scripts/cycle-decide.mjs`, `scripts/cycle-metrics.mjs`, `scripts/cycle-report.mjs`,
+`scripts/cycle-decide.mjs`, `scripts/cycle-metrics.mjs`,
 `scripts/check-harness.mjs`, общий модуль схем и валидаторов, `evals/orchestrator/*`.
+`scripts/cycle-report.mjs` из первоначального плана **не создан** — вне фазы 1 (#224).
 
 **Изменяемые:** `.pi/agents/review.md` (JSON-блок, поля scope), `.pi/prompts/cycle.md`
 (автомат, `resume`, правила супервизора), `AGENTS.md` (короткая ссылка на спеку, без названий
