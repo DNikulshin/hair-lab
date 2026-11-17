@@ -89,7 +89,7 @@
 scripts/
   cycle-state.mjs      cycle-evidence.mjs   cycle-gates.mjs
   cycle-decide.mjs     cycle-pr-body.mjs    cycle-metrics.mjs
-  cycle-usage.mjs
+  cycle-usage.mjs      cycle-report.mjs
   check-harness.mjs
   lib/cycle/
     paths.mjs  io.mjs  validate.mjs  refs.mjs  git.mjs  redact.mjs  config.mjs
@@ -376,7 +376,19 @@ node scripts/cycle-pr-body.mjs --dir D [--draft-escalation]
 `cost_rub` — те же токены по `evals/prices.json` и моделям из `state.models`. Нет замера —
 `null` (это «не измеряли», а не ноль); нет цен или модели хотя бы у одного этапа с расходом —
 `cost_rub: null`, потому что неполная сумма выдавала бы себя за полную.
-`cycle-report` не входит в эту поставку.
+
+### 5.8a `cycle-report.mjs`
+
+```
+node scripts/cycle-report.mjs [--dir <каталог артефактов>] [--json]
+```
+
+Сводка `metrics.json` по циклам (`docs/orchestrator.md` §11, §15): расход и медиана, итерации,
+длительность, вклад этапов (`only_review`/`only_evaluator`/`both`), дефекты оценщика и суммы
+исходов гейтов. Markdown-таблица в stdout; `--json` — тот же отчёт структурой. Файлов не
+пишет, пороги не применяет (только факты). Каталоги без `metrics.json` пропускаются — их
+число печатается отдельно; битый или не прошедший схему `metrics.json` — код 2, а не тихий
+пропуск (испорченный артефакт занизил бы расход). Порядок — по имени каталога и таблице §5.5.
 
 ### 5.9 `check-harness.mjs`
 
