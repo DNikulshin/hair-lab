@@ -17,6 +17,7 @@ import { describe, test } from 'node:test';
 import {
   classifyTestIntLog,
   exitCode,
+  gateEnv,
   isGateApplicable,
   parseArgs,
   planRun,
@@ -633,6 +634,33 @@ describe('cycle-gates: secrets_scan', () => {
 });
 
 describe('cycle-gates: лог и тайм-аут', () => {
+  test('gateEnv включает TURBO_FORCE и сохраняет остальное окружение', () => {
+    const env = gateEnv({ PATH: '/usr/bin', DATABASE_URL: 'postgresql://localhost/x' });
+
+    assert.equal(env.TURBO_FORCE, 'true', 'turbo обязан исполнить задачу, а не отдать кэш');
+    assert.equal(env.PATH, '/usr/bin');
+    assert.equal(env.DATABASE_URL, 'postgresql://localhost/x', 'окружение не теряется');
+  });
+
+  test('гейт запускается с TURBO_FORCE=true: pass — живой прогон, а не FULL TURBO', async (t) => {
+    const dir = makeCycleDir(t);
+    const definitions = [
+      {
+        id: 'probe_env',
+        cmd: `${process.execPath} -p process.env.TURBO_FORCE`,
+        required: true,
+        dependsOn: [],
+        pathPrefixes: [],
+      },
+    ];
+
+    const run = await runGates({ definitions, iteration: 1, dir, runner: undefined });
+    const entry = run.gates[0];
+
+    assert.equal(entry.status, 'pass', entry.reason ?? '');
+    assert.equal(readFileSync(join(dir, entry.log), 'utf8').trim(), 'true');
+  });
+
   test('лог больше logMaxBytes обрезается до хвоста по границе строки', (t) => {
     const dir = makeCycleDir(t);
     const file = join(dir, 'big.log');

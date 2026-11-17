@@ -274,6 +274,14 @@ node scripts/cycle-gates.mjs --dir D [--only id,id] [--base SHA]
 (`example`, `changeme`, `xxx`, `<…>`) и файла `.env.example`. Находка → `fail`, `file:line`
 в логе без значения.
 
+Гейты запускаются с `TURBO_FORCE=true` (`gateEnv`): `pass` в `gates.<n>.json` — это живой
+прогон, а не результат из кэша turbo («FULL TURBO»). Кэш turbo адресуется по хешу входов,
+но часть окружения в хеш не входит, а гейты — основное свидетельство «код проверен»;
+цена принудительного прогона в этом репозитории — секунды (contracts_build 3 с,
+typecheck 11 с, lint 9 с, test 12 с против миллисекунд из кэша, #216). Затрагивает только
+задачи turbo: `test_int` в `turbo.json` уже `cache: false`, а `check_arch`, `check_harness`,
+`format_check`, `lint:workflows` и `test:scripts` кэша не имеют.
+
 `test_int` запускает `pnpm test:int` как есть: turbo пробрасывает `DATABASE_URL`, задача зависит
 от `db:generate` и не кэшируется; скрипт `.env*` не читает, поэтому `DATABASE_URL` экспортируется
 в окружение процесса перед запуском цикла (`docs/environment.md`). Без переменной тесты падают

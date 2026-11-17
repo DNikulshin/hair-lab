@@ -304,6 +304,24 @@ function killGroup(child, signal) {
 }
 
 /**
+ * Окружение процесса гейта: наследуется от текущего процесса плюс `TURBO_FORCE=true`.
+ *
+ * Без этого turbo отдаёт результат из кэша («FULL TURBO»), и `pass` в `gates.<n>.json`
+ * означал бы «эти входы когда-то уже проверялись», а не живой прогон (§5.5, #216). Кэш
+ * turbo адресуется по хешу входов, но часть окружения в хеш не входит, а гейты — основное
+ * свидетельство «код проверен»; цена принудительного прогона в этом репозитории — секунды
+ * (contracts_build 3 с, typecheck 11 с, lint 9 с, test 12 с), поэтому выбирается свежесть.
+ * Затрагивает только задачи turbo: `test_int` в `turbo.json` уже `cache: false`, а
+ * `check_arch`, `check_harness`, `format_check`, `lint:workflows` и `test:scripts`
+ * кэша не имеют.
+ * @param {NodeJS.ProcessEnv} [base] базовое окружение (в тестах — подмена)
+ * @returns {NodeJS.ProcessEnv} окружение для `spawn`
+ */
+export function gateEnv(base = process.env) {
+  return { ...base, TURBO_FORCE: 'true' };
+}
+
+/**
  * Запуск команды гейта без оболочки: `cmd` разбивается по пробелам, аргументы не
  * интерполируются. Вывод (stdout+stderr) пишется в лог; при превышении `LIMITS.logMaxBytes`
  * в логе остаётся хвост. Тайм-аут: SIGTERM группе → пауза `graceMs` → SIGKILL → `fail`
@@ -336,7 +354,12 @@ async function runCommandGate(
   /** @type {Promise<void>} */
   let escalation = Promise.resolve();
 
-  const child = spawn(command, args, { cwd, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawn(command, args, {
+    cwd,
+    detached: true,
+    stdio: ['ignore', 'pipe', 'pipe'],
+    env: gateEnv(),
+  });
   child.on('error', (error) => {
     spawnError = error;
   });
