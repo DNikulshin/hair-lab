@@ -27,3 +27,6 @@ export {
   type BookingConfirmationPayload,
   type BookingConfirmationSnapshot,
 } from './booking-confirmation.email';
+// Границы календарного дня в TZ салона нужны админке записей (#242): фича берёт их
+// через публичный API этой фичи, а не из внутреннего файла (`pnpm check:arch`).
+export { salonDayWindow, type DayWindow } from './slots.service';
