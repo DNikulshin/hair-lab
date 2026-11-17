@@ -8,6 +8,7 @@
  *
  * Приложения импортируют только `@hair-lab/contracts` (без глубоких путей).
  */
+export * from './admin/admin-appointments.contract';
 export * from './auth/auth.contract';
 export * from './booking/booking.contract';
 export * from './catalog/catalog.contract';

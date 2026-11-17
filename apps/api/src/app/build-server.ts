@@ -5,6 +5,7 @@ import {
   validatorCompiler,
   type ZodTypeProvider,
 } from 'fastify-type-provider-zod';
+import { adminAppointmentsRoutes } from '../features/admin-appointments';
 import {
   authRoutes,
   createMagicLinkTemplate,
@@ -150,6 +151,8 @@ export async function buildServer(options: BuildServerOptions = {}) {
   // Вход сотрудника в админку: отдельная cookie (`hl_staff_session`) и свои сессии,
   // клиентская авторизация остаётся как есть.
   await app.register(staffAuthRoutes);
+  // Админка записей: список дня и переходы статусов, все маршруты — только для сотрудника.
+  await app.register(adminAppointmentsRoutes);
 
   return app;
 }
