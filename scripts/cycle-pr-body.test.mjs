@@ -6,6 +6,7 @@ import { describe, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 import {
+  dedupeUnverified,
   listItems,
   orderGates,
   parseArgs,
@@ -61,6 +62,19 @@ function body(name, args = []) {
  */
 function fixtureJson(name, file) {
   return JSON.parse(readFileSync(join(dir(name), file), 'utf8'));
+}
+
+/**
+ * Текст одной секции тела PR (от её заголовка до следующего `## `).
+ * @param {string} text тело PR
+ * @param {string} heading заголовок без `## `
+ * @returns {string}
+ */
+function section(text, heading) {
+  const start = text.indexOf(`## ${heading}`);
+  assert.notEqual(start, -1, `секция «${heading}» отсутствует`);
+  const next = text.indexOf('\n## ', start + 1);
+  return text.slice(start, next === -1 ? undefined : next);
 }
 
 /**
@@ -211,6 +225,15 @@ describe('секции шаблона', () => {
     assert.ok(text.includes('- Метрики цикла `cycle-metrics.mjs` — задача T8.'));
   });
 
+  test('followups.md с тремя пунктами даёт три строки, без заглушки', () => {
+    const lines = section(body('proceed'), 'Вне скоупа')
+      .split('\n')
+      .filter((line) => line.startsWith('- '));
+
+    assert.equal(lines.length, 3, 'каждый пункт файла — отдельная строка');
+    assert.ok(!lines.some((line) => line.includes('Нет пунктов вне скоупа')));
+  });
+
   test('нет followups.md — заглушка, а не ошибка', () => {
     const text = body('escalation');
 
@@ -241,6 +264,22 @@ describe('PROCEED_WITH_UNVERIFIED', () => {
 
   test('при PROCEED блока «не проверено» нет', () => {
     assert.ok(!body('proceed').includes('### Не проверено'));
+  });
+
+  test('один и тот же факт из decision и evaluation — один чекбокс (#204)', () => {
+    const text = body('unverified');
+    const lines = text.split('\n').filter((line) => line.startsWith('- [ ]'));
+    const entry = lines.filter((line) => line.includes('Поведение на битом JSON'));
+
+    assert.equal(entry.length, 1, 'дубль из двух источников даёт один пункт');
+    assert.ok(
+      entry[0].includes('— нет фикстуры с обрезанным файлом'),
+      'остаётся более полная версия (what — why)',
+    );
+    assert.ok(
+      !text.includes('evaluation unverified: Поведение'),
+      'префикс источника в тело PR не попадает',
+    );
   });
 
   test('при ESCALATE блока «не проверено» нет', () => {
@@ -445,6 +484,28 @@ describe('парсеры', () => {
       { id: 'C2', text: 'второй' },
       { id: 'C1', text: 'первый' },
     ]);
+  });
+
+  test('dedupeUnverified: префикс источника снимается, остаётся более полная формулировка', () => {
+    const items = dedupeUnverified([
+      'gate:test_int not_run (no_database)',
+      'evaluation unverified: Поведение на битом JSON',
+      'Поведение на битом JSON — нет фикстуры с обрезанным файлом',
+      'criteria:C3 unverified',
+      '  ',
+    ]);
+
+    assert.deepEqual(items, [
+      'gate:test_int not_run (no_database)',
+      'Поведение на битом JSON — нет фикстуры с обрезанным файлом',
+      'criteria:C3 unverified',
+    ]);
+  });
+
+  test('dedupeUnverified: повторное вхождение длиннее — заменяет короткое на своей позиции', () => {
+    const items = dedupeUnverified(['Один факт', 'Другой факт', 'Один факт — с пояснением']);
+
+    assert.deepEqual(items, ['Один факт — с пояснением', 'Другой факт']);
   });
 
   test('parseArgs: --dir и --draft-escalation, мусор — исключение', () => {

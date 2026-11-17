@@ -28,6 +28,12 @@
  * С `--draft-escalation` в начало добавляется баннер: причина, пояснение,
  * `draft_pr_allowed` и открытые замечания из `escalation.json`.
  *
+ * **Дедупликация «не проверено».** Один и тот же факт приходит из двух артефактов: `cycle-decide`
+ * пишет в `decision.unverified[]` строку `evaluation unverified: <what>`, а
+ * `evaluation.unverified[]` хранит `what` и `why`. В блоке «не проверено» пункт печатается
+ * один раз — в более полной формулировке (`<what> — <why>`); сравнение идёт по
+ * нормализованной форме без префикса источника (#204).
+ *
  * **Ссылки критериев.** В колонке «Свидетельство» — первая *разрешаемая* ссылка из
  * `evaluation.criteria[].evidence` (`resolveRef`: файл существует, строка в файле, гейт есть
  * в `gates.<n>.json`). Если не разрешается ни одна, показывается первая ссылка как есть, а
@@ -113,6 +119,13 @@ const CHECKBOX = /^\[[ xX]\][ \t]*(.*)$/;
 /** Заголовок markdown: закрывает предыдущий пункт списка. */
 const HEADING = /^#{1,6}[ \t]/;
 
+/**
+ * Префикс источника в `decision.unverified[]`: `cycle-decide` пишет `evaluation unverified: <what>`
+ * (§5.6). При сборке тела PR тот же факт приходит и из `evaluation.unverified[]` — префикс
+ * снимается при сравнении, иначе один пункт попадает в PR дважды (#204).
+ */
+const SOURCE_PREFIX = /^(?:evaluation|review|decision)[ \t]+unverified:[ \t]*/iu;
+
 /** Строка `evidence/criteria.md`: строчный контракт `- C1: формулировка` (§5.4). */
 const CRITERION_LINE = /^-[ \t]+(C[1-9]\d*):[ \t]*(.*)$/;
 
@@ -153,6 +166,55 @@ function cell(text) {
   const value = singleLine(text);
   const shortened = value.length <= MAX_CELL ? value : `${value.slice(0, MAX_CELL - 1).trimEnd()}…`;
   return shortened.replace(/\|/g, '\\|');
+}
+
+/**
+ * Нормализованная форма пункта «не проверено»: без префикса источника и без разницы
+ * в регистре/пробелах. Сравнение по ней, а не по сырому тексту — иначе формулировки
+ * одного и того же факта из двух артефактов считаются разными.
+ * @param {string} text
+ * @returns {string}
+ */
+function unverifiedKey(text) {
+  return singleLine(text).replace(SOURCE_PREFIX, '').toLowerCase();
+}
+
+/**
+ * Один ли это факт в двух формулировках: точное совпадение или более короткая версия —
+ * начало более полной на границе слова (`<what>` против `<what> — <why>`).
+ * @param {string} left
+ * @param {string} right
+ * @returns {boolean}
+ */
+function sameUnverified(left, right) {
+  if (left === right) return true;
+  const [shorter, longer] = left.length <= right.length ? [left, right] : [right, left];
+  if (!longer.startsWith(shorter)) return false;
+  return /^[\s—–-]/u.test(longer.slice(shorter.length));
+}
+
+/**
+ * Дедупликация пунктов «не проверено» из `decision.unverified[]` и
+ * `evaluation.unverified[]`. Из пары остаётся более полная формулировка, позиция — первого
+ * вхождения (порядок артефактов сохраняется, вывод детерминирован).
+ * @param {string[]} items
+ * @returns {string[]}
+ */
+export function dedupeUnverified(items) {
+  if (!Array.isArray(items)) throw new TypeError('dedupeUnverified: ожидается массив');
+
+  /** @type {{ key: string, text: string }[]} */
+  const kept = [];
+  for (const item of items) {
+    if (!isText(item)) continue;
+    const text = singleLine(item);
+    const key = unverifiedKey(text);
+    const index = kept.findIndex((entry) => sameUnverified(entry.key, key));
+    if (index === -1) kept.push({ key, text });
+    else if (text.length > kept[index].text.length) kept[index] = { key, text };
+  }
+
+  return kept.map((entry) => entry.text);
 }
 
 /**
@@ -477,15 +539,15 @@ export function renderPrBody(inputs) {
   if (decision.action === PROCEED_WITH_UNVERIFIED) {
     evaluationLines.push('', '### Не проверено (снять может владелец)', '');
 
-    /** @type {string[]} */
-    const unchecked = [];
     const decisionItems = Array.isArray(decision.unverified) ? decision.unverified : [];
-    for (const item of decisionItems) unchecked.push(`- [ ] ${redacted(item)}`);
-
     const evaluationUnverified = Array.isArray(evaluation.unverified) ? evaluation.unverified : [];
-    for (const item of evaluationUnverified) {
-      unchecked.push(`- [ ] ${redacted(item.what)} — ${redacted(item.why)}`);
-    }
+
+    // Один факт приходит из двух артефактов (`evaluation unverified: …` и `what — why`):
+    // дедупликация до маскирования-независимой разметки, чтобы чекбоксов не было вдвое.
+    const unchecked = dedupeUnverified([
+      ...decisionItems.map((item) => redacted(item)),
+      ...evaluationUnverified.map((item) => `${redacted(item.what)} — ${redacted(item.why)}`),
+    ]).map((item) => `- [ ] ${item}`);
 
     if (unchecked.length === 0) evaluationLines.push('Отметок нет.');
     else evaluationLines.push(...unchecked);
