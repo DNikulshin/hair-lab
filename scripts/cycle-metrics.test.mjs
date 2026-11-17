@@ -11,7 +11,9 @@ import {
   buildMetrics,
   evaluatorSharesFamilyWithPlan,
   matchFindings,
+  normalizeUsage,
   parseArgs,
+  priceUsage,
   resolveCycleDir,
 } from './cycle-metrics.mjs';
 import { validateMetrics } from './lib/cycle/validate.mjs';
@@ -629,5 +631,87 @@ describe('resolveCycleDir и parseArgs', () => {
     writeFileSync(join(dir, 'state.json'), '{"stage": "CODE"}\n');
 
     assert.equal(resolveCycleDir(root), dir);
+  });
+});
+
+describe('normalizeUsage', () => {
+  test('приводит расход к целым и дополняет отсутствующие поля нулями', () => {
+    assert.deepEqual(normalizeUsage({ plan: { runs: 1, input: 10, cache_read: 20, output: 30 } }), {
+      plan: { runs: 1, input: 10, cache_read: 20, cache_write: 0, output: 30, reasoning: 0 },
+    });
+  });
+
+  test('неизвестный этап и отрицательные значения — отказ, а не тихий ноль', () => {
+    assert.throws(() => normalizeUsage({ gates: { runs: 1 } }), /неизвестный этап gates/u);
+    assert.throws(() => normalizeUsage({ code: { runs: -1 } }), /usage\.json\.code\.runs/u);
+    assert.throws(() => normalizeUsage(null), /ожидается объект этапов/u);
+  });
+});
+
+describe('priceUsage', () => {
+  /** Снапшот цен: 10 ₽ за 1M входа, 100 ₽ за 1M вывода, 1 ₽ за 1M чтения кэша. */
+  const prices = {
+    'm/a': { input: 10, output: 100, cache_read: 1, cache_write: 0, context: 1000 },
+  };
+  const models = { plan: 'm/a', code: 'm/a', review: 'm/a', evaluate: 'm/a' };
+
+  test('складывает стадии и округляет до копеек', () => {
+    const tokens = {
+      plan: { runs: 1, input: 1_000_000, cache_read: 0, cache_write: 0, output: 0, reasoning: 0 },
+      code: { runs: 2, input: 0, cache_read: 1_000_000, cache_write: 0, output: 0, reasoning: 0 },
+    };
+    // 10 ₽ за вход плана + 1 ₽ за кэш кода.
+    assert.equal(priceUsage(tokens, models, prices), 11);
+  });
+
+  test('нет замера, нет модели или нет цен — null, а не ноль', () => {
+    const tokens = {
+      plan: { runs: 1, input: 1, cache_read: 0, cache_write: 0, output: 0, reasoning: 0 },
+    };
+    assert.equal(priceUsage({}, models, prices), null);
+    assert.equal(priceUsage(tokens, { plan: 'm/unknown' }, prices), null);
+    assert.equal(priceUsage(tokens, {}, prices), null);
+    assert.equal(priceUsage(tokens, models, {}), null);
+  });
+});
+
+describe('buildMetrics: расход и стоимость', () => {
+  const usage = {
+    plan: { runs: 1, input: 1_000_000, cache_read: 0, cache_write: 0, output: 0, reasoning: 0 },
+  };
+  const prices = { 'm/a': { input: 10, output: 100, cache_read: 1, cache_write: 0, context: 1 } };
+  const state = {
+    iteration: 1,
+    max_iterations: 2,
+    stage: 'DONE',
+    history: [],
+    models: { plan: 'm/a' },
+  };
+
+  test('без usage токены и стоимость — null: это отсутствие замера, а не ноль', () => {
+    const metrics = buildMetrics({ state, iterations: [] });
+    assert.equal(metrics.tokens, null);
+    assert.equal(metrics.cost_rub, null);
+  });
+
+  test('с usage заполняются токены, стоимость считается по моделям этапов', () => {
+    const metrics = buildMetrics({ state, iterations: [], usage, prices });
+    assert.deepEqual(metrics.tokens.plan, {
+      runs: 1,
+      input: 1_000_000,
+      cache_read: 0,
+      cache_write: 0,
+      output: 0,
+      reasoning: 0,
+    });
+    assert.equal(metrics.cost_rub, 10);
+    assert.equal(validateMetrics(metrics).ok, true);
+  });
+
+  test('usage без цен оставляет токены и обнуляет стоимость', () => {
+    const metrics = buildMetrics({ state, iterations: [], usage });
+    assert.ok(metrics.tokens !== null);
+    assert.equal(metrics.cost_rub, null);
+    assert.equal(validateMetrics(metrics).ok, true);
   });
 });

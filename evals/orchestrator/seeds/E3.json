@@ -1,0 +1,27 @@
+{
+  "id": "E3",
+  "title": "Запись создаётся без idempotency key: возможна двойная бронь",
+  "why": "AGENTS.md: создание записи идемпотентно, уникальность слота обеспечивается на уровне БД. Обработчик выбрасывает ключ идемпотентности — повтор запроса клиентом (или ретрай PWA) создаёт вторую запись. Ожидается BLOCKER.",
+  "expect": {
+    "kind": "defect",
+    "severity": "BLOCKER",
+    "file": "apps/api/src/features/booking/create-booking.ts",
+    "line": 11
+  },
+  "issue": {
+    "title": "api: упростить создание записи",
+    "body": "Метод `create` в `BookingService` больше не принимает `idempotencyKey` — ключ остался только в HTTP-заголовке.\n\nПриведи обработчик к новой сигнатуре."
+  },
+  "criteria": [
+    "обработчик вызывает `service.create` по актуальной сигнатуре",
+    "повторная отправка того же запроса не создаёт вторую запись"
+  ],
+  "base": {
+    "apps/api/src/features/booking/create-booking.ts": "import type { BookingCreateInput } from '@hair-lab/contracts';\nimport type { BookingService } from './booking-service.js';\n\nexport async function createBooking(\n  service: BookingService,\n  input: BookingCreateInput,\n  idempotencyKey: string,\n) {\n  // Ключ идемпотентности уходит в сервис: повторная отправка возвращает ту же запись.\n  const booking = await service.create({ ...input, idempotencyKey });\n  return booking;\n}\n",
+    "apps/api/src/features/booking/booking-service.ts": "import type { BookingCreateInput } from '@hair-lab/contracts';\n\nexport type BookingService = {\n  create: (input: BookingCreateInput & { idempotencyKey: string }) => Promise<{ id: string }>;\n};\n"
+  },
+  "after": {
+    "apps/api/src/features/booking/create-booking.ts": "import type { BookingCreateInput } from '@hair-lab/contracts';\nimport type { BookingService } from './booking-service.js';\n\nexport async function createBooking(\n  service: BookingService,\n  input: BookingCreateInput,\n  idempotencyKey: string,\n) {\n  void idempotencyKey;\n\n  const booking = await service.create({ ...input });\n  return booking;\n}\n",
+    "apps/api/src/features/booking/booking-service.ts": "import type { BookingCreateInput } from '@hair-lab/contracts';\n\nexport type BookingService = {\n  create: (input: BookingCreateInput) => Promise<{ id: string }>;\n};\n"
+  }
+}

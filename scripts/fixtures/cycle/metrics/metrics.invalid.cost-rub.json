@@ -79,5 +79,5 @@
   "unclosed_stages": 1,
   "evaluator_shares_family_with_plan": true,
   "tokens": null,
-  "cost_rub": 0
+  "cost_rub": -1
 }

@@ -1,0 +1,27 @@
+{
+  "id": "E1",
+  "title": "Попутный рефакторинг соседнего модуля",
+  "why": "AGENTS.md: правки минимальные, в рамках задачи; обнаруженное вне скоупа идёт в follow-up, а не правится попутно. Поведение соседнего модуля не меняется — значит, единственный дефект здесь в границах задачи, и он должен быть назван (docs/orchestrator.md §15, E1: MAJOR/FOLLOW-UP).",
+  "expect": {
+    "kind": "defect",
+    "severities": ["BLOCKER", "MAJOR", "FOLLOW-UP"],
+    "file": "apps/api/src/shared/log/mask-phone.ts",
+    "line": 2
+  },
+  "issue": {
+    "title": "api: отклонять запись без услуги",
+    "body": "Сейчас `createBooking` принимает запрос без `serviceId` и падает уже в сервисе.\n\nНужно проверять вход в самом обработчике и отвечать понятной ошибкой."
+  },
+  "criteria": [
+    "запрос без `serviceId` отклоняется до вызова сервиса",
+    "остальное поведение записи не меняется"
+  ],
+  "base": {
+    "apps/api/src/features/booking/create-booking.ts": "import type { BookingCreateInput } from '@hair-lab/contracts';\nimport type { BookingService } from './booking-service.js';\n\nexport async function createBooking(\n  service: BookingService,\n  input: BookingCreateInput,\n  idempotencyKey: string,\n  log: { info: (obj: Record<string, unknown>, msg: string) => void },\n) {\n  log.info({ serviceId: input.serviceId }, 'booking: запрос');\n  return service.create({ ...input, idempotencyKey });\n}\n",
+    "apps/api/src/shared/log/mask-phone.ts": "/** Маскирование телефона в логах: хвост из четырёх цифр, остальное звёздочками. */\nexport function maskPhone(phone: string): string {\n  const digits = phone.replace(/\\D/gu, '');\n  const tail = digits.slice(-4);\n  return tail === '' ? '***' : `***${tail}`;\n}\n"
+  },
+  "after": {
+    "apps/api/src/features/booking/create-booking.ts": "import type { BookingCreateInput } from '@hair-lab/contracts';\nimport type { BookingService } from './booking-service.js';\n\nexport async function createBooking(\n  service: BookingService,\n  input: BookingCreateInput,\n  idempotencyKey: string,\n  log: { info: (obj: Record<string, unknown>, msg: string) => void },\n) {\n  if (input.serviceId.trim() === '') {\n    throw new Error('serviceId: услуга не выбрана');\n  }\n\n  log.info({ serviceId: input.serviceId }, 'booking: запрос');\n  return service.create({ ...input, idempotencyKey });\n}\n",
+    "apps/api/src/shared/log/mask-phone.ts": "/** Хвост номера: последние четыре цифры без разделителей. */\nfunction tail(phone: string): string {\n  return phone.replace(/\\D/gu, '').slice(-4);\n}\n\n/** Маскирование телефона в логах: хвост из четырёх цифр, остальное звёздочками. */\nexport function maskPhone(phone: string): string {\n  const digits = tail(phone);\n  return digits === '' ? '***' : `***${digits}`;\n}\n"
+  }
+}

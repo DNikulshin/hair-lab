@@ -33,7 +33,11 @@
  *   второй сегмент `model`). До T7 агента `evaluate` нет, ключа в `state.models` тоже,
  *   и тогда значение `true` по R2: независимость оценщика не подтверждена, поэтому
  *   консервативно фиксируем «в одном семействе», а не выдаём желаемое за факт;
- * - `tokens` и `cost_rub` — `null`: сбор usage и бюджеты в поставку не входят (R5).
+ * - `tokens` — суммы по этапам из `usage.json` (его пишет `cycle-usage` по транскриптам
+ *   субагентов). Нет файла — `null`: это не ноль токенов, а отсутствие замера;
+ * - `cost_rub` — те же токены, оценённые по `evals/prices.json` и моделям из `state.models`.
+ *   `null`, если `usage.json` нет, нет снапшота цен или хотя бы у одного этапа с расходом
+ *   не известна модель: частичная сумма выдавала бы неполный расход за полный.
  *
  * Отсутствие `review`/`evaluation`/`decision` у итерации — не ошибка: цикл мог
  * эскалироваться раньше REVIEW, и вклад такой итерации в счётчики нулевой.
@@ -62,6 +66,7 @@ import { join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { normalizeDoc } from './cycle-decide.mjs';
+import { priceStage, readPrices } from './lib/evals/cost.mjs';
 import { readJson, writeJsonAtomic } from './lib/cycle/io.mjs';
 import {
   FIXED_NAMES,
@@ -125,9 +130,76 @@ const DURATION_FACTOR = 10 ** DURATION_DIGITS;
  * @property {number} verdict_without_evidence
  * @property {number} unclosed_stages
  * @property {boolean} evaluator_shares_family_with_plan
- * @property {null} tokens
- * @property {null} cost_rub
+ * @property {Record<string, { runs: number, input: number, cache_read: number, cache_write: number, output: number, reasoning: number }>|null} tokens
+ * @property {number|null} cost_rub
  */
+
+/** Этапы, на которых вызывается модель: только у них бывает расход токенов. */
+const MODEL_STAGES = Object.freeze(['plan', 'code', 'review', 'evaluate']);
+
+/**
+ * Токены из `usage.json` в вид `metrics.json`: целые числа, ключи стадий в порядке
+ * автомата. Лишние ключи — ошибка данных: неизвестный этап означал бы, что расход
+ * посчитан не по тому словарю, и молча потерять его нельзя.
+ * @param {unknown} usage содержимое `usage.json`
+ * @returns {Record<string, { runs: number, input: number, cache_read: number, cache_write: number, output: number, reasoning: number }>}
+ */
+export function normalizeUsage(usage) {
+  if (!isRecord(usage)) throw new Error('usage.json: ожидается объект этапов');
+
+  /** @type {Record<string, any>} */
+  const tokens = {};
+  for (const [stage, value] of Object.entries(usage)) {
+    if (!MODEL_STAGES.includes(stage)) {
+      throw new Error(`usage.json: неизвестный этап ${stage}`);
+    }
+    if (!isRecord(value)) throw new Error(`usage.json.${stage}: ожидается объект`);
+    /** @type {Record<string, number>} */
+    const entry = {};
+    for (const field of ['runs', 'input', 'cache_read', 'cache_write', 'output', 'reasoning']) {
+      const number = value[field] ?? 0;
+      if (!Number.isInteger(number) || number < 0) {
+        throw new Error(`usage.json.${stage}.${field}: ожидается целое ≥ 0`);
+      }
+      entry[field] = number;
+    }
+    tokens[stage] = entry;
+  }
+
+  return tokens;
+}
+
+/**
+ * Стоимость расхода по ценам и моделям этапов.
+ * @param {Record<string, Record<string, number>>} tokens нормализованный расход
+ * @param {Record<string, unknown>} models `state.models`
+ * @param {Record<string, import('./lib/evals/cost.mjs').ModelPrice>} prices снапшот цен
+ * @returns {number|null} рубли с копейками или `null`, если считать не по чему
+ */
+export function priceUsage(tokens, models, prices) {
+  if (!isRecord(tokens) || !isRecord(models) || !isRecord(prices)) return null;
+  const stages = Object.keys(tokens);
+  if (stages.length === 0) return null;
+
+  let total = 0;
+  for (const stage of stages) {
+    const model = models[stage];
+    if (typeof model !== 'string' || model === '') return null;
+    if (!Object.hasOwn(prices, model)) return null;
+
+    const entry = tokens[stage];
+    const priced = priceStage({ prices }, model, {
+      calls_per_run: 0,
+      input: entry.input,
+      cache_read: entry.cache_read,
+      output: entry.output,
+      reasoning: entry.reasoning,
+    });
+    total += priced.total;
+  }
+
+  return Math.round(total * 100) / 100;
+}
 
 /**
  * Плоский объект: массивы и `null` объектами не считаются.
@@ -326,10 +398,17 @@ export function evaluatorSharesFamilyWithPlan(models) {
  * Ожидает уже проверенные валидаторами документы, но не полагается на это: битая дата,
  * отрицательная или нечисловая длительность и нечисловые счётчики — исключение с
  * указанием записи (`state.history[i]`, `gates.<n>`), а не тихий ноль.
- * @param {{ state: Record<string, any>, iterations: IterationInputs[] }} inputs
+ * Токены и стоимость считаются только из переданных фактов: `usage` и `prices`.
+ * `null` в обоих означает «замера нет», и это не то же самое, что ноль.
+ * @param {{
+ *   state: Record<string, any>,
+ *   iterations: IterationInputs[],
+ *   usage?: Record<string, any>|null,
+ *   prices?: Record<string, import('./lib/evals/cost.mjs').ModelPrice>|null,
+ * }} inputs
  * @returns {Metrics}
  */
-export function buildMetrics({ state, iterations }) {
+export function buildMetrics({ state, iterations, usage = null, prices = null }) {
   /** @type {Record<string, number>} */
   const stageTotals = {};
   const history = Array.isArray(state.history) ? state.history : [];
@@ -426,6 +505,8 @@ export function buildMetrics({ state, iterations }) {
     gateDurations[id] = roundSeconds(seconds, `gate_durations_s.${id}`);
   }
 
+  const tokens = usage === null ? null : normalizeUsage(usage);
+
   return {
     iterations: countOf(state.iteration, 'state.iteration'),
     max_iterations: countOf(state.max_iterations, 'state.max_iterations'),
@@ -444,8 +525,8 @@ export function buildMetrics({ state, iterations }) {
     verdict_without_evidence: verdictWithoutEvidence,
     unclosed_stages: unclosed,
     evaluator_shares_family_with_plan: evaluatorSharesFamilyWithPlan(state.models),
-    tokens: null,
-    cost_rub: null,
+    tokens,
+    cost_rub: priceUsage(tokens, state.models, prices),
   };
 }
 
@@ -606,6 +687,48 @@ export function resolveCycleDir(root) {
 }
 
 /**
+ * Необязательный `usage.json` каталога цикла: файла нет — замера нет (`null`),
+ * битый файл — отказ: испорченный расход исказил бы стоимость молча.
+ * @param {string} dir каталог цикла
+ * @returns {Record<string, any>|null}
+ */
+function readUsage(dir) {
+  const file = join(dir, FIXED_NAMES.usage);
+  if (!existsSync(file)) return null;
+  try {
+    return /** @type {Record<string, any>} */ (readJson(file));
+  } catch (error) {
+    const code = /** @type {{ code?: unknown } | undefined} */ (error)?.code;
+    const reason = typeof code === 'string' ? describeReadError(error) : describeJsonError(error);
+    throw new Error(`${FIXED_NAMES.usage}: не читается (${reason})`, { cause: error });
+  }
+}
+
+/**
+ * Снапшот цен из репозитория. Отсутствие файла — не ошибка: цикл мог пройти до
+ * появления снапшота, и тогда стоимость остаётся `null`, а токены заполняются.
+ * Битый снапшот — отказ: цены влияют на бюджетные пороги, тихо игнорировать их нельзя.
+ * @param {string} root корень репозитория
+ * @returns {Record<string, import('./lib/evals/cost.mjs').ModelPrice>|null}
+ */
+function readPriceSnapshot(root) {
+  const file = join(root, 'evals', 'prices.json');
+  if (!existsSync(file)) return null;
+
+  /** @type {unknown} */
+  let doc;
+  try {
+    doc = readJson(file);
+  } catch (error) {
+    const code = /** @type {{ code?: unknown } | undefined} */ (error)?.code;
+    const reason = typeof code === 'string' ? describeReadError(error) : describeJsonError(error);
+    throw new Error(`evals/prices.json: не читается (${reason})`, { cause: error });
+  }
+
+  return readPrices(doc).models;
+}
+
+/**
  * Точка входа CLI. Пишет только `metrics.json` в каталог цикла; единственный вывод —
  * строка JSON в stdout, диагностика — в stderr.
  * @returns {void}
@@ -617,7 +740,12 @@ function main() {
     const dir = args.dir === null ? resolveCycleDir(root) : resolve(args.dir);
 
     const state = readRequiredJson(join(dir, FIXED_NAMES.state), validateState, FIXED_NAMES.state);
-    const metrics = buildMetrics({ state, iterations: readIterations(dir, state) });
+    const metrics = buildMetrics({
+      state,
+      iterations: readIterations(dir, state),
+      usage: readUsage(dir),
+      prices: readPriceSnapshot(root),
+    });
 
     // Самопроверка: метрики обязаны проходить собственный валидатор (Приложение A).
     // Ошибка здесь — дефект писателя, а не входных данных, поэтому отдельный текст.

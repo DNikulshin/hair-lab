@@ -19,6 +19,7 @@ export const FIXED_NAMES = Object.freeze({
   state: 'state.json',
   followups: 'followups.md',
   metrics: 'metrics.json',
+  usage: 'usage.json',
   escalation: 'escalation.json',
   qaWeb: 'qa-web.json',
   issue: 'issue.json',

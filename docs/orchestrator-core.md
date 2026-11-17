@@ -21,16 +21,16 @@
 
 ## 1. Принятые решения (заморожены)
 
-| №   | Решение                                                                                                                                                                           |
-| --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| R1  | Провайдер `polza-ai` и текущие модели не меняются: `plan` GLM-5.3, `code` DeepSeek v4.1 Flash, `review` GPT-6 Luna Pro                                                            |
-| R2  | Новый агент `evaluate` на `polza-ai/z-ai/glm-5.3`, thinking high; общее семейство с `plan` принято (компенсация: слепота к плану, критерии из issue)                              |
-| R3  | Блокер из любого источника (ревью или оценка) запускает доработку, если он валиден; число проходов `code` — максимум 2                                                            |
-| R4  | При эскалации draft PR открывается только по условиям §5.3 спеки (§9 спеки): код написан, обязательные гейты зелёные, причина `iteration_limit`/`budget`/`agent_output_invalid`   |
-| R5  | Субагенты работают (подтверждено владельцем). Параллельный запуск `evaluate` и источник usage субагентов не подтверждены: работаем последовательно, токены в метриках пока `null` |
-| R6  | Решения принимает код (`cycle-decide`), супервизор их не переопределяет; merge делает только владелец                                                                             |
-| R7  | Прод-релиз не скоро: сначала ядро (T0–T8), затем T9 на задаче B2, потом B1 → B3 → B4 через `/cycle`; B5 (сертификат) идёт по своему сроку независимо                              |
-| R8  | По итогам планирования: T1 разбита на T1a и T1b; порядок T0 и T1a → T1b → T5 → T3, T4, T6, T6b, T2 → T8 → T7 → T9; задачи выполняются последовательно в одном рабочем дереве      |
+| №   | Решение                                                                                                                                                                                                                                                                                   |
+| --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| R1  | Провайдер `polza-ai` и текущие модели не меняются: `plan` GLM-5.3, `code` DeepSeek v4.1 Flash, `review` GPT-6 Luna Pro                                                                                                                                                                    |
+| R2  | Новый агент `evaluate` на `polza-ai/z-ai/glm-5.3`, thinking high; общее семейство с `plan` принято (компенсация: слепота к плану, критерии из issue)                                                                                                                                      |
+| R3  | Блокер из любого источника (ревью или оценка) запускает доработку, если он валиден; число проходов `code` — максимум 2                                                                                                                                                                    |
+| R4  | При эскалации draft PR открывается только по условиям §5.3 спеки (§9 спеки): код написан, обязательные гейты зелёные, причина `iteration_limit`/`budget`/`agent_output_invalid`                                                                                                           |
+| R5  | Субагенты работают (подтверждено владельцем). Параллельный запуск `evaluate` не подтверждён: работаем последовательно. Источник usage найден — транскрипты субагентов в каталоге сессий pi; расход собирает `cycle-usage.mjs`, `metrics.json` пишет `tokens` и `cost_rub` по факту (§5.8) |
+| R6  | Решения принимает код (`cycle-decide`), супервизор их не переопределяет; merge делает только владелец                                                                                                                                                                                     |
+| R7  | Прод-релиз не скоро: сначала ядро (T0–T8), затем T9 на задаче B2, потом B1 → B3 → B4 через `/cycle`; B5 (сертификат) идёт по своему сроку независимо                                                                                                                                      |
+| R8  | По итогам планирования: T1 разбита на T1a и T1b; порядок T0 и T1a → T1b → T5 → T3, T4, T6, T6b, T2 → T8 → T7 → T9; задачи выполняются последовательно в одном рабочем дереве                                                                                                              |
 
 ## 2. Дельта к спеке v0.1 (чего в ней не хватало)
 
@@ -54,7 +54,7 @@
 `AGENTS.md`, PR-шаблоне, `docs/workflow.md`, CI, первый боевой цикл.
 
 **Не входит:** набор сидов `evals/orchestrator` и прогоны на моделях (фаза 2), токены и
-стоимость в метриках (до решения по R5), оркестрация скриптом вместо LLM-супервизора (фаза 3),
+оркестрация скриптом вместо LLM-супервизора (фаза 3),
 смена провайдера, `model-roles.json`, `kb`, Telegram-мост, любые правки `apps/*` и
 `packages/*`, смена моделей.
 
@@ -86,6 +86,7 @@
 scripts/
   cycle-state.mjs      cycle-evidence.mjs   cycle-gates.mjs
   cycle-decide.mjs     cycle-pr-body.mjs    cycle-metrics.mjs
+  cycle-usage.mjs
   check-harness.mjs
   lib/cycle/
     paths.mjs  io.mjs  validate.mjs  refs.mjs  git.mjs  redact.mjs  config.mjs
@@ -262,7 +263,8 @@ node scripts/cycle-decide.mjs --dir D [--iteration N]
 
 `partial` у критерия блоком не является: попадает в `notes`. Вердикт модели
 `REWORK` без валидного блокера записывается как `verdict_without_evidence` и не блокирует.
-Бюджет (правило 7 спеки) в фазе 1 не применяется: ждёт метрик расхода (R5).
+Бюджет (правило 7 спеки) применяется по данным `metrics.json`: `cost_rub` заполняется из
+`usage.json` (см. §5.8), поэтому бюджетный порог можно калибровать по фактическим прогонам.
 Сопоставление находок для метрик: тот же файл и разница строк ≤ 5 → «совпали».
 
 Результат `decision.<n>.json`:
@@ -288,7 +290,11 @@ node scripts/cycle-pr-body.mjs --dir D [--draft-escalation]
 Пишет `metrics.json`: длительности этапов (из `state.history`), длительности гейтов,
 число итераций, исходы гейтов, замечания по серьёзности, дефекты оценщика, `only_review` /
 `only_evaluator` / `both`, `unresolved_refs`, `verdict_without_evidence`,
-`evaluator_shares_family_with_plan: true`. Поля токенов и стоимости — `null` до решения по R5.
+`evaluator_shares_family_with_plan: true`. `tokens` и `cost_rub` берутся из `usage.json`
+каталога цикла: `tokens` — суммы по этапам (пишет `cycle-usage` по транскриптам субагентов),
+`cost_rub` — те же токены по `evals/prices.json` и моделям из `state.models`. Нет замера —
+`null` (это «не измеряли», а не ноль); нет цен или модели хотя бы у одного этапа с расходом —
+`cost_rub: null`, потому что неполная сумма выдавала бы себя за полную.
 `cycle-report` не входит в эту поставку.
 
 ### 5.9 `check-harness.mjs`
@@ -611,22 +617,23 @@ A1–A9 статически; запуск `node --test` и `gh` остаётс�
 длительностей — секунды с точностью до 3 знаков; `cycle_duration_s` равен сумме
 `stage_durations_s`, `gate_total_s` — сумме `gate_durations_s`.
 
-| Поле                                          | Тип и правила                                                                                                            |
-| --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `iterations`, `max_iterations`                | целые ≥ 1 (из `state.json`)                                                                                              |
-| `final_stage`                                 | `state.stage`: INIT, PLAN, …, DONE, ESCALATED                                                                            |
-| `stage_durations_s`                           | объект `<STAGE>` → число ≥ 0: сумма `finished_at - started_at` по `state.history`                                        |
-| `cycle_duration_s`                            | число ≥ 0: сумма `stage_durations_s`                                                                                     |
-| `gate_durations_s`                            | объект `<id гейта>` → число ≥ 0: сумма `duration_s` по всем итерациям                                                    |
-| `gate_total_s`                                | число ≥ 0: сумма `gate_durations_s`                                                                                      |
-| `gate_outcomes`                               | объект `<id гейта>` → `{ pass, fail, skipped, not_run }`, целые ≥ 0 (по всем итерациям)                                  |
-| `review_findings`                             | `{ BLOCKER, MAJOR, MINOR, FOLLOW-UP }`, целые ≥ 0                                                                        |
-| `evaluator_defects`                           | `{ BLOCKER, MAJOR, MINOR }`, целые ≥ 0                                                                                   |
-| `only_review`, `only_evaluator`, `both`       | целые ≥ 0: сопоставление находок и дефектов внутри итерации по правилу §5.6 (разница строк ≤ 5, каждый элемент один раз) |
-| `unresolved_refs`, `verdict_without_evidence` | целые ≥ 0: суммы из `decision.<n>.json`                                                                                  |
-| `unclosed_stages`                             | целое ≥ 0: записи `state.history` без `finished_at`                                                                      |
-| `evaluator_shares_family_with_plan`           | boolean: семейство — второй сегмент `model` (§5.9); нет ключа `evaluate` — `true` (R2)                                   |
-| `tokens`, `cost_rub`                          | строго `null` в фазе 1 (R5: usage и бюджеты не собираются)                                                               |
+| Поле                                          | Тип и правила                                                                                                                            |
+| --------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `iterations`, `max_iterations`                | целые ≥ 1 (из `state.json`)                                                                                                              |
+| `final_stage`                                 | `state.stage`: INIT, PLAN, …, DONE, ESCALATED                                                                                            |
+| `stage_durations_s`                           | объект `<STAGE>` → число ≥ 0: сумма `finished_at - started_at` по `state.history`                                                        |
+| `cycle_duration_s`                            | число ≥ 0: сумма `stage_durations_s`                                                                                                     |
+| `gate_durations_s`                            | объект `<id гейта>` → число ≥ 0: сумма `duration_s` по всем итерациям                                                                    |
+| `gate_total_s`                                | число ≥ 0: сумма `gate_durations_s`                                                                                                      |
+| `gate_outcomes`                               | объект `<id гейта>` → `{ pass, fail, skipped, not_run }`, целые ≥ 0 (по всем итерациям)                                                  |
+| `review_findings`                             | `{ BLOCKER, MAJOR, MINOR, FOLLOW-UP }`, целые ≥ 0                                                                                        |
+| `evaluator_defects`                           | `{ BLOCKER, MAJOR, MINOR }`, целые ≥ 0                                                                                                   |
+| `only_review`, `only_evaluator`, `both`       | целые ≥ 0: сопоставление находок и дефектов внутри итерации по правилу §5.6 (разница строк ≤ 5, каждый элемент один раз)                 |
+| `unresolved_refs`, `verdict_without_evidence` | целые ≥ 0: суммы из `decision.<n>.json`                                                                                                  |
+| `unclosed_stages`                             | целое ≥ 0: записи `state.history` без `finished_at`                                                                                      |
+| `evaluator_shares_family_with_plan`           | boolean: семейство — второй сегмент `model` (§5.9); нет ключа `evaluate` — `true` (R2)                                                   |
+| `tokens`                                      | `null` или карта «этап → `{runs, input, cache_read, cache_write, output, reasoning}`»; этапы только `plan`, `code`, `review`, `evaluate` |
+| `cost_rub`                                    | `null` или число ≥ 0 (₽, копейки): те же токены по `evals/prices.json` и `state.models`                                                  |
 
 ## Приложение B. Протокол супервизора (канонический порядок команд)
 

@@ -1,0 +1,22 @@
+{
+  "id": "E4",
+  "title": "Проверка владельца после чтения кэша",
+  "why": "AGENTS.md: клиент видит только свои записи, проверка владельца выполняется до чтения кэша и тяжёлых данных. Здесь данные отдаются из кэша под общим ключом и до проверки клиента: чужой кабинет получает чужие записи. Ожидается BLOCKER.",
+  "expect": {
+    "kind": "defect",
+    "severity": "BLOCKER",
+    "file": "apps/api/src/features/client-cabinet/get-bookings.ts",
+    "line": 8
+  },
+  "issue": {
+    "title": "api: кэшировать список записей кабинета",
+    "body": "Список записей в кабинете запрашивается на каждом переходе и бьёт по базе.\n\nДобавь кэш на 60 секунд."
+  },
+  "criteria": ["повторный запрос кабинета не идёт в базу", "клиент видит только свои записи"],
+  "base": {
+    "apps/api/src/features/client-cabinet/get-bookings.ts": "import type { Db } from './types.js';\n\nexport async function getBookings(\n  ctx: { clientId: string },\n  db: Db,\n): Promise<Array<{ id: string; clientId: string }>> {\n  if (ctx.clientId.trim() === '') {\n    throw new Error('clientId: не определён');\n  }\n\n  return db.booking.findMany({ where: { clientId: ctx.clientId } });\n}\n"
+  },
+  "after": {
+    "apps/api/src/features/client-cabinet/get-bookings.ts": "import type { BookingCache, Db } from './types.js';\n\nexport async function getBookings(\n  ctx: { clientId: string },\n  cache: BookingCache,\n  db: Db,\n): Promise<Array<{ id: string; clientId: string }>> {\n  const cached = await cache.get('bookings');\n  if (cached !== null) {\n    return cached;\n  }\n\n  if (ctx.clientId.trim() === '') {\n    throw new Error('clientId: не определён');\n  }\n\n  const rows = await db.booking.findMany({ where: { clientId: ctx.clientId } });\n  await cache.set('bookings', rows);\n  return rows;\n}\n"
+  }
+}
