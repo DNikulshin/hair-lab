@@ -92,6 +92,8 @@ Telegram-мост, изменения RAG, продуктовая функцио
 
 ```
 state.json                 состояние цикла (пишет только cycle-скрипты)
+usage.json                 расход токенов по этапам (пишет cycle-usage)
+issue.json                 снимок issue: title, body, labels
 plan.<n>.md                план (n — номер прохода)
 code-report.<n>.md         отчёт супервизора по проходу
 rework-brief.<n>.md        что исправить (после REWORK)
@@ -99,10 +101,15 @@ review.<n>.md + .json      ревью (проза + структура)
 evaluation.<n>.md + .json  независимая оценка
 decision.<n>.json          решение cycle-decide
 followups.md               замечания вне скоупа
+escalation.json            причина эскалации (только при ESCALATED)
 metrics.json               метрики цикла
 evidence/                  пакет для оценщика (§7)
   issue.md  criteria.md  diff.patch  gates.json  gates/*.log  qa-web.json
 ```
+
+Имена и их набор в коде задаёт `FIXED_NAMES` (`scripts/lib/cycle/paths.mjs`); поля
+артефактов — Приложение A `docs/orchestrator-core.md`. Примеры ниже сокращённые: показаны
+поля, о которые спотыкаются чаще всего, полный список — в Приложении A.
 
 ### `state.json`
 
@@ -119,18 +126,35 @@ evidence/                  пакет для оценщика (§7)
   "criteria_source": "issue",
   "models": { "plan": "…", "code": "…", "review": "…", "evaluate": "…" },
   "retries": { "REVIEW": 0, "EVALUATE": 0, "evidence": 0 },
+  "owner_approved": false,
+  "history": [
+    {
+      "stage": "REVIEW",
+      "iteration": 1,
+      "started_at": "…",
+      "finished_at": null,
+      "status": "running"
+    }
+  ],
+  "escalation": null,
+  "applied_decision": null,
   "started_at": "…",
   "updated_at": "…"
 }
 ```
+
+`escalation` заполняется только на `ESCALATED` (`{ reason, detail, draft_pr_allowed }`),
+`applied_decision` — маркер применённого `decision.<n>.json` (защита от повторного
+применения), `owner_approved` — разрешение владельца идти сверх `max_iterations`.
 
 ### `gates.json`
 
 ```json
 {
   "iteration": 1,
-  "base": "main",
+  "base_sha": "<40 hex: база цикла>",
   "head": "<sha или worktree>",
+  "started_at": "…",
   "gates": [
     {
       "id": "typecheck",
@@ -139,7 +163,7 @@ evidence/                  пакет для оценщика (§7)
       "status": "pass|fail|skipped|not_run",
       "exit": 0,
       "duration_s": 41,
-      "log": "gates/typecheck.log",
+      "log": "gates/typecheck.1.log",
       "reason": null
     }
   ]
@@ -226,7 +250,13 @@ INIT → PLAN → CODE → GATES → [QA_WEB] → REVIEW ┐
 DECIDE → REWORK → CODE (iteration+1)  |  ACQUIRE_EVIDENCE → GATES/QA_WEB
        → PROCEED[_WITH_UNVERIFIED] → PR → DONE
        → ESCALATE → (stop, комментарий в issue, status:blocked + needs-owner)
+
+Эскалация (только `escalate`): INIT, PLAN, GATES, QA_WEB, DECIDE → ESCALATED
 ```
+
+В `ESCALATED` ведёт только подкоманда `escalate` (`advance --to ESCALATED` отклоняется
+на любом этапе); из `CODE`, `REVIEW`, `EVALUATE`, `REWORK`, `ACQUIRE_EVIDENCE` и `PR`
+эскалации нет — это таблица §5.3 `docs/orchestrator-core.md`.
 
 | Этап     | Делает                        | Результат                                 | Условие выхода                                                                            |
 | -------- | ----------------------------- | ----------------------------------------- | ----------------------------------------------------------------------------------------- |
