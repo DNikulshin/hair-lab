@@ -114,17 +114,32 @@ scripts/
 Единственный писатель `state.json`. Подкоманды:
 
 ```
-init     --issue N --slug S --branch B [--date YYYY-MM-DD] [--max-iterations 2]
+init     --issue N --slug S --branch B [--date YYYY-MM-DD] [--max-iterations 2] [--dir D]
 get      [--dir D] [--field F]
-advance  --to STAGE [--dir D]
-finish   --stage STAGE --status done|error [--detail T]
+advance  --to STAGE [--dir D] [--owner-approved]
+finish   --stage STAGE --status done|error [--detail T] [--dir D]
 apply-decision [--dir D]              применяет decision.<n>.json
-escalate --reason R [--detail T]      пишет escalation.json, ставит ESCALATED
+escalate --reason R [--detail T] [--dir D]   пишет escalation.json, ставит ESCALATED
 resume   [--dir D]                    печатает первый незавершённый этап
-lock | unlock                         .pi/artifacts/.lock (pid, slug, время; устаревший lock снимается, если pid не жив)
+lock [--dir D] [--slug S] | unlock [--dir D]  блокировка дерева, см. ниже
 ```
 
-Допустимые переходы (всё остальное → код 3):
+**Каталог цикла (`--dir`).** Явный `--dir` — путь как есть. По умолчанию `init` собирает
+`<artifacts>/<date>-<issue>-<slug>`, а `get`/`advance`/`finish`/`apply-decision`/`escalate`/
+`resume` берут единственный активный цикл (`findActiveCycle`): подкаталог со `state.json`,
+у которого `stage` ∉ {`DONE`, `ESCALATED`}. Активных ноль или больше одного — код 2:
+неоднозначность должна ломать цикл, а не разрешаться угадыванием. Поэтому `get` для
+терминального цикла (`DONE`/`ESCALATED`) требует явного `--dir` — по умолчанию такой каталог
+не виден; `resume` в терминальном цикле завершается кодом 3, как и любая мутация: после
+`DONE`/`ESCALATED` читается только `get`. `lock`/`unlock` от `findActiveCycle` не зависят:
+их каталог — `.pi/artifacts/` (или `dirname(--dir)`, если он задан), поэтому `unlock`
+работает и после `DONE`/`ESCALATED`.
+
+Допустимые переходы (всё остальное → код 3). В `ESCALATED` ведёт только `escalate`
+(и `apply-decision` с `ESCALATE`): `advance --to ESCALATED` отклоняется — у эскалации свои
+защиты и `escalation.json`. Эскалация с `QA_WEB` нужна, например, для `diff_too_large`,
+обнаруженного на ANALYSIS уже после браузерной проверки; код этот переход пока не
+поддерживает — см. пометку под таблицей.
 
 | Из               | В                                                         |
 | ---------------- | --------------------------------------------------------- |
@@ -132,7 +147,7 @@ lock | unlock                         .pi/artifacts/.lock (pid, slug, время
 | PLAN             | CODE, ESCALATED                                           |
 | CODE             | GATES                                                     |
 | GATES            | QA_WEB, REVIEW, ESCALATED                                 |
-| QA_WEB           | REVIEW                                                    |
+| QA_WEB           | REVIEW, ESCALATED                                         |
 | REVIEW           | EVALUATE, DECIDE                                          |
 | EVALUATE         | REVIEW, DECIDE                                            |
 | DECIDE           | REWORK, ACQUIRE_EVIDENCE, REVIEW, EVALUATE, PR, ESCALATED |
@@ -140,17 +155,53 @@ lock | unlock                         .pi/artifacts/.lock (pid, slug, время
 | ACQUIRE_EVIDENCE | GATES, QA_WEB                                             |
 | PR               | DONE                                                      |
 
+**`QA_WEB → ESCALATED` нормативен, но пока не реализован (issue #202).** Ребро остаётся в
+таблице: его требуют Приложение B (`escalate --reason diff_too_large` на ANALYSIS уже после
+QA_WEB) и issue #178. Однако `TRANSITIONS.QA_WEB` в `scripts/cycle-state.mjs` содержит только
+`REVIEW`, поэтому `cycle-state escalate` с этапа `QA_WEB` завершается кодом 3 («эскалация из
+QA_WEB недопустима»). Правка кода — `TRANSITIONS` и независимый литерал таблицы в тесте —
+issue #202; до неё таблицу читать как нормативное требование к автомату, а не как описание
+текущего скрипта.
+
 Защиты:
 
-- `REWORK → CODE` увеличивает `iteration`; при `iteration ≥ max_iterations` недопустимо без
-  `--owner-approved` (флаг пишется в `state.json`);
+- `REWORK → CODE` увеличивает `iteration` — это единственное место инкремента в автомате;
+  при `iteration ≥ max_iterations` переход недопустим без `--owner-approved` (флаг пишется в
+  `state.json` и переживает перезапуски). `apply-decision` с `REWORK` счётчики не меняет:
+  иначе первый же `REWORK` упирался бы в лимит, а `iteration > max_iterations` без
+  `owner_approved` не проходит схему состояния;
 - `→ DECIDE` только если для текущей итерации есть `review.<n>.md` и `evaluation.<n>.md`;
 - `→ PR` только если последнее `decision` имеет `action` `PROCEED` или `PROCEED_WITH_UNVERIFIED`;
 - `apply-decision` идемпотентен: `RETRY_STAGE` → `retries[stage]++` и переход в этот этап;
-  `ACQUIRE_EVIDENCE` → `retries.evidence++`; `REWORK` → переход и `iteration++`; `ESCALATE` →
-  `escalate`; `PROCEED*` → `PR`;
-- `escalate` вычисляет `draft_pr_allowed`: проход `code` завершён, в `gates.<n>.json` нет
-  обязательного `fail`, причина ∈ {`iteration_limit`, `budget`, `agent_output_invalid`}.
+  `ACQUIRE_EVIDENCE` → `retries.evidence++`; `REWORK` → только переход в `REWORK` (инкремент —
+  на ребре `REWORK → CODE`, п. 1); `ESCALATE` → `escalate`; `PROCEED*` → `PR`. Повторный
+  запуск с тем же решением — no-op с кодом 0 (файл не перезаписывается): сравнивается
+  записанный маркер `applied_decision` (`iteration`, `action`, `retry_stage`, `digest`
+  содержимого решения), поэтому счётчики не растут дважды. Изменённое решение применяется по
+  общим правилам, а когда переход уже невозможен (не `DECIDE`, терминальный этап) — код 3,
+  а не молчаливый успех;
+- `escalate` вычисляет `draft_pr_allowed` (§9): проход `code` завершён и обязательные гейты
+  зелёные, то есть `gates.<n>.json` текущей итерации валиден, содержит ≥ 1 гейт
+  `required: true`, и каждый обязательный гейт — `pass` или `not_run` с причиной
+  `no_database`; причина ∈ {`iteration_limit`, `budget`, `agent_output_invalid`}. Проверка
+  fail-safe: нет файла, битый документ, чужая итерация, пустой список гейтов, обязательный
+  `fail`, `skipped` или `not_run` по другой причине → `false` (неполные данные — не повод
+  открывать draft PR).
+
+**Блокировка (`lock`/`unlock`).** Файл `.pi/artifacts/.lock` = `{ pid, slug|null, created_at }`.
+В `pid` пишется **родительский** процесс (`ppid`) — супервизор, который ведёт цикл: сам
+`cycle-state` живёт миллисекунды и блокировку держать не может; если родителя нет (`ppid`
+0/1), берётся собственный pid. Захват атомарный (эксклюзивное создание файла), поэтому два
+параллельных `lock` в одном дереве не могут оба получить код 0. Занятый lock: живой pid —
+код 3. Пустой файл моложе 30 с — идущий прямо сейчас захват (тоже код 3); старше — сбой
+между созданием и записью, такой файл восстанавливается автоматически, иначе дерево
+заклинило бы до ручного `unlock`. Мёртвый, битый или заброшенный lock снимается, но
+восстановление сериализовано файлом `<lock>.takeover` с TTL 30 с: без него два процесса
+снимали бы lock по очереди и второй снёс бы уже свежую блокировку первого. Под
+сериализатором состояние перепроверяется, а снятие идёт через переименование со сверкой
+inode — удаления «по пути» нет. `unlock` безусловен: отсутствующий файл — no-op с кодом 0;
+вызывается и на `DONE`, и на `ESCALATE` (иначе lock с живым pid супервизора держит дерево до
+конца сессии).
 
 ### 5.4 `cycle-evidence.mjs`
 
@@ -591,7 +642,14 @@ A1–A9 статически; запуск `node --test` и `gh` остаётс�
 | `models`                      | объект строк                                                                                             |
 | `history[]`                   | `{ stage, iteration, started_at, finished_at                                                             | null, status }` |
 | `escalation`                  | `null` или `{ reason, detail, draft_pr_allowed }`                                                        |
+| `applied_decision`            | `null` или `{ iteration, action, retry_stage\|null, digest }` — маркер применённого решения              |
 | `started_at`, `updated_at`    | ISO-8601                                                                                                 |
+
+`applied_decision` — защита `apply-decision` от повторного применения того же решения: `digest` —
+`sha256` канонического JSON `decision.<n>.json` (ключи отсортированы, поэтому дайджест не
+зависит от порядка полей и артефакт остаётся побайтно воспроизводимым); совпадение всех
+четырёх полей — no-op. Валидатор `state` лишние поля игнорирует, поэтому старые `state.json`
+без этого поля остаются валидными.
 
 **gates.\<n\>.json**: `iteration`, `base_sha`, `head`, `started_at`, `gates[]`:
 `{ id, cmd|null, required, status ∈ {pass, fail, skipped, not_run}, exit|null, duration_s, log|null, reason|null }`.
@@ -661,7 +719,7 @@ DECIDE     advance --to DECIDE → node scripts/cycle-decide.mjs --dir <dir> →
              REWORK                 rework-brief.<n>.md из rework_items → CODE (iteration+1)
              PROCEED[_WITH_UNVERIFIED]  коммиты, push, PR: тело из cycle-pr-body, метка status:review
              ESCALATE               комментарий в issue, status:blocked + needs-owner;
-                                    draft PR только если escalation.draft_pr_allowed
+                                    cycle-state unlock; draft PR только если escalation.draft_pr_allowed
 DONE       node scripts/cycle-metrics.mjs --dir <dir>; cycle-state unlock
 ```
 
