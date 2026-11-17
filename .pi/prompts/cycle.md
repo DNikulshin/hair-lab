@@ -111,8 +111,9 @@ MCP недоступен — `{"status": "not_run", "reason": "<причина>"
   `finish --stage REWORK --status done`, затем `advance --to CODE` (итерация увеличивается на
   этом ребре). Лимит — `max_iterations` из `state.json` (по умолчанию 2); сверх лимита только
   `advance --to CODE --owner-approved` с явного разрешения владельца;
-- `PROCEED` / `PROCEED_WITH_UNVERIFIED` — этап `PR` уже открыт: коммиты
-  (`<type>(<scope>): <что>`), `git push -u origin <ветка>`, тело —
+- `PROCEED` / `PROCEED_WITH_UNVERIFIED` — этап `PR` уже открыт: сначала `followups.md`
+  (замечания вне скоупа — до сборки тела, иначе раздел «Вне скоупа» останется пустым),
+  потом коммиты (`<type>(<scope>): <что>`), `git push -u origin <ветка>`, тело —
   `node scripts/cycle-pr-body.mjs` (при `PROCEED_WITH_UNVERIFIED` там будет блок «не проверено»),
   `gh pr create --body-file …`, метка `status:review`, `finish --stage PR --status done`.
   **PR не мержить**: мерж делает владелец;

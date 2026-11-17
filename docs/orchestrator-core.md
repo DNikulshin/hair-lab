@@ -334,7 +334,13 @@ node scripts/cycle-pr-body.mjs --dir D [--draft-escalation]
 ревью и оценки; «Вне скоупа» — из `followups.md`; строка `Closes #<issue>` обязательна.
 С `--draft-escalation` в начале добавляется баннер с причинами и открытыми замечаниями.
 Вывод — stdout. Для `PROCEED_WITH_UNVERIFIED` добавляется блок «не проверено» с чекбоксами
-для владельца.
+для владельца; один факт из `decision.unverified[]` (`evaluation unverified: <what>`) и
+`evaluation.unverified[]` (`<what> — <why>`) печатается один раз — в более полной
+формулировке (нормализация без префикса источника, #204).
+
+`followups.md` читается только если существует к моменту сборки: замечания вне скоупа
+супервизор записывает **до** `cycle-pr-body` (Приложение B, `PROCEED*`), иначе раздел
+останется заглушкой при написанном позже файле.
 
 ### 5.8 `cycle-metrics.mjs` (минимум фазы 1)
 
@@ -717,7 +723,9 @@ DECIDE     advance --to DECIDE → node scripts/cycle-decide.mjs --dir <dir> →
              RETRY_STAGE            повторить указанный этап один раз
              ACQUIRE_EVIDENCE       выполнить acquire[] (гейт или QA_WEB), затем снова ANALYSIS
              REWORK                 rework-brief.<n>.md из rework_items → CODE (iteration+1)
-             PROCEED[_WITH_UNVERIFIED]  коммиты, push, PR: тело из cycle-pr-body, метка status:review
+             PROCEED[_WITH_UNVERIFIED]  followups.md (замечания вне скоупа — до сборки тела,
+                                         иначе «Вне скоупа» останется пустым), коммиты, push,
+                                         PR: тело из cycle-pr-body, метка status:review
              ESCALATE               комментарий в issue, status:blocked + needs-owner;
                                     cycle-state unlock; draft PR только если escalation.draft_pr_allowed
 DONE       node scripts/cycle-metrics.mjs --dir <dir>; cycle-state unlock
