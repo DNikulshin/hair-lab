@@ -271,7 +271,10 @@ node scripts/cycle-gates.mjs --dir D [--only id,id] [--base SHA]
 в логе без значения.
 
 `test_int` запускает `pnpm test:int` как есть: turbo пробрасывает `DATABASE_URL`, задача зависит
-от `db:generate` и не кэшируется; скрипт `.env*` не читает. Класс отказа определяется по логу:
+от `db:generate` и не кэшируется; скрипт `.env*` не читает, поэтому `DATABASE_URL` экспортируется
+в окружение процесса перед запуском цикла (`docs/environment.md`). Без переменной тесты падают
+с ошибкой конфигурации и гейт получает `fail` — это не `not_run (no_database)`, то есть разные
+исходы для решения. Класс отказа определяется по логу:
 ошибки соединения (`ECONNREFUSED`, `ENOTFOUND`, Prisma `P1001`, «Can't reach database server»)
 → `not_run`, причина `no_database`; любые другие падения, включая
 `password authentication failed`, → `fail`. Образцы логов — в фикстурах тестов.

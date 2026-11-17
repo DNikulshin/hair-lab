@@ -63,6 +63,24 @@ POSTGRES_PORT=55432 docker compose up -d db
 перед этим нужен сгенерированный клиент (`db:generate`). Интеграционные тесты (`pnpm test:int`)
 идут в ту же БД, что и `DATABASE_URL`.
 
+### `DATABASE_URL` и гейт `test_int` в `/cycle`
+
+Гейт `test_int` берёт `DATABASE_URL` из **окружения процесса**, а `.env` не читает. Поэтому
+перед циклом переменную нужно экспортировать, иначе гейт не увидит базу:
+
+```bash
+export DATABASE_URL='postgresql://hair_lab:change_me@127.0.0.1:55432/hair_lab?schema=public'
+node scripts/cycle-gates.mjs --dir <каталог цикла>
+```
+
+Исходы гейта различаются по смыслу (docs/orchestrator-core.md §5.5):
+
+- `pass` — база доступна, тесты прошли;
+- `not_run (no_database)` — переменная задана, но база недоступна: решение будет
+  `PROCEED_WITH_UNVERIFIED` с отметкой `gate:test_int not_run (no_database)` в PR;
+- `fail` — переменной нет вовсе или упал сам тест. Это конфигурация, а не отсутствие базы:
+  цикл увидит провал гейта, а не «не проверено».
+
 ## Разработка через reverse proxy (code-server)
 
 Если dev-сервер открывается не по `localhost`, а через прокси (code-server, VS Code tunnels),
