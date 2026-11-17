@@ -6,8 +6,8 @@
  * отсюда константы — список исключений и версия кэшей меняются в одном месте.
  *
  * Инварианты (см. AGENTS.md, «Данные и надёжность»): ответы API и приватный HTML
- * (`/account`, `/login`, `/register`, `/booking/payment`) не попадают в кэш ни при каких условиях;
- * HTML публичных страниц не прекешируем — он `force-dynamic`.
+ * (`/account`, `/admin`, `/login`, `/register`, `/booking/payment`) не попадают в кэш
+ * ни при каких условиях; HTML публичных страниц не прекешируем — он `force-dynamic`.
  */
 
 /** Как service worker обрабатывает запрос. */
@@ -18,7 +18,7 @@ export type SwTarget = 'api' | 'private-html' | 'next-static' | 'asset' | 'other
  * в `activate` все кэши другой версии удаляются, поэтому старый HTML/скрипты
  * не переживают деплой.
  */
-export const SW_CACHE_VERSION = 'v2';
+export const SW_CACHE_VERSION = 'v3';
 
 /** Общий префикс: по нему `activate` узнаёт «свои» кэши. */
 export const SW_CACHE_PREFIX = 'hair-lab';
@@ -55,9 +55,12 @@ export const OFFLINE_PATH = '/offline';
  * `/login`, но перечислен явно: это точка входа с токеном из письма.
  * `/booking/payment` — статус оплаты конкретной записи (uuid в query, ссылка на оплату
  * в черновике вкладки): из кэша он открылся бы чужим людям и с устаревшим статусом.
+ * `/admin` — рабочее место сотрудника: в кэше оказались бы записи дня с телефонами клиентов,
+ * а на общем устройстве они достались бы следующему человеку.
  */
 export const PRIVATE_HTML_PREFIXES = [
   '/account',
+  '/admin',
   '/login',
   '/login/magic',
   '/register',

@@ -236,7 +236,7 @@ describe('listAdminAppointments: день в TZ салона', () => {
     });
   });
 
-  it('отдаёт DTO админки: ISO-время, имена, цену и полный телефон', async () => {
+  it('отдаёт DTO админки: ISO-время, имена, цену, полный телефон и причину отмены', async () => {
     const { db } = createDbStub([row()]);
 
     const [appointment] = (await listAdminAppointments(db, DATE)).items;
@@ -252,10 +252,38 @@ describe('listAdminAppointments: день в TZ салона', () => {
       masterName: 'Тестовый Мастер',
       clientName: 'Тестовая Клиентка',
       clientPhone: '+70000000001',
+      // Запись не отменялась: причина есть всегда, значение — `null`.
+      cancelReason: null,
     });
-    // Служебных полей и почты в ответе нет.
+    // Почты клиента в ответе нет.
     expect(Object.keys(appointment ?? {})).not.toContain('clientEmail');
-    expect(Object.keys(appointment ?? {})).not.toContain('cancelReason');
+  });
+
+  it('отдаёт причину отмены: клиентскую, салонную и служебную оплатную', async () => {
+    const byClient = row({
+      id: '00000000-0000-4000-8000-000000000201',
+      status: 'cancelled',
+      cancelReason: 'cancelled_by_client',
+    });
+    const bySalon = row({
+      id: '00000000-0000-4000-8000-000000000202',
+      status: 'cancelled',
+      cancelReason: `${SALON_CANCEL_REASON_PREFIX}: мастер заболел`,
+    });
+    const byPayment = row({
+      id: '00000000-0000-4000-8000-000000000203',
+      status: 'cancelled',
+      cancelReason: 'payment_expired',
+    });
+    const { db } = createDbStub([byClient, bySalon, byPayment]);
+
+    const items = (await listAdminAppointments(db, DATE)).items;
+
+    expect(items.map((item) => item.cancelReason)).toEqual([
+      'cancelled_by_client',
+      `${SALON_CANCEL_REASON_PREFIX}: мастер заболел`,
+      'payment_expired',
+    ]);
   });
 });
 
@@ -380,6 +408,8 @@ describe('cancelAdminAppointment: причина салона и письма', 
 
     expect(appointment.status).toBe('cancelled');
     expect(record.cancelReason).toBe(`${SALON_CANCEL_REASON_PREFIX}: мастер заболел`);
+    // DTO отдаёт причину: экран сотрудника показывает, что отменил салон и почему.
+    expect(appointment.cancelReason).toBe(`${SALON_CANCEL_REASON_PREFIX}: мастер заболел`);
     // Салонная причина отличима от клиентской — по ней UI #243 понимает, кто отменил.
     expect(record.cancelReason).not.toBe('cancelled_by_client');
     expect(record.cancelReason?.startsWith('cancelled_by_salon: ')).toBe(true);
