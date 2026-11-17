@@ -1,8 +1,11 @@
 # Задание оркестратору: доработка плана и детерминированное ядро цикла (фаза 1)
 
-> ⚠️ **Временный документ.** Дословная копия `.pi/artifacts/2026-11-16-package/orchestrator-handoff.md`
-> (v1.2 от 2026-11-16). Живёт в репозитории, пока ядро цикла не реализовано: **удаляется после T9**
-> (тогда же правится строка «Реализация и декомпозиция» в [orchestrator.md](./orchestrator.md)).
+> **Описание реализации.** Замысел, дизайн ядра и Приложения A–D (форматы артефактов,
+> протокол супервизора, задачи T*). Политика и требования к поведению — в
+> [orchestrator.md](./orchestrator.md): при противоречии в политике действует он, в деталях
+> реализации — этот файл. Исходная версия — дословная копия
+> `.pi/artifacts/2026-11-16-package/orchestrator-handoff.md` (v1.2 от 2026-11-16); после T9
+> документ живой и правится вместе с кодом (#219).
 
 Версия: 1.2 · Дата: 2026-11-16 · Адресат: супервизор pi проекта hair-lab и его субагенты
 Сверено со свежим снимком репозитория (297 файлов); что изменилось по сравнению с v1.0 — §10;
@@ -124,6 +127,9 @@ escalate --reason R [--detail T] [--dir D]   пишет escalation.json, ста�
 resume   [--dir D]                    печатает первый незавершённый этап
 lock [--dir D] [--slug S] | unlock [--dir D]  блокировка дерева, см. ниже
 ```
+
+`finish --detail T` и `escalate` (туда попадает причина эскалации) пишут `detail` в
+закрываемую запись `history[]`; поле необязательное, формат — Приложение A.
 
 **Каталог цикла (`--dir`).** Явный `--dir` — путь как есть. По умолчанию `init` собирает
 `<artifacts>/<date>-<issue>-<slug>`, а `get`/`advance`/`finish`/`apply-decision`/`escalate`/
@@ -406,14 +412,15 @@ git-сценарии — во временных репозиториях `git i
 
 - **Цель:** зафиксировать решение и нормативный документ в репозитории.
 - **Входит:** `docs/adr/0006-independent-evaluation.md` по `0000-template.md`;
-  `docs/orchestrator.md` (содержимое `orchestrator-spec.md` v0.2) и временный
-  `docs/orchestrator-core.md` (содержимое `orchestrator-handoff.md`; удаляется после T9), чтобы агенты читали его из репозитория; запись в `docs/decisions.md`
+  `docs/orchestrator.md` (содержимое `orchestrator-spec.md` v0.2) и `docs/orchestrator-core.md`
+  (содержимое `orchestrator-handoff.md`), чтобы агенты читали его из репозитория; запись в
+  `docs/decisions.md`
   (это индекс-таблица: добавить строку со ссылкой на ADR 0006; номера 0004 и 0005 заняты).
 - **Не входит:** любые скрипты и изменения `.pi/`.
 - **Готово, когда:**
   - ADR содержит контекст, решение (независимая оценка, детерминированное ядро, правило «любой из двух»), последствия и принятые компромиссы (общее семейство `plan`/`evaluate`);
   - `docs/orchestrator.md` совпадает со спекой v0.2 и содержит ссылку на ADR;
-  - `docs/orchestrator-core.md` совпадает с `orchestrator-handoff.md` v1.1 и помечен как временный;
+  - `docs/orchestrator-core.md` совпадает с `orchestrator-handoff.md` v1.1;
   - `pnpm format:check` проходит.
 
 ### T1a. Каркас: пути, ввод-вывод, git, конфигурация, тестовая обвязка · `size:m` · `prio:p2`
@@ -655,7 +662,7 @@ A1–A9 статически; запуск `node --test` и `gh` остаётс�
 | `retries`                     | `{ REVIEW, EVALUATE, evidence }`, целые ≥ 0                                                              |
 | `owner_approved`              | boolean                                                                                                  |
 | `models`                      | объект строк                                                                                             |
-| `history[]`                   | `{ stage, iteration, started_at, finished_at                                                             | null, status }` |
+| `history[]`                   | `{ stage, iteration, started_at, finished_at\|null, status, detail? }` — `detail` необязателен, см. ниже |
 | `escalation`                  | `null` или `{ reason, detail, draft_pr_allowed }`                                                        |
 | `applied_decision`            | `null` или `{ iteration, action, retry_stage\|null, digest }` — маркер применённого решения              |
 | `started_at`, `updated_at`    | ISO-8601                                                                                                 |
@@ -665,6 +672,12 @@ A1–A9 статически; запуск `node --test` и `gh` остаётс�
 зависит от порядка полей и артефакт остаётся побайтно воспроизводимым); совпадение всех
 четырёх полей — no-op. Валидатор `state` лишние поля игнорирует, поэтому старые `state.json`
 без этого поля остаются валидными.
+
+`history[].detail` — необязательное поле закрытой записи, пишется `cycle-state` в двух случаях:
+`finish --detail T` (человеческий текст, маскируется по §5.4, как свободный текст лога) и
+`escalate` (туда попадает причина эскалации из словаря D7). У открытой записи
+(`finished_at: null`) поля нет; валидатор `state` лишние поля игнорирует, поэтому старые
+артефакты без `detail` остаются валидными. Метрики на поле не опираются.
 
 **gates.\<n\>.json**: `iteration`, `base_sha`, `head`, `started_at`, `gates[]`:
 `{ id, cmd|null, required, status ∈ {pass, fail, skipped, not_run}, exit|null, duration_s, log|null, reason|null }`.
