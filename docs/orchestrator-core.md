@@ -93,6 +93,7 @@ scripts/
   check-harness.mjs
   lib/cycle/
     paths.mjs  io.mjs  validate.mjs  refs.mjs  git.mjs  redact.mjs  config.mjs
+    cost.mjs
     *.test.mjs                       # рядом с модулем
   fixtures/cycle/**                  # только .json и .md, отформатированные prettier
 ```
@@ -110,7 +111,7 @@ scripts/
 | `refs.mjs`     | `parseRef(str)` и `resolveRef(ref, ctx)`: `path:line`, `gate:<id>`, `qa:<id>`; запрещены абсолютные пути, `..`, `.pi/artifacts/`, `node_modules/`; файл существует, строка не больше числа строк; гейт есть в `gates.<n>.json`; шаг есть в `qa-web.json` |
 | `git.mjs`      | `baseSha()`, `intentToAddUntracked()`, `diffFromBase(base)`, `changedFiles(base)`, `addedLines(diff)`; все вызовы через `execFileSync('git', …)`                                                                                                         |
 | `redact.mjs`   | `redactLog(text)`, `redactQa(obj)`, `scanSecrets(addedLines)` (§5.4, §5.5)                                                                                                                                                                               |
-| `config.mjs`   | определения гейтов, пути-условия, лимиты (диф ≤ 2000 изменённых строк и ≤ 400 КБ), бюджетный порог цикла (`maxCycleCostRub`), стартовые тайм-ауты                                                                                                        |
+| `config.mjs`   | определения гейтов, пути-условия, лимиты (`maxDiffLines` 2000 / `maxDiffBytes` 400 КБ, `logMaxBytes` 5 МБ, `evidenceTailLines` 200, `defaultMaxIterations` 2, `maxCycleCostRub` 30 ₽), стартовые тайм-ауты                                               |
 | `cost.mjs`     | `normalizeUsage`, `priceUsage`, `priceKeyFor`, `readUsage`, `readPriceSnapshot`, `cycleCostRub`: расход и его стоимость по `usage.json` и `evals/prices.json` — одна формула и для `metrics.json`, и для бюджетного порога                               |
 
 ### 5.3 `cycle-state.mjs`
