@@ -23,6 +23,7 @@ import {
 import { catalogRoutes } from '../features/catalog';
 import { healthRoutes } from '../features/health';
 import { createYookassaClient, paymentsPlugin, type PaymentGateway } from '../features/payments';
+import { staffAuthRoutes } from '../features/staff-auth';
 import { authPlugin, createOriginAllowList } from '../shared/auth';
 import { env } from '../shared/config/env';
 import { dbPlugin, type Db } from '../shared/db';
@@ -146,6 +147,9 @@ export async function buildServer(options: BuildServerOptions = {}) {
   // `global: false`: лимиты задаются per-route в конфиге маршрута (см. auth.routes.ts).
   await app.register(rateLimit, { global: false });
   await app.register(authRoutes, { delivery: tokenDelivery });
+  // Вход сотрудника в админку: отдельная cookie (`hl_staff_session`) и свои сессии,
+  // клиентская авторизация остаётся как есть.
+  await app.register(staffAuthRoutes);
 
   return app;
 }

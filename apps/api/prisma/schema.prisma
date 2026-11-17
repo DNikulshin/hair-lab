@@ -180,6 +180,56 @@ model LoginToken {
   @@map("login_tokens")
 }
 
+/// Сотрудник салона: учётная запись для входа в админку (#240).
+/// `passwordHash` — argon2id в формате PHC (как у клиента: сырой пароль не хранится).
+/// `role` — enum в БД, а не строка: набор ролей фиксирован, опечатка не должна создавать
+/// несуществующую роль. Удаление не физическое: `isActive = false` сразу закрывает доступ
+/// (сессии при этом остаются, но `requireStaff` их не пропускает).
+model Staff {
+  id String @id @default(uuid()) @db.Uuid
+
+  email        String    @unique
+  passwordHash String    @map("password_hash")
+  role         StaffRole
+  isActive     Boolean   @default(true) @map("is_active")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  sessions StaffSession[]
+
+  @@map("staff")
+}
+
+/// Роль сотрудника. `admin` — полный доступ к админке, `manager` — операционная работа
+/// (матрица разрешений — отдельная задача, здесь только тип и проверка в `requireStaff`).
+enum StaffRole {
+  admin
+  manager
+
+  @@map("staff_role")
+}
+
+/// Сессия сотрудника: отдельная таблица и отдельная cookie (`hl_staff_session`), чтобы
+/// клиентская сессия не давала доступа к админке. В БД — только SHA-256 от токена.
+/// Срок фиксирован на входе (рабочий день) и при обращении не продлевается:
+/// `expires_at` = вход + idle TTL, `created_at` — начало сессии (абсолютный предел).
+model StaffSession {
+  id String @id @default(uuid()) @db.Uuid
+
+  tokenHash String @unique @map("token_hash")
+
+  staffId String @map("staff_id") @db.Uuid
+  staff   Staff  @relation(fields: [staffId], references: [id], onDelete: Cascade)
+
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  lastUsedAt DateTime @default(now()) @map("last_used_at") @db.Timestamptz(3)
+  expiresAt  DateTime @map("expires_at") @db.Timestamptz(3)
+
+  @@index([staffId])
+  @@map("staff_sessions")
+}
+
 /// Гостевая запись на услугу. Персональные данные клиента маскируются в логах.
 /// Непересечение слотов одного мастера обеспечивает EXCLUDE-констрейнт (см. миграцию).
 /// `clientId` заполняется, когда запись создана из-под сессии; гостевые записи остаются

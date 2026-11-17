@@ -50,14 +50,25 @@ ESLint-правила `no-restricted-imports` не умеют проверять
 - Production использует прямой путь nginx → API; web Route Handlers работают как dev-прокси и передают Cookie/Origin/Set-Cookie; cookie имеет Path=/ для SSR и запросов кабинета.
 - #35 (реализовано): вход по одноразовой ссылке и подтверждение почты. `login_tokens` (SHA-256 от токена, TTL 15 минут, single-use, новый запрос гасит прежние), `POST /auth/magic-link` (202, одинаковый ответ для любого адреса, rate limit 3/час на пару IP+хэш адреса) и `/auth/magic-link/consume` (200 + сессия в httpOnly cookie). Сырой токен живёт только в памяти процесса: в outbox уходят `email` и `loginTokenId`, письмо собирается при отправке. `emailVerifiedAt` заполняется при погашении ссылки, в той же транзакции — автопривязка гостевых записей по адресу (`appointments.client_id IS NULL AND lower(client_email) = lower(email)`). Парольный вход требует подтверждённого адреса.
 
+## Сотрудники и вход в админку (#240)
+
+- Сотрудник — отдельная учётная запись (`staff`), не клиент: своя таблица, свой enum роли `staff_role` (`admin`, `manager`), флаг `is_active` вместо удаления. Матрица разрешений по ролям — отдельная задача, здесь только тип и проверка в `requireStaff(roles?)`.
+- Пароль — `@node-rs/argon2` (argon2id, те же параметры, что у клиента): хранится только PHC-хеш. Неверный пароль, неизвестный email и деактивированный сотрудник дают одинаковый 401 `unauthorized`; на неизвестный email выполняется dummy-verify.
+- Сессия сотрудника — отдельная таблица `staff_sessions` и отдельная cookie `hl_staff_session` (те же атрибуты: HttpOnly, SameSite=Lax, Path=/, Secure в production). Клиентская `hl_session` доступа к staff-маршрутам не даёт и наоборот: cookie и сессии не пересекаются.
+- Срок сессии — рабочий день: 8 часов от входа, абсолютный предел 12 часов; при обращениях не продлевается (угнанная cookie не живёт дольше смены). `last_used_at` заполняется только при входе.
+- Вход: `POST /staff/auth/login` (rate limit 10/мин/IP, как у клиентского входа), `POST /staff/auth/logout`, `GET /staff/me`. CSRF — общий Origin-guard плагина аутентификации, отдельного кода не требуется.
+- Первый сотрудник создаётся CLI `pnpm create:staff --email … --role …`: пароль вводится с терминала без эха, `.env*` скрипт не читает (нужен экспортированный `DATABASE_URL`), сидов с реальными данными нет.
+- Миграция `add_staff_auth` — только expand (новые таблицы и enum); порядок отката, пока сотрудников нет, — `docs/migrations.md`.
+
 ## Схема БД: что зафиксировано
 
 Схема живёт в `apps/api/prisma/schema.prisma` и меняется только миграциями
-(`apps/api/prisma/migrations`, 7 версий на 2026-11-15): `ServiceCategory`, `Service`, `Master`,
+(`apps/api/prisma/migrations`, 8 версий на 2026-11-17): `ServiceCategory`, `Service`, `Master`,
 `MasterService`, `MasterWorkingHours`, `ScheduleException`, `Appointment`, `Client`, `Session`,
-`LoginToken`, `Payment`, `OutboxMessage`. Отдельной модели `Slot` нет: свободное время выводится
-из рабочих часов и исключений расписания, занятость — из `appointments.starts_at/ends_at`
-(непересечение слотов мастера держит EXCLUDE-констрейнт из миграции).
+`LoginToken`, `Staff`, `StaffSession`, `Payment`, `OutboxMessage`. Отдельной модели `Slot` нет:
+свободное время выводится из рабочих часов и исключений расписания, занятость — из
+`appointments.starts_at/ends_at` (непересечение слотов мастера держит EXCLUDE-констрейнт
+из миграции). Порядок изменения и отката миграций — `docs/migrations.md`.
 
 ## Вынос harness отложен до завершения проекта
 
