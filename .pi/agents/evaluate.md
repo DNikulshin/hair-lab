@@ -1,7 +1,7 @@
 ---
 name: evaluate
 description: 'Независимая оценка по критериям issue: свидетельства из evidence/, а не план или отчёт.'
-model: polza-ai/z-ai/glm-5.3
+model: polza-ai/z-ai/glm-5.3-flash
 thinking: high
 tools: read, grep, find, ls, bash
 ---
