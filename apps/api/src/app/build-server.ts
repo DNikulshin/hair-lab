@@ -21,11 +21,11 @@ import {
   type CreateBookingPaymentsOptions,
 } from '../features/bookings';
 import { catalogRoutes } from '../features/catalog';
-import { healthRoutes } from '../features/health/health.routes';
+import { healthRoutes } from '../features/health';
 import { createYookassaClient, paymentsPlugin, type PaymentGateway } from '../features/payments';
 import { authPlugin, createOriginAllowList } from '../shared/auth';
 import { env } from '../shared/config/env';
-import { dbPlugin } from '../shared/db';
+import { dbPlugin, type Db } from '../shared/db';
 import {
   createPrismaOutboxStore,
   createSmtpTransport,
@@ -40,6 +40,11 @@ import { createLoggerOptions } from '../shared/logging/logger';
  * Всё, что не передано, берётся из окружения (`shared/config/env`).
  */
 export interface BuildServerOptions {
+  /**
+   * Клиент БД. Подменяется в тестах композиции, без сети; по умолчанию —
+   * клиент Prisma на `DATABASE_URL` из окружения.
+   */
+  db?: Db;
   payments?: {
     /** Включена ли оплата записи. По умолчанию — `PAYMENTS_MODE != 'off'`. */
     enabled?: boolean;
@@ -104,7 +109,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
     }),
   };
 
-  await app.register(dbPlugin, { databaseUrl: env.DATABASE_URL });
+  await app.register(dbPlugin, { databaseUrl: env.DATABASE_URL, client: options.db });
   // Аутентификация после БД: плагину нужен `app.db` для резолва сессии из cookie.
   await app.register(authPlugin, {
     secureCookies: env.NODE_ENV === 'production',

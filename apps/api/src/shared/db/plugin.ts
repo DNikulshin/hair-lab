@@ -11,15 +11,21 @@ declare module 'fastify' {
 
 export interface DbPluginOptions {
   databaseUrl: string;
+  /**
+   * Готовый клиент БД. Подменяется в тестах композиции, без сети: тогда соединение
+   * по `databaseUrl` не открывается. По умолчанию клиент создаётся из `databaseUrl`.
+   */
+  client?: Db;
 }
 
 /**
- * Плагин БД: создаёт единственный клиент на приложение и закрывает соединения
- * при остановке сервера (main.ts вызывает `app.close()` по SIGINT/SIGTERM).
- * `fastify-plugin` нужен, чтобы декоратор был виден в родительском контексте.
+ * Плагин БД: создаёт единственный клиент на приложение (или берёт переданный)
+ * и закрывает соединения при остановке сервера (main.ts вызывает `app.close()`
+ * по SIGINT/SIGTERM). `fastify-plugin` нужен, чтобы декоратор был виден
+ * в родительском контексте.
  */
 const dbPlugin: FastifyPluginAsync<DbPluginOptions> = async (app, options) => {
-  const db = createPrismaClient(options.databaseUrl);
+  const db = options.client ?? createPrismaClient(options.databaseUrl);
 
   app.decorate('db', db);
   app.addHook('onClose', async () => {
