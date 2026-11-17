@@ -81,13 +81,15 @@ interface AdminAppointmentRow {
   durationMin: number;
   clientName: string;
   clientPhone: string;
+  cancelReason: string | null;
   master: { fullName: string };
   service: { name: string };
 }
 
 /**
  * Выборка для DTO: имена мастера и услуги приходят в том же запросе (`select` с relation),
- * без N+1. Почта и причина отмены не читаются — для ответа они не нужны.
+ * без N+1. Почта не читается — для ответа она не нужна. Причина отмены нужна: по ней
+ * сотрудник видит, кто и почему отменил визит (клиент, салон или служебный код оплаты).
  */
 const adminAppointmentSelect = {
   id: true,
@@ -98,12 +100,10 @@ const adminAppointmentSelect = {
   durationMin: true,
   clientName: true,
   clientPhone: true,
+  cancelReason: true,
   master: { select: { fullName: true } },
   service: { select: { name: true } },
 } as const;
-
-/** Классификация отказа: те же поля плюс причина, чтобы отличить нашу отмену от клиентской. */
-const classifiedSelect = { ...adminAppointmentSelect, cancelReason: true } as const;
 
 /** Снимок отмены для письма: те же поля плюс почта клиента. */
 const cancellationSnapshotSelect = { ...adminAppointmentSelect, clientEmail: true } as const;
@@ -121,6 +121,7 @@ function toAdminAppointment(row: AdminAppointmentRow): AdminAppointment {
     masterName: row.master.fullName,
     clientName: row.clientName,
     clientPhone: row.clientPhone,
+    cancelReason: row.cancelReason,
   };
 }
 
@@ -220,9 +221,10 @@ async function transition(
     }
 
     // Строка не обновилась: объясняем причину по актуальному состоянию записи.
+    // Выборка та же, что для DTO: причина отмены в ней уже есть.
     const existing = await tx.appointment.findFirst({
       where: { id },
-      select: classifiedSelect,
+      select: adminAppointmentSelect,
     });
 
     if (existing === null) throw new AdminAppointmentNotFoundError();

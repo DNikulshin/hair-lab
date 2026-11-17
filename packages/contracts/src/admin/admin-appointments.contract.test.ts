@@ -19,6 +19,7 @@ const appointment = {
   masterName: 'Тестовый Мастер',
   clientName: 'Тестовая Клиентка',
   clientPhone: '+70000000001',
+  cancelReason: null,
 } as const;
 
 describe('adminAppointmentSchema', () => {
@@ -26,6 +27,7 @@ describe('adminAppointmentSchema', () => {
     const parsed = adminAppointmentSchema.parse(appointment);
 
     expect(Object.keys(parsed).sort()).toEqual([
+      'cancelReason',
       'clientName',
       'clientPhone',
       'durationMin',
@@ -41,16 +43,30 @@ describe('adminAppointmentSchema', () => {
     expect(parsed.clientPhone).toBe('+70000000001');
   });
 
+  it('отдаёт причину отмены — салонную и клиентскую — и null без отмены', () => {
+    expect(adminAppointmentSchema.parse(appointment).cancelReason).toBeNull();
+    expect(
+      adminAppointmentSchema.parse({ ...appointment, cancelReason: 'cancelled_by_client' })
+        .cancelReason,
+    ).toBe('cancelled_by_client');
+    expect(
+      adminAppointmentSchema.parse({
+        ...appointment,
+        status: 'cancelled',
+        cancelReason: 'cancelled_by_salon: мастер заболел',
+      }).cancelReason,
+    ).toBe('cancelled_by_salon: мастер заболел');
+  });
+
   it('не отдаёт служебные поля, даже если они пришли в объекте', () => {
     const parsed = adminAppointmentSchema.parse({
       ...appointment,
       clientEmail: 'guest@example.invalid',
-      cancelReason: 'cancelled_by_salon: тест',
       paymentDeadlineAt: '2030-06-15T06:30:00.000Z',
     });
 
+    // Почта клиента экрану админки не нужна: в списке дня её нет.
     expect(Object.keys(parsed)).not.toContain('clientEmail');
-    expect(Object.keys(parsed)).not.toContain('cancelReason');
     expect(Object.keys(parsed)).not.toContain('paymentDeadlineAt');
   });
 
@@ -70,6 +86,18 @@ describe('adminAppointmentSchema', () => {
     expect(adminAppointmentSchema.safeParse({ ...appointment, clientPhone: '' }).success).toBe(
       false,
     );
+  });
+
+  it('принимает ответ без cancelReason: так отвечала прежняя версия API', () => {
+    const { cancelReason: _omitted, ...withoutReason } = appointment;
+    const parsed = adminAppointmentSchema.safeParse(withoutReason);
+
+    // Поле необязательное: новый клиент обязан разобрать ответ старого API,
+    // иначе экран покажет «сервис недоступен» вместо списка дня.
+    expect(parsed.success).toBe(true);
+    if (!parsed.success) return;
+    expect(parsed.data.cancelReason).toBeUndefined();
+    expect(Object.keys(parsed.data)).not.toContain('cancelReason');
   });
 });
 
@@ -93,6 +121,14 @@ describe('adminAppointmentsResponseSchema', () => {
 
     expect(parsed.items).toHaveLength(1);
     expect(adminAppointmentsResponseSchema.safeParse({ items: {} }).success).toBe(false);
+  });
+
+  it('принимает список дня от API прежней версии (без cancelReason)', () => {
+    const { cancelReason: _omitted, ...withoutReason } = appointment;
+
+    expect(adminAppointmentsResponseSchema.safeParse({ items: [withoutReason] }).success).toBe(
+      true,
+    );
   });
 });
 

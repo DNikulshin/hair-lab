@@ -31,6 +31,9 @@ describe('classify: приватный HTML', () => {
     '/account',
     '/account/',
     '/account/bookings/42',
+    '/admin',
+    '/admin/',
+    '/admin/appointments/42',
     '/login',
     '/login/magic',
     '/login/magic/',
@@ -45,6 +48,9 @@ describe('classify: приватный HTML', () => {
     expect(classify(url('/registration'), '')).toBe('other');
     expect(classify(url('/accounts'), '')).toBe('other');
     expect(classify(url('/login-help'), '')).toBe('other');
+    // Админка приватна, а похожие пути — обычная навигация.
+    expect(classify(url('/administrator'), '')).toBe('other');
+    expect(classify(url('/admin-help'), '')).toBe('other');
     // Страница оплаты приватна, а сам визард записи — публичная навигация.
     expect(classify(url('/book'), '')).toBe('other');
     expect(classify(url('/booking'), '')).toBe('other');
@@ -86,6 +92,7 @@ describe('classify: база приложения', () => {
   it('база отрезается перед разбором пути', () => {
     expect(classify(url(`${base}/api/slots`), base)).toBe('api');
     expect(classify(url(`${base}/account`), base)).toBe('private-html');
+    expect(classify(url(`${base}/admin`), base)).toBe('private-html');
     expect(classify(url(`${base}/booking/payment`), base)).toBe('private-html');
     expect(classify(url(`${base}/_next/static/chunks/a.js`), base)).toBe('next-static');
     expect(classify(url(`${base}/icons/icon-512.png`), base)).toBe('asset');
