@@ -170,6 +170,30 @@ export function normalizeUsage(usage) {
 }
 
 /**
+ * Ключ модели в снапшоте цен.
+ *
+ * `state.models` хранит идентификатор с префиксом провайдера (`polza-ai/z-ai/glm-5.3` —
+ * этого требует H4), а `evals/prices.json` — без него. Точное совпадение проверяется
+ * первым, чтобы не зависеть от формы записи; затем пробуется вариант без первого сегмента.
+ * `null` — модели нет в снапшоте, считать не по чему.
+ * @param {string} model как записано в `state.models`
+ * @param {Record<string, unknown>} prices снапшот цен
+ * @returns {string|null}
+ */
+export function priceKeyFor(model, prices) {
+  if (typeof model !== 'string' || model === '') return null;
+  if (Object.hasOwn(prices, model)) return model;
+
+  const slash = model.indexOf('/');
+  if (slash > 0) {
+    const withoutProvider = model.slice(slash + 1);
+    if (Object.hasOwn(prices, withoutProvider)) return withoutProvider;
+  }
+
+  return null;
+}
+
+/**
  * Стоимость расхода по ценам и моделям этапов.
  * @param {Record<string, Record<string, number>>} tokens нормализованный расход
  * @param {Record<string, unknown>} models `state.models`
@@ -183,12 +207,11 @@ export function priceUsage(tokens, models, prices) {
 
   let total = 0;
   for (const stage of stages) {
-    const model = models[stage];
-    if (typeof model !== 'string' || model === '') return null;
-    if (!Object.hasOwn(prices, model)) return null;
+    const key = priceKeyFor(models[stage], prices);
+    if (key === null) return null;
 
     const entry = tokens[stage];
-    const priced = priceStage({ prices }, model, {
+    const priced = priceStage({ prices }, key, {
       calls_per_run: 0,
       input: entry.input,
       cache_read: entry.cache_read,

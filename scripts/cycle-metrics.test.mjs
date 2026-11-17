@@ -13,6 +13,7 @@ import {
   matchFindings,
   normalizeUsage,
   parseArgs,
+  priceKeyFor,
   priceUsage,
   resolveCycleDir,
 } from './cycle-metrics.mjs';
@@ -648,6 +649,24 @@ describe('normalizeUsage', () => {
   });
 });
 
+describe('priceKeyFor', () => {
+  const prices = { 'z-ai/glm-5.3': { input: 1, output: 2, cache_read: 3, cache_write: 0 } };
+
+  test('находит модель с префиксом провайдера: в state.models он есть, в prices нет', () => {
+    assert.equal(priceKeyFor('polza-ai/z-ai/glm-5.3', prices), 'z-ai/glm-5.3');
+  });
+
+  test('точное совпадение проверяется первым', () => {
+    assert.equal(priceKeyFor('z-ai/glm-5.3', prices), 'z-ai/glm-5.3');
+  });
+
+  test('неизвестная модель и мусор дают null', () => {
+    assert.equal(priceKeyFor('polza-ai/nope/nope', prices), null);
+    assert.equal(priceKeyFor('', prices), null);
+    assert.equal(priceKeyFor(null, prices), null);
+  });
+});
+
 describe('priceUsage', () => {
   /** Снапшот цен: 10 ₽ за 1M входа, 100 ₽ за 1M вывода, 1 ₽ за 1M чтения кэша. */
   const prices = {
@@ -662,6 +681,13 @@ describe('priceUsage', () => {
     };
     // 10 ₽ за вход плана + 1 ₽ за кэш кода.
     assert.equal(priceUsage(tokens, models, prices), 11);
+  });
+
+  test('модель с префиксом провайдера в state.models считается по ценам без префикса', () => {
+    const tokens = {
+      plan: { runs: 1, input: 1_000_000, cache_read: 0, cache_write: 0, output: 0, reasoning: 0 },
+    };
+    assert.equal(priceUsage(tokens, { plan: 'polza-ai/m/a' }, prices), 10);
   });
 
   test('нет замера, нет модели или нет цен — null, а не ноль', () => {
