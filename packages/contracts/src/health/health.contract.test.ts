@@ -11,6 +11,15 @@ describe('healthResponseSchema', () => {
     expect(parsed.status).toBe('ok');
   });
 
+  it('принимает `degraded`: тело 503 при недоступной БД остаётся по контракту', () => {
+    const parsed = healthResponseSchema.parse({
+      status: 'degraded',
+      version: '0.1.0',
+      checkedAt: new Date().toISOString(),
+    });
+    expect(parsed.status).toBe('degraded');
+  });
+
   it('отклоняет неизвестный статус и время без зоны', () => {
     expect(() =>
       healthResponseSchema.parse({ status: 'down', version: '0.1.0', checkedAt: '2026-01-01' }),
