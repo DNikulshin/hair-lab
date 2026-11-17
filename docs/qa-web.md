@@ -50,7 +50,7 @@ for p in 3003 3001; do kill "$(ss -tlnpH "sport = :$p" | grep -o 'pid=[0-9]*' | 
 - **Скриншоты владельцу — картинкой в чат**: `chrome-devtools` MCP `take_screenshot` **без
   `filePath`** возвращает image-content, и Pi Web рисует его в транскрипте (вложения `read` так
   не отображаются). С `filePath` тот же тул пишет PNG на диск и в чат ничего не отправляет.
-- Для этой же цели есть `publish_preview` / `/share` (см. скилл `design-preview`) — ссылка
+- Для этой же цели есть `publish_preview` / `/preview` (см. скилл `design-preview`) — ссылка
   `https://pi.dnikulshin.ru:8443/preview/<slug>/` для другого устройства.
 - Если MCP недоступен — в отчёте пишем «браузерная проверка не выполнена» с причиной,
   а не «проверено».

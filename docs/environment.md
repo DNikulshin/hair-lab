@@ -95,6 +95,44 @@ NEXT_ALLOWED_DEV_ORIGINS=code.dnikulshin.ru
 `NEXT_ALLOWED_DEV_ORIGINS` нужен потому, что Next блокирует кросс-доменные dev-запросы
 к `/_next/*`. В проде и в Docker эти переменные не задаются.
 
+## Веб-поиск агента (локальный SearXNG)
+
+`web_search` в pi работает без ключа и без внешних аккаунтов: запросы идут в локальный SearXNG,
+поднятый контейнером `searxng/searxng:latest` на `127.0.0.1:8888` (`restart: unless-stopped`).
+Конфиг инстанса — `~/searxng/settings.yml` (`use_default_settings`, JSON API включён, `limiter` и
+`public_instance` выключены), поэтому наружу он не смотрит и от прокси не зависит.
+
+Настройки инструмента — `~/.pi/agent/web-search.json`:
+
+```json
+{
+  "searxngBaseUrl": "http://127.0.0.1:8888",
+  "searchRouting": {
+    "providers": ["searxng", "duckduckgo"],
+    "fallbackOn": ["network", "transient", "quota", "invalid-response", "empty", "unsupported"],
+    "timeoutMs": 25000
+  }
+}
+```
+
+`searchRouting` — это последовательный резерв: сначала `searxng`, и только если он вернул сетевую,
+транзиентную или пустую ошибку — `duckduckgo` (бесплатный, без ключа). Провайдеры вроде `degoog`
+не годятся: публичный инстанс отвечает десятки секунд и обрывает JSON.
+
+Проверка и перезапуск:
+
+```bash
+curl -s 'http://127.0.0.1:8888/search?q=test&format=json' | head -c 200   # должен отдать JSON
+docker ps --filter name=searxng                                            # контейнер жив?
+docker restart searxng                                                     # если нет
+```
+
+Docker здесь из snap (`/snap/bin/docker`). Из обычного терминала это работает; из pi
+(юнит systemd с `NoNewPrivileges=true`) `snap`-команды падают с `snap-confine is packaged
+without necessary permissions` — перезапуск контейнера делать в своём терминале.
+
+После правки `web-search.json` нужен `/reload` в pi: конфиг читается один раз на процесс.
+
 ## Проверки
 
 Порядок: `contracts build` → `typecheck` → `lint` + `check:arch` → тесты.
