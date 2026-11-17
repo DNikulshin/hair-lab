@@ -84,7 +84,11 @@ export type CreateBooking = z.infer<typeof createBookingSchema>;
  * Поля только аддитивные: старые клиенты `payment` игнорируют, при `PAYMENTS_MODE=off` его нет.
  */
 export const bookingPaymentSchema = z.object({
-  confirmationUrl: z.url(),
+  /**
+   * Ссылка на страницу оплаты. Только `https`: значение попадает в `href` на web,
+   * а `z.url()` без ограничения схемы пропускает `javascript:` и `data:`.
+   */
+  confirmationUrl: z.url({ protocol: /^https$/ }),
   expiresAt: isoDateTimeSchema,
 });
 export type BookingPayment = z.infer<typeof bookingPaymentSchema>;
