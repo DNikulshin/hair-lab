@@ -26,7 +26,7 @@ description: Быстрый цикл макетов и визуальной оц
    `https://pi.dnikulshin.ru:8443/preview/<slug>/`: снаружи проброшен **8443 → внутренний 443**
    (`docs/deploy.md`, `docs/staging.md`), поэтому ссылка без `:8443` не откроется; nginx
    слушает только 443, auth/TLS наследуются от server-блока pi. Публикация:
-   тул `publish_preview` / команда `/share`, разовая настройка
+   тул `publish_preview` / команда `/preview`, разовая настройка
    `sudo ~/.pi/agent/bin/preview-nginx-setup.sh`. Внутри хоста проверять так:
    `curl -sk --resolve pi.dnikulshin.ru:443:127.0.0.1 https://pi.dnikulshin.ru/preview/`
    (ожидается 401 — auth), а не через публичный IP: hairpin-NAT на роутере не работает.
