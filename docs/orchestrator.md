@@ -427,8 +427,14 @@ EVALUATE. Повторные проверки ограничены: ревью �
 
 `scripts/cycle-report.mjs` сводит метрики по циклам: расход, число итераций, процент
 блокеров, найденных только оценщиком. Эти данные нужны для решения в §15: оставлять ли этап.
-**Скрипт не реализован** (фаза 1 закрыта без него, см. §17): сводка собирается вручную по
-`metrics.json`; задача — #224.
+
+```
+node scripts/cycle-report.mjs [--dir <каталог артефактов>] [--json]
+```
+
+Отчёт — markdown-таблица в stdout: циклы, расход (сумма и медиана по фактическим замерам),
+итерации, длительность, вклад этапов, дефекты оценщика, суммы исходов гейтов. Только факты,
+без сравнения с порогами; файлов не пишет.
 
 ## 12. Проверка конфигурации (`scripts/check-harness.mjs`, `pnpm check:harness`)
 
@@ -511,19 +517,20 @@ EVALUATE. Повторные проверки ограничены: ревью �
 `evals/orchestrator/seeds/*.json`, `scripts/evals-pack.mjs` (каталог прогона),
 `scripts/evals-collect.mjs` (ответ и токены из транскрипта), `scripts/evals-score.mjs`
 (полнота, ложные блокировки, стоимость) и `scripts/evals-cost.mjs` (₽ за прогон
-стадии и цикл по каталогу цен и профилю токенов).
+стадии и цикл по каталогу цен и профилю токенов). Факты по боевым циклам для решения
+«оставлять ли `evaluate`» даёт `scripts/cycle-report.mjs` (§11): вклад этапов и дефекты
+оценщика по `metrics.json` без ручной сборки.
 
 ## 16. Изменения в репозитории
 
 **Новые файлы:** `docs/orchestrator.md`, `docs/adr/0006-independent-evaluation.md`,
 `.pi/agents/evaluate.md`, `scripts/cycle-gates.mjs`, `scripts/cycle-evidence.mjs`,
-`scripts/cycle-decide.mjs`, `scripts/cycle-metrics.mjs`,
+`scripts/cycle-decide.mjs`, `scripts/cycle-metrics.mjs`, `scripts/cycle-report.mjs`,
 `scripts/check-harness.mjs`, общий модуль схем и валидаторов, `evals/orchestrator/*`.
-`scripts/cycle-report.mjs` из первоначального плана **не создан** — вне фазы 1 (#224).
 
 **Изменяемые:** `.pi/agents/review.md` (JSON-блок, поля scope), `.pi/prompts/cycle.md`
 (автомат, `resume`, правила супервизора), `AGENTS.md` (короткая ссылка на спеку, без названий
-моделей), `package.json` (скрипты `check:harness`, `cycle:*`), `.github/workflows/ci.yml`
+моделей), `package.json` (скрипт `check:harness`), `.github/workflows/ci.yml`
 (шаг `check:harness`), `.github/PULL_REQUEST_TEMPLATE.md` (раздел «Независимая оценка»),
 `docs/workflow.md` (Definition of Done: оценка и гейты).
 
