@@ -128,6 +128,9 @@ resume   [--dir D]                    печатает первый незаве
 lock [--dir D] [--slug S] | unlock [--dir D]  блокировка дерева, см. ниже
 ```
 
+`finish --detail T` и `escalate` (туда попадает причина эскалации) пишут `detail` в
+закрываемую запись `history[]`; поле необязательное, формат — Приложение A.
+
 **Каталог цикла (`--dir`).** Явный `--dir` — путь как есть. По умолчанию `init` собирает
 `<artifacts>/<date>-<issue>-<slug>`, а `get`/`advance`/`finish`/`apply-decision`/`escalate`/
 `resume` берут единственный активный цикл (`findActiveCycle`): подкаталог со `state.json`,
@@ -659,7 +662,7 @@ A1–A9 статически; запуск `node --test` и `gh` остаётс�
 | `retries`                     | `{ REVIEW, EVALUATE, evidence }`, целые ≥ 0                                                              |
 | `owner_approved`              | boolean                                                                                                  |
 | `models`                      | объект строк                                                                                             |
-| `history[]`                   | `{ stage, iteration, started_at, finished_at                                                             | null, status }` |
+| `history[]`                   | `{ stage, iteration, started_at, finished_at\|null, status, detail? }` — `detail` необязателен, см. ниже |
 | `escalation`                  | `null` или `{ reason, detail, draft_pr_allowed }`                                                        |
 | `applied_decision`            | `null` или `{ iteration, action, retry_stage\|null, digest }` — маркер применённого решения              |
 | `started_at`, `updated_at`    | ISO-8601                                                                                                 |
@@ -669,6 +672,12 @@ A1–A9 статически; запуск `node --test` и `gh` остаётс�
 зависит от порядка полей и артефакт остаётся побайтно воспроизводимым); совпадение всех
 четырёх полей — no-op. Валидатор `state` лишние поля игнорирует, поэтому старые `state.json`
 без этого поля остаются валидными.
+
+`history[].detail` — необязательное поле закрытой записи, пишется `cycle-state` в двух случаях:
+`finish --detail T` (человеческий текст, маскируется по §5.4, как свободный текст лога) и
+`escalate` (туда попадает причина эскалации из словаря D7). У открытой записи
+(`finished_at: null`) поля нет; валидатор `state` лишние поля игнорирует, поэтому старые
+артефакты без `detail` остаются валидными. Метрики на поле не опираются.
 
 **gates.\<n\>.json**: `iteration`, `base_sha`, `head`, `started_at`, `gates[]`:
 `{ id, cmd|null, required, status ∈ {pass, fail, skipped, not_run}, exit|null, duration_s, log|null, reason|null }`.
