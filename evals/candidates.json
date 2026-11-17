@@ -4,13 +4,13 @@
     "unit": "идентификатор модели polza-ai без префикса провайдера"
   },
   "candidates": {
-    "evaluate-flash": {
-      "note": "дешёвая оценка в том же семействе, что и план (R2 уже принял общее семейство)",
-      "evaluate": "z-ai/glm-5.3-flash"
-    },
     "evaluate-minimax": {
       "note": "дешёвая оценка в отдельном семействе: снимает общее семейство plan/evaluate",
       "evaluate": "minimax/minimax-m3.1-flash"
+    },
+    "evaluate-glm53": {
+      "note": "откат на дорогую оценку: если flash пропустит блокер там, где glm-5.3 его находил",
+      "evaluate": "z-ai/glm-5.3"
     },
     "plan-flash": {
       "note": "дешёвое планирование в том же семействе",
@@ -19,11 +19,6 @@
     "plan-luna": {
       "note": "планирование на модели ревьюера: дешевле всех, но plan и review в одном семействе",
       "plan": "openai/gpt-6-luna-pro"
-    },
-    "plan-evaluate-flash": {
-      "note": "оба дорогих этапа на дешёвой модели того же семейства",
-      "evaluate": "z-ai/glm-5.3-flash",
-      "plan": "z-ai/glm-5.3-flash"
     },
     "code-mimo": {
       "note": "самое дешёвое чтение кэша среди сильных кодирующих моделей",
