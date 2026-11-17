@@ -1,0 +1,28 @@
+{
+  "id": "E6",
+  "title": "Несовместимое изменение контракта: удалено поле",
+  "why": "Удаление поля из схемы ломает старые клиенты (кэш PWA живёт неделями). AGENTS.md: изменения только обратно совместимые, депрекация вместо удаления. Ожидается BLOCKER.",
+  "expect": {
+    "kind": "defect",
+    "severity": "BLOCKER",
+    "file": "packages/contracts/src/booking.ts",
+    "line": 8
+  },
+  "issue": {
+    "title": "contracts: упростить BookingCreateInput",
+    "body": "В `BookingCreateInput` поле `clientPhone` дублирует `clientContact`.\n\nУбери лишнее поле, чтобы клиенты не передавали данные дважды."
+  },
+  "criteria": [
+    "`BookingCreateInput` не содержит лишних полей",
+    "web и api используют обновлённую схему",
+    "существующие записи не ломаются"
+  ],
+  "base": {
+    "packages/contracts/src/booking.ts": "import { z } from 'zod';\n\nexport const bookingCreateSchema = z.object({\n  serviceId: z.string().uuid(),\n  masterId: z.string().uuid(),\n  startsAt: z.string().datetime(),\n  clientName: z.string().min(1).max(100),\n  clientPhone: z.string().min(5).max(32),\n  clientContact: z.string().min(5).max(64),\n  idempotencyKey: z.string().uuid(),\n});\n\nexport type BookingCreateInput = z.infer<typeof bookingCreateSchema>;\n",
+    "packages/contracts/src/index.ts": "export * from './booking.js';\n"
+  },
+  "after": {
+    "packages/contracts/src/booking.ts": "import { z } from 'zod';\n\nexport const bookingCreateSchema = z.object({\n  serviceId: z.string().uuid(),\n  masterId: z.string().uuid(),\n  startsAt: z.string().datetime(),\n  clientName: z.string().min(1).max(100),\n  clientContact: z.string().min(5).max(64),\n  idempotencyKey: z.string().uuid(),\n});\n\nexport type BookingCreateInput = z.infer<typeof bookingCreateSchema>;\n",
+    "packages/contracts/src/index.ts": "export * from './booking.js';\n"
+  }
+}

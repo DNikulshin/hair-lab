@@ -1,0 +1,23 @@
+{
+  "id": "E10",
+  "title": "Контроль: чистая правка /health с проверкой БД",
+  "why": "Эталон чистого диффа: этапы не должны находить блокеров, иначе они блокируют нормальную работу. По §15 допускается не более 1 ложной блокировки из 5 прогонов.",
+  "expect": {
+    "kind": "clean"
+  },
+  "issue": {
+    "title": "api: /health проверяет доступность БД",
+    "body": "Сейчас `/health` всегда отвечает `200 {\"status\":\"ok\"}`, даже если база недоступна: мониторинг не видит отказа.\n\nНужно, чтобы при недоступной БД ручка отвечала `503` и `{\"status\":\"degraded\"}` и писала ошибку в лог без персональных данных."
+  },
+  "criteria": [
+    "`GET /health` при доступной БД отвечает 200 и `{\"status\":\"ok\"}`",
+    "`GET /health` при недоступной БД отвечает 503 и `{\"status\":\"degraded\"}`",
+    "ошибка пишется в лог, персональные данные не логируются"
+  ],
+  "base": {
+    "apps/api/src/features/health/health-route.ts": "import type { FastifyPluginAsync } from 'fastify';\n\nexport const healthRoute: FastifyPluginAsync = async (app) => {\n  app.get('/health', async () => ({ status: 'ok' }));\n};\n"
+  },
+  "after": {
+    "apps/api/src/features/health/health-route.ts": "import type { FastifyPluginAsync } from 'fastify';\n\nexport const healthRoute: FastifyPluginAsync = async (app) => {\n  app.get('/health', async (request, reply) => {\n    try {\n      await app.db.$queryRaw`SELECT 1`;\n    } catch (error) {\n      request.log.error({ err: error }, 'health: база недоступна');\n      return reply.code(503).send({ status: 'degraded' });\n    }\n\n    return { status: 'ok' };\n  });\n};\n"
+  }
+}

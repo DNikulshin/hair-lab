@@ -1,0 +1,165 @@
+{
+  "_meta": {
+    "currency": "RUB",
+    "fetched_at": "2026-11-17",
+    "note": "Снапшот каталога: только модели, которые встречаются в конфигурациях и экспериментах. Обновляется вручную, см. docs/evals.md.",
+    "source": "https://polza.ai/api/v1/models",
+    "unit": "за 1M токенов"
+  },
+  "models": {
+    "anthropic/claude-haiku-5.5": {
+      "cache_read": 1.213191,
+      "cache_write": 15.1648875,
+      "context": 1000000,
+      "input": 12.13191,
+      "output": 60.65955
+    },
+    "anthropic/claude-sonnet-5.5": {
+      "cache_read": 9.57331494,
+      "cache_write": 239.3328735,
+      "context": 1000000,
+      "input": 191.4662988,
+      "output": 957.331494
+    },
+    "deepseek/deepseek-v4-flash": {
+      "cache_read": 1.71134208,
+      "cache_write": 0,
+      "context": 1048576,
+      "input": 8.5567104,
+      "output": 17.1134208
+    },
+    "deepseek/deepseek-v4-pro": {
+      "cache_read": 29.7108,
+      "cache_write": 0,
+      "context": 1048576,
+      "input": 106.95888,
+      "output": 178.2648
+    },
+    "deepseek/deepseek-v4.1-flash": {
+      "cache_read": 0.39931315,
+      "cache_write": 0,
+      "context": 1048576,
+      "input": 13.3104384,
+      "output": 39.9313152
+    },
+    "deepseek/deepseek-v4.1-flash-1017": {
+      "cache_read": 0.8319024,
+      "cache_write": 0,
+      "context": 1048576,
+      "input": 4.753728,
+      "output": 8.319024
+    },
+    "google/gemini-2.5-flash-lite": {
+      "cache_read": 0.6065955,
+      "cache_write": 5.0549625,
+      "context": 1048576,
+      "input": 6.065955,
+      "output": 24.26382
+    },
+    "google/gemini-3.8-flash": {
+      "cache_read": 4.54946625,
+      "cache_write": 2.52748125,
+      "context": 1048576,
+      "input": 45.4946625,
+      "output": 227.4733125
+    },
+    "google/gemini-4-carbon": {
+      "cache_read": 5.94216,
+      "cache_write": 11.14155,
+      "context": 1048576,
+      "input": 118.8432,
+      "output": 594.216
+    },
+    "google/gemini-4-hydrogen": {
+      "cache_read": 4.45662,
+      "cache_write": 4.9518,
+      "context": 1048576,
+      "input": 89.1324,
+      "output": 445.662
+    },
+    "minimax/minimax-m3.1-flash": {
+      "cache_read": 0.891324,
+      "cache_write": 0,
+      "context": 1048576,
+      "input": 8.91324,
+      "output": 35.65296
+    },
+    "nex-agi/nex-n2.5-mini": {
+      "cache_read": 0.297108,
+      "cache_write": 0,
+      "context": 262144,
+      "input": 2.97108,
+      "output": 11.88432
+    },
+    "openai/gpt-6-luna": {
+      "cache_read": 0.6065955,
+      "cache_write": 7.58244375,
+      "context": 1050000,
+      "input": 6.065955,
+      "output": 30.329775
+    },
+    "openai/gpt-6-luna-pro": {
+      "cache_read": 0.6065955,
+      "cache_write": 7.58244375,
+      "context": 1050000,
+      "input": 6.065955,
+      "output": 30.329775
+    },
+    "openai/gpt-6-sol": {
+      "cache_read": 12.13191,
+      "cache_write": 151.648875,
+      "context": 1050000,
+      "input": 121.3191,
+      "output": 606.5955
+    },
+    "openai/gpt-6.1-sol": {
+      "cache_read": 6.065955,
+      "cache_write": 151.648875,
+      "context": 1050000,
+      "input": 121.3191,
+      "output": 606.5955
+    },
+    "xiaomi/mimo-v2.6-flash": {
+      "cache_read": 0.28522368,
+      "cache_write": 0,
+      "context": 1050000,
+      "input": 13.3104384,
+      "output": 26.6208768
+    },
+    "z-ai/glm-5-turbo": {
+      "cache_read": 28.522368,
+      "cache_write": 0,
+      "context": 202752,
+      "input": 142.61184,
+      "output": 475.3728
+    },
+    "z-ai/glm-5.2": {
+      "cache_read": 9.9828288,
+      "cache_write": 0,
+      "context": 1048576,
+      "input": 53.47944,
+      "output": 171.134208
+    },
+    "z-ai/glm-5.3": {
+      "cache_read": 8.18829648,
+      "cache_write": 0,
+      "context": 1048576,
+      "input": 8.30713968,
+      "output": 166.38048
+    },
+    "z-ai/glm-5.3-flash": {
+      "cache_read": 3.565296,
+      "cache_write": 0,
+      "context": 1048576,
+      "input": 4.74184368,
+      "output": 9.31730688
+    },
+    "z-ai/glm-5.3-prime": {
+      "cache_read": 39.9313152,
+      "cache_write": 0,
+      "context": 1000000,
+      "input": 199.656576,
+      "output": 627.492096
+    }
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "id": "E2",
+  "title": "DROP COLUMN в миграции без expand/contract",
+  "why": "Удаление колонки одной миграцией ломает старые версии клиентов и откат (AGENTS.md: схема меняется по expand/contract, применённые миграции не правятся). Ожидается BLOCKER.",
+  "expect": {
+    "kind": "defect",
+    "severity": "BLOCKER",
+    "file": "apps/api/prisma/migrations/20260117120000_drop_client_phone/migration.sql",
+    "line": 1
+  },
+  "issue": {
+    "title": "data: убрать неиспользуемое поле client_phone из Booking",
+    "body": "Поле `client_phone` в `Booking` больше не используется: телефон хранится в `Client`.\n\nУбери поле из схемы и БД."
+  },
+  "criteria": [
+    "поля `client_phone` нет в `Booking`",
+    "существующие данные телефонов сохранены в `Client`",
+    "старые версии клиентов продолжают работать"
+  ],
+  "base": {
+    "apps/api/prisma/schema.prisma": "model Booking {\n  id           String   @id @default(uuid())\n  clientPhone  String   @map(\"client_phone\")\n  startsAt     DateTime @map(\"starts_at\")\n  clientId     String   @map(\"client_id\")\n\n  @@map(\"Booking\")\n}\n",
+    "apps/api/prisma/migrations/20260101090000_init/migration.sql": "CREATE TABLE \"Booking\" (\n    \"id\" UUID NOT NULL,\n    \"client_phone\" TEXT NOT NULL,\n    \"starts_at\" TIMESTAMP(3) NOT NULL,\n    \"client_id\" TEXT NOT NULL,\n    CONSTRAINT \"Booking_pkey\" PRIMARY KEY (\"id\")\n);\n"
+  },
+  "after": {
+    "apps/api/prisma/schema.prisma": "model Booking {\n  id           String   @id @default(uuid())\n  startsAt     DateTime @map(\"starts_at\")\n  clientId     String   @map(\"client_id\")\n\n  @@map(\"Booking\")\n}\n",
+    "apps/api/prisma/migrations/20260117120000_drop_client_phone/migration.sql": "ALTER TABLE \"Booking\" DROP COLUMN \"client_phone\";\n"
+  }
+}
