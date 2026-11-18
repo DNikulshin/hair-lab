@@ -49,16 +49,21 @@
 Проверку, которую нельзя выполнить (нет БД, окружения), помечай «не проверено» и называй причину.
 Не заявляй «проверено» без фактического запуска.
 
-## Pre-commit
+## Pre-commit и pre-push
 
 Хук `.githooks/pre-commit` запускает `scripts/precommit.mjs` (`pnpm precommit`) по staged-файлам:
 prettier `--write`, eslint `--fix` (исправления возвращаются в индекс), `pnpm check:arch`, если тронуты
 `apps/*/src` или `packages/*/src`, `pnpm check:harness`, если тронут `.pi/**`, и `pnpm lint:workflows`
 (`actionlint`), если тронуты
-`.github/workflows/*.yml`. Полный `typecheck` и тесты остаются в CI: на каждый коммит это слишком
-медленно. Хук подключается автоматически на `pnpm install` (`prepare` → `git config core.hooksPath .githooks`);
-вручную — та же команда. Обход: `git commit --no-verify` (только осознанно). В CI хук не запускается —
-там свои шаги, включая `format:check`.
+`.github/workflows/*.yml`. Первым делом хук проверяет ветку: коммит в `main`/`master` отклоняется
+с подсказкой создать ветку по задаче (`scripts/lib/git-guard.mjs`) — правило «коммитить только
+в рабочую ветку» проверяется механизмом, а не памятью.
+Полный `typecheck` и тесты остаются в CI: на каждый коммит это слишком
+медленно. Хук `.githooks/pre-push` запускает `scripts/pre-push.mjs` и так же отклоняет
+push в `main`/`master` (включая `git push origin main:<что-то>` и удаление ветки).
+Хуки подключаются автоматически на `pnpm install` (`prepare` → `git config core.hooksPath .githooks`);
+вручную — та же команда. Обход — `git commit --no-verify` / `git push --no-verify` (только осознанно).
+В CI хуки не запускаются — там свои шаги, включая `format:check`.
 
 ## Архитектура (ED small)
 

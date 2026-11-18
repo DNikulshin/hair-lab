@@ -6,6 +6,8 @@
  * `git config core.hooksPath .githooks`). Вручную: `pnpm precommit`.
  *
  * Правила:
+ * - защищённая ветка (`main`/`master`) — отказ до запуска инструментов: работа идёт
+ *   в ветке по задаче, merge делает владелец через PR (`scripts/lib/git-guard.mjs`);
  * - смотрим только файлы из индекса (staged), удалённые не проверяем;
  * - prettier и eslint запускаются с `--write`/`--fix`, исправленные файлы возвращаются в индекс;
  * - `.prettierignore` и `ignores` из eslint-конфига действуют как обычно (сгенерированное не трогаем);
@@ -19,6 +21,8 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
+
+import { commitBlockReason, normalizeBranch } from './lib/git-guard.mjs';
 
 const PRETTIER_FILES = /\.(?:md|mdx|json|jsonc|ya?ml|ts|tsx|mts|cts|js|jsx|mjs|cjs|css)$/;
 const ESLINT_FILES = /\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs)$/;
@@ -54,6 +58,15 @@ function restage(files) {
 function main() {
   const root = git(['rev-parse', '--show-toplevel']).trim();
   process.chdir(root);
+
+  // Проверка ветки — первой: не тратим время на prettier/eslint ради коммита, который
+  // всё равно нельзя делать в `main` (#250, AGENTS.md).
+  const blocked = commitBlockReason(normalizeBranch(git(['rev-parse', '--abbrev-ref', 'HEAD'])));
+  if (blocked !== null) {
+    process.stderr.write(`${blocked}\n`);
+    process.exitCode = 1;
+    return;
+  }
 
   if (!existsSync(resolve(root, 'node_modules/.bin/prettier'))) {
     console.log(
