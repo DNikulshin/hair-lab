@@ -478,6 +478,70 @@ describe('createHoldsSweeper', () => {
     expect(confirmation?.obj).toEqual({ paymentId: 'payment-1', appointmentId: EXPIRED_ID });
   });
 
+  it('уже подтверждённая вебхуком оплата не считается сверкой: changed=false, счётчик 0', async () => {
+    const { db, state } = createFakeDb({
+      appointments: [
+        {
+          id: EXPIRED_ID,
+          status: 'pending',
+          cancelReason: null,
+          paymentDeadlineAt: EXPIRED_DEADLINE,
+        },
+      ],
+      payments: [
+        payment({
+          id: 'payment-1',
+          appointmentId: EXPIRED_ID,
+          yookassaPaymentId: YOOKASSA_PAYMENT_ID,
+        }),
+      ],
+    });
+    const { logger, entries } = createLogger();
+    const fake = createFakeGateway();
+    fake.paymentState = (id) => {
+      // Пока сверка ждёт ответа шлюза, уведомление успело подтвердить оплату:
+      // `applyPaymentSucceeded` увидит уже `succeeded` и вернёт `changed: false`.
+      const appointment = state.appointments[0];
+      if (appointment !== undefined) {
+        appointment.status = 'confirmed';
+        appointment.paymentDeadlineAt = null;
+      }
+      const row = state.payments[0];
+      if (row !== undefined) row.status = 'succeeded';
+      return gatewayPayment({ id, status: 'succeeded', paid: true });
+    };
+    const sweeper = createHoldsSweeper({
+      db,
+      gateway: fake.gateway,
+      intervalMs: 30_000,
+      logger,
+    });
+
+    const result = await sweeper.tick(NOW);
+
+    // Сверка была (сеть потрачена), но перехода не было: засчитывать его нельзя.
+    expect(result).toEqual({
+      expired: 0,
+      paymentsCanceled: 0,
+      reconciled: 1,
+      confirmed: 0,
+      refundsRetried: 0,
+      refundsCompleted: 0,
+    });
+    expect(fake.checks).toEqual([YOOKASSA_PAYMENT_ID]);
+    // В логе нет ни подтверждения сверкой, ни отмены.
+    expect(entries.some((entry) => entry.msg.includes('подтверждена сверкой'))).toBe(false);
+    expect(entries).toHaveLength(0);
+
+    // Состояние остаётся тем, которое записал вебхук: подтверждённая запись и `succeeded`.
+    const appointment = state.appointments.find((row) => row.id === EXPIRED_ID);
+    expect(appointment?.status).toBe('confirmed');
+    expect(appointment?.paymentDeadlineAt).toBeNull();
+    const paymentRow = state.payments.find((row) => row.id === 'payment-1');
+    expect(paymentRow?.status).toBe('succeeded');
+    expect(paymentRow?.refundRequired).toBe(false);
+  });
+
   it('ошибка шлюза не отменяет запись: она ждёт и уходит на следующий тик', async () => {
     const { db, state } = createFakeDb({
       appointments: [
@@ -832,6 +896,77 @@ describe('createHoldsSweeper', () => {
     expect(retriedFromDeferred.length).toBeGreaterThan(0);
     // Перепроверяются именно ранее отложенные записи, а не одни и те же головы выборки.
     expect(retriedFromDeferred.every((id) => firstChecks.includes(id))).toBe(true);
+  });
+
+  it('постоянно падающая сверка головы бэклога не скрывает хвост: последний холд сверяется', async () => {
+    // 2 × HOLDS_RECONCILE_LIMIT истёкших холдов: у всех, кроме последнего, сверка падает всегда.
+    // Окно выборки, ограниченное сверху `HOLDS_RECONCILE_LIMIT + MAX_DEFERRED_RECONCILES` (≤ 39),
+    // до хвоста не достаёт никогда: лимит сверки уходит на падающую голову.
+    const total = 2 * HOLDS_RECONCILE_LIMIT;
+    const healthyIndex = total - 1;
+    const appointments: AppointmentRow[] = [];
+    const payments: PaymentRow[] = [];
+    for (let index = 0; index < total; index += 1) {
+      const id = `appointment-${index}`;
+      appointments.push({
+        id,
+        status: 'pending',
+        cancelReason: null,
+        // Старшинство по дедлайну: последний холд — хвост бэклога.
+        paymentDeadlineAt: new Date(EXPIRED_DEADLINE.getTime() + index * 1000),
+      });
+      payments.push(
+        payment({
+          id: `payment-${index}`,
+          appointmentId: id,
+          yookassaPaymentId: `yookassa-${index}`,
+        }),
+      );
+    }
+    const { db, state } = createFakeDb({ appointments, payments });
+    const { logger } = createLogger();
+    const fake = createFakeGateway();
+    fake.paymentState = (id) =>
+      id === `yookassa-${healthyIndex}`
+        ? gatewayPayment({ id, status: 'pending' })
+        : new Error('ETIMEDOUT');
+    const sweeper = createHoldsSweeper({
+      db,
+      gateway: fake.gateway,
+      intervalMs: 30_000,
+      logger,
+    });
+
+    // Первый тик: сверка головы падает — ничего не отменено и ничего не подтверждено.
+    const first = await sweeper.tick(NOW);
+    expect(first).toMatchObject({ expired: 0, paymentsCanceled: 0, reconciled: 0, confirmed: 0 });
+    expect(fake.checks).toHaveLength(HOLDS_RECONCILE_LIMIT);
+    expect(fake.checks).not.toContain(`yookassa-${healthyIndex}`);
+
+    // Следующие тики: отложенная голова пропускается, хвост бэклога доходит до сверки.
+    let canceledTick = 0;
+    for (let tick = 2; tick <= 5 && canceledTick === 0; tick += 1) {
+      const before = fake.checks.length;
+      await sweeper.tick(NOW);
+      const perTick = fake.checks.slice(before);
+      // Сетевой бюджет тика тот же: не больше HOLDS_RECONCILE_LIMIT сверок.
+      expect(perTick.length, `тик ${tick}`).toBeLessThanOrEqual(HOLDS_RECONCILE_LIMIT);
+      if (
+        state.appointments.find((row) => row.id === `appointment-${healthyIndex}`)?.status ===
+        'cancelled'
+      ) {
+        canceledTick = tick;
+      }
+    }
+
+    expect(canceledTick).toBeGreaterThan(0);
+    // Хвост сверен и снят как обычный истёкший холд: запись cancelled, платёж canceled.
+    const tail = state.appointments.find((row) => row.id === `appointment-${healthyIndex}`);
+    expect(tail?.status).toBe('cancelled');
+    expect(tail?.cancelReason).toBe(PAYMENT_EXPIRED_REASON);
+    expect(state.payments.find((row) => row.id === `payment-${healthyIndex}`)?.status).toBe(
+      'canceled',
+    );
   });
 
   it('оплата пришла по уже отменённой записи: платёж succeeded и помечен обязательным к возврату', async () => {
