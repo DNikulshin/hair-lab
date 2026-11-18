@@ -67,6 +67,14 @@ export const GATES = Object.freeze([
     pathPrefixes: [],
   }),
   Object.freeze({
+    id: 'migrations_clean',
+    // Миграции применяются на пустой временной БД (#250); скрипт — `scripts/migrations-clean.mjs`.
+    cmd: 'pnpm migrations:clean',
+    required: true,
+    dependsOn: [],
+    pathPrefixes: ['apps/api/'],
+  }),
+  Object.freeze({
     id: 'test_int',
     cmd: 'pnpm test:int',
     required: true,
@@ -137,6 +145,7 @@ export const GATE_TIMEOUTS = Object.freeze({
   check_arch: 60_000,
   lint_workflows: 60_000,
   test: 300_000,
+  migrations_clean: 300_000,
   test_int: 900_000,
   test_scripts: 120_000,
   check_harness: 60_000,

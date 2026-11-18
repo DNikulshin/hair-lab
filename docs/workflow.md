@@ -112,9 +112,9 @@ gh project create --owner DNikulshin --title "hair-lab"
 - **гейты:** для задач, прошедших `/cycle`, PR не мержится, пока обязательные гейты
   в `gates.<n>.json` не зелёные: `contracts_build`, `typecheck`, `lint`, `check_arch`,
   `lint_workflows`, `test`, `test_scripts`, `check_harness`, `format_check`, `secrets_scan`,
-  а также `test_int`, если дифф затрагивает `apps/api/` или `packages/contracts/`.
-  `test_int` без БД — `not_run` с причиной `no_database`: это не провал, но и не проверка,
-  такие пункты идут в блок «не проверено»;
+  а также `migrations_clean` и `test_int`, если дифф затрагивает `apps/api/`.
+  `migrations_clean`/`test_int` без БД — `not_run` с причиной `no_database`: это не провал,
+  но и не проверка, такие пункты идут в блок «не проверено»;
 - **статусы гейтов:** `skipped` — условие не выполнено (например `lint_workflows` без правки
   workflow), он не считается непроверенным и не блокирует; `not_run` без `no_database` —
   непроверенный обязательный гейт и блокер для чистого `PROCEED`;

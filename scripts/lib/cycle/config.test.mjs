@@ -11,6 +11,7 @@ const EXPECTED_IDS = [
   'check_arch',
   'lint_workflows',
   'test',
+  'migrations_clean',
   'test_int',
   'test_scripts',
   'check_harness',
@@ -65,6 +66,7 @@ describe('GATES', () => {
       ]),
       [
         ['lint_workflows', ['.github/workflows/']],
+        ['migrations_clean', ['apps/api/']],
         ['test_int', ['apps/api/', 'packages/contracts/']],
         ['test_scripts', ['scripts/']],
         ['check_harness', ['.pi/', 'scripts/cycle-', 'AGENTS.md']],
