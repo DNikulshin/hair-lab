@@ -10,8 +10,11 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-hair_lab}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change_me}
       POSTGRES_DB: ${POSTGRES_DB:-hair_lab}
+    # Только loopback (issue #124): dev-БД поднимается с паролем из шаблона окружения,
+    # а Docker публикует порты в обход INPUT-цепочки ufw — с `0.0.0.0` база была бы
+    # доступна всей локальной сети. Как у api/web в docker-compose.prod.yml.
     ports:
-      - '${POSTGRES_PORT:-5432}:5432'
+      - '127.0.0.1:${POSTGRES_PORT:-5432}:5432'
     volumes:
       - db-data:/var/lib/postgresql/data
     healthcheck:

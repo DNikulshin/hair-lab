@@ -17,6 +17,10 @@ import { adminStatusLabel, formatAdminCancelReason, isActiveAdminStatus } from '
  * сообщает только то, что знает он: запрос в полёте (`busy`) и какое действие выполняется
  * именно в этой строке (`currentAction`) — по нему подпись кнопки меняется на «Отменяем…».
  *
+ * `canCancel` — матрица ролей админки (#252): отмена салоном доступна только роли `admin`.
+ * Правило обеспечивает API (403 `forbidden`), здесь — только удобство: менеджер не видит
+ * кнопку, которая всё равно не сработает.
+ *
  * Пока запрос в полёте, все кнопки строки disabled: второй клик не отправит второй запрос.
  *
  * ПДн: имя и телефон клиента — только текстом (ссылок `tel:` нет: номер не должен попадать
@@ -51,6 +55,8 @@ export interface AdminAppointmentRowProps {
   busy: boolean;
   /** Действие, выполняемое в этой строке, или `null`. */
   currentAction: AdminAction | null;
+  /** Отмена салоном доступна только роли `admin` (#252); менеджер кнопку не видит. */
+  canCancel: boolean;
   /** Выполнить действие. `true` — запись обновлена, форму отмены можно закрыть. */
   onAction: (action: AdminAction, reason?: string) => Promise<boolean>;
 }
@@ -60,6 +66,7 @@ export function AdminAppointmentRow({
   timeZone,
   busy,
   currentAction,
+  canCancel,
   onAction,
 }: AdminAppointmentRowProps) {
   const [cancelOpen, setCancelOpen] = useState(false);
@@ -169,9 +176,11 @@ export function AdminAppointmentRow({
         >
           {label('no-show')}
         </Button>
-        <Button type="button" size="sm" variant="ghost" disabled={busy} onClick={openCancel}>
-          Отменить
-        </Button>
+        {canCancel ? (
+          <Button type="button" size="sm" variant="ghost" disabled={busy} onClick={openCancel}>
+            Отменить
+          </Button>
+        ) : null}
       </div>
     );
   }

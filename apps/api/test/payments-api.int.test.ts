@@ -7,6 +7,7 @@ import {
   paymentStatusResponseSchema,
   slotsResponseSchema,
   type Slot,
+  type StaffRole,
 } from '@hair-lab/contracts';
 import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { buildServer } from '../src/app/build-server';
@@ -322,13 +323,18 @@ function staffHeaders(): Record<string, string> {
   return { 'x-forwarded-for': `10.3.1.${staffIpNumber}` };
 }
 
-/** Вход сотрудника по-настоящему, через маршрут: cookie и сессия в БД настоящие. */
-async function loginAsStaff(): Promise<string> {
+/**
+ * Вход сотрудника по-настоящему, через маршрут: cookie и сессия в БД настоящие.
+ *
+ * По умолчанию `admin`: тест сценария проверяет салонную отмену, а она по матрице
+ * ролей (#252) доступна только администратору — менеджер получает 403.
+ */
+async function loginAsStaff(role: StaffRole = 'admin'): Promise<string> {
   const created = await db.staff.create({
     data: {
       email: `staff-${randomUUID()}@example.invalid`,
       passwordHash: await hashPassword(password),
-      role: 'manager',
+      role,
     },
     select: { id: true, email: true },
   });
