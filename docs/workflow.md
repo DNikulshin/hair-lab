@@ -58,29 +58,22 @@ https://github.com/users/DNikulshin/projects/4 — одна доска на пр
 Если секрета нет, `board-sync.yml` падает с инструкцией — молчаливого пропуска больше нет
 (issue #280: доска разошлась с репозиторием на 30 карточек, а прогоны были зелёными).
 
-Fine-grained PAT (рекомендуется — минимальные права):
+Classic PAT (рабочий вариант): https://github.com/settings/tokens/new?scopes=project,repo&description=hair-lab-board-sync
+— scope `project` (проекты и карточки) и `repo` (issues). Права аккаунта — полные только там,
+где нужно; токен личный, не организации.
 
-1. https://github.com/settings/personal-access-tokens/new
-2. Resource owner — `DNikulshin`; Repository access → Only select repositories → `hair-lab`;
-   Repository permissions → Issues: **Read-only**, Pull requests: **Read-only**
-   (Metadata: Read подставится сам).
-3. Account permissions → Projects: **Read and write** — это и есть доступ к Projects v2
-   пользователя.
-4. Expiration — не больше 90 дней; дату окончания — в календарь.
-5. Положить в секрет: `gh secret set PROJECT_TOKEN --repo DNikulshin/hair-lab` (вставить токен)
-   или Settings → Secrets and variables → Actions → New repository secret.
-6. Проверить: Actions → Board sync → Run workflow; в логе — «без изменений <N>».
+Fine-grained PAT для `gh project` **не подходит** (проверено 2026-11-18): `gh` проверяет
+классические scopes токена и на fine-grained падает до запроса —
+`your authentication token is missing required scopes [read:org read:discussion]`
+(прогон 44401162112, gh 2.103.3), хотя `Account permissions` → `Projects: Read and write`
+выданы. Если `gh` это починит, тем же токеном можно будет обойтись без classic-токена.
 
 Почему в workflow `OWNER: '@me'`, а не логин: `gh project … --owner <логин>` сначала
-определяет тип владельца запросом `user(login:)`, которого fine-grained PAT не получает —
-gh падает с `unknown owner type` (проверено прогоном 44397670721: сначала `Resource not
-accessible by personal access token (user.projectV2)`, после выдачи прав — `unknown owner type`).
-`@me` резолвится через `viewer` и работает с обоими типами токена; репозиторий передаётся
-отдельно (`REPO`). Локальный запуск скрипта без переменных по-прежнему берёт `DNikulshin`
-и требует classic-токена со scope `project`.
-
-Classic PAT как альтернатива: https://github.com/settings/tokens/new?scopes=project,repo&description=hair-lab-board-sync
-— scope `project` (запись в Projects) и `repo` (чтение issues).
+определяет тип владельца запросом `user(login:)`, и если токен такого запроса не получает,
+gh падает с `unknown owner type` (прогон 44397670721: сначала `Resource not accessible by
+personal access token (user.projectV2)`, после выдачи прав — `unknown owner type`).
+`@me` резолвится через `viewer` и от этого не зависит; репозиторий передаётся отдельно (`REPO`).
+Локальный запуск скрипта без переменных по-прежнему берёт `DNikulshin`.
 
 Упавший `board-sync.yml` с сообщением «Секрет PROJECT_TOKEN не задан» означает и истёкший
 токен: продлить/выпустить новый и повторить `gh secret set`.
