@@ -32,7 +32,7 @@
 | Review      | `status:review`      |
 | Blocked     | `status:blocked`     |
 
-Метки `status:review` и `status:in-progress` переключает workflow `board.yml`
+Метки `status:review` и `status:in-progress` переключает workflow `board-labels.yml`
 по событиям PR: открытие PR → `review`, черновик → `in-progress`, закрытие → метки снимаются.
 Issue закрывается автоматически строкой `Closes #<номер>` в теле PR.
 
@@ -43,10 +43,40 @@ https://github.com/users/DNikulshin/projects/4 — одна доска на пр
 
 - Каждая карточка — issue репозитория; состояние в колонке выводится из меток `status:*`,
   закрытый issue попадает в Done.
-- Синхронизация: `./scripts/gh-project-sync.sh` (идемпотентно, можно запускать вручную).
-- Автоматически: `board.yml` вызывает скрипт, если задан секрет `PROJECT_TOKEN`
-  (PAT со scope `project`; `GITHUB_TOKEN` не имеет доступа к Projects v2).
+- Сверка: `./scripts/gh-project-sync.sh` — идемпотентна, запускается вручную в любой момент.
+  `DRY_RUN=1 ./scripts/gh-project-sync.sh` печатает план и ничего не пишет в проект.
+- Автоматически: `board-sync.yml` по событиям `issues` (открытие, закрытие, смена меток)
+  и `pull_request`, плюс раз в сутки по расписанию как страховка. Ручной прогон —
+  Actions → Board sync → Run workflow.
+- Разделение прав: метки `status:*` переключает `board-labels.yml` (`GITHUB_TOKEN`),
+  карточки и поле `Status` двигает `board-sync.yml` — ему нужен PAT.
 - Номер проекта переопределяется переменной репозитория `PROJECT_NUMBER` (по умолчанию 4).
+
+#### Секрет `PROJECT_TOKEN`
+
+`GITHUB_TOKEN` не имеет доступа к Projects v2, поэтому сверке нужен отдельный токен.
+Если секрета нет, `board-sync.yml` падает с инструкцией — молчаливого пропуска больше нет
+(issue #280: доска разошлась с репозиторием на 30 карточек, а прогоны были зелёными).
+
+Classic PAT (рабочий вариант): https://github.com/settings/tokens/new?scopes=project,repo&description=hair-lab-board-sync
+— scope `project` (проекты и карточки) и `repo` (issues). Права аккаунта — полные только там,
+где нужно; токен личный, не организации.
+
+Fine-grained PAT для `gh project` **не подходит** (проверено 2026-11-18): `gh` проверяет
+классические scopes токена и на fine-grained падает до запроса —
+`your authentication token is missing required scopes [read:org read:discussion]`
+(прогон 44401162112, gh 2.103.3), хотя `Account permissions` → `Projects: Read and write`
+выданы. Если `gh` это починит, тем же токеном можно будет обойтись без classic-токена.
+
+Почему в workflow `OWNER: '@me'`, а не логин: `gh project … --owner <логин>` сначала
+определяет тип владельца запросом `user(login:)`, и если токен такого запроса не получает,
+gh падает с `unknown owner type` (прогон 44397670721: сначала `Resource not accessible by
+personal access token (user.projectV2)`, после выдачи прав — `unknown owner type`).
+`@me` резолвится через `viewer` и от этого не зависит; репозиторий передаётся отдельно (`REPO`).
+Локальный запуск скрипта без переменных по-прежнему берёт `DNikulshin`.
+
+Упавший `board-sync.yml` с сообщением «Секрет PROJECT_TOKEN не задан» означает и истёкший
+токен: продлить/выпустить новый и повторить `gh secret set`.
 
 Дополнительные метки: `type:*` (feature/bug/chore/spike), `area:*` (api/web/contracts/data/infra/design),
 `prio:p1..p3`, `size:s|m|l`, `needs-owner` (нужно решение, а не код).

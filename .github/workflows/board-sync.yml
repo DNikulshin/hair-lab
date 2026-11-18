@@ -1,0 +1,53 @@
+name: Board sync
+
+# Полная сверка доски Projects с issues: карточки добавляются, колонка Status выводится
+# из меток status:* и из закрытия issue. Логика — `scripts/gh-project-sync.sh`.
+#
+# Почему отдельным workflow: карточки и поле Status в Projects v2 недоступны GITHUB_TOKEN,
+# нужен PAT `PROJECT_TOKEN` (как создать — `docs/workflow.md`, раздел «Доска Projects»).
+# Пока секрета нет, джоба падает с инструкцией: раньше шаг молча пропускался, доска
+# расходилась с репозиторием, а прогон был зелёным (issue #280).
+on:
+  issues:
+    types: [opened, reopened, closed, labeled, unlabeled]
+  pull_request:
+    types: [opened, reopened, ready_for_review, converted_to_draft, closed]
+  schedule:
+    # Страховка: события могли не дойти, проект правили руками, токен менялся.
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Параллельные прогоны гоняли бы одни и те же карточки: собираем их в очередь.
+concurrency:
+  group: board-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    # PR из форка не получает секретов — синк там всё равно не выполнить.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.PROJECT_TOKEN }}
+      # `@me`, а не `github.repository_owner`: `gh project … --owner <login>` сначала определяет
+      # тип владельца запросом `user(login:)`, а fine-grained PAT такого запроса не получает и
+      # gh падает с «unknown owner type» (проверено прогоном 44397670721). `@me` резолвится
+      # через `viewer` и работает с обоими типами токена; репозиторий задан отдельно (REPO).
+      OWNER: '@me'
+      REPO: ${{ github.repository }}
+      PROJECT_NUMBER: ${{ vars.PROJECT_NUMBER || '4' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Проверить, что PROJECT_TOKEN задан
+        if: env.GH_TOKEN == ''
+        run: |
+          echo "::error::Секрет PROJECT_TOKEN не задан — доска не синхронизируется."
+          echo "Как создать PAT и положить в секрет: docs/workflow.md, «Доска Projects»."
+          exit 1
+
+      - name: Синхронизировать доску Projects
+        run: ./scripts/gh-project-sync.sh
