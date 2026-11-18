@@ -764,13 +764,13 @@ describe('decide: правило 5 — PROCEED', () => {
 
 describe('decide: правило 7 — бюджетный порог (§5.6, §11)', () => {
   test('costRub выше порога — ESCALATE с причиной budget', (t) => {
-    const result = decide(inputs(makeWorkspace(t), { costRub: 30.01 }));
+    const result = decide(inputs(makeWorkspace(t), { costRub: 50.01 }));
 
     assert.equal(result.action, 'ESCALATE');
     assert.equal(result.retry_stage, null);
 
     assert.deepEqual(result.reasons, [
-      'budget: 30.01 ₽ > 30 ₽ (правило 7 §5.6)',
+      'budget: 50.01 ₽ > 50 ₽ (правило 7 §5.6)',
       'escalate:budget',
     ]);
     assert.equal(validateDecision(result).ok, true, validateDecision(result).errors.join('\n'));
@@ -779,7 +779,7 @@ describe('decide: правило 7 — бюджетный порог (§5.6, §1
   test('ровно порог и ниже — обычное решение: сравнение строгое', (t) => {
     const root = makeWorkspace(t);
 
-    for (const costRub of [30, 29.99, 0]) {
+    for (const costRub of [50, 49.99, 0]) {
       const result = decide(inputs(root, { costRub }));
       assert.equal(result.action, 'PROCEED', `costRub = ${costRub}`);
       assert.deepEqual(result.reasons, []);
@@ -800,7 +800,7 @@ describe('decide: правило 7 — бюджетный порог (§5.6, §1
     const result = decide(
       inputs(root, {
         gates: gatesDoc([gate('typecheck', 'fail')]),
-        costRub: 45,
+        costRub: 55,
       }),
     );
 
@@ -1499,7 +1499,7 @@ describe('CLI: бюджет по usage.json (правило 7 §5.6)', () => {
       reviewMd: mdBlock(reviewDoc()),
       evaluationMd: mdBlock(evaluationDoc()),
     });
-    // 1M входных токенов по 100 ₽ за 1M = 100 ₽ > 30 ₽ (§5.2, LIMITS.maxCycleCostRub).
+    // 1M входных токенов по 100 ₽ за 1M = 100 ₽ > 50 ₽ (§5.2, LIMITS.maxCycleCostRub).
     writeFileSync(
       join(dir, 'usage.json'),
       `${JSON.stringify({ plan: { runs: 1, input: 1_000_000 } }, null, 2)}\n`,

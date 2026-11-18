@@ -57,6 +57,11 @@
  *   `stage_status = 'running'`; `finish` закрывает последнюю открытую запись
  *   (`finished_at = now`, `status = done|error`, `--detail` → дополнительное поле `detail`).
  *   `init` сразу закрывает INIT как `done`: в протоколе Приложения B у INIT нет `finish`.
+ *   Два этапа закрываются без `finish`, потому что своей работы у них нет и `finish` для
+ *   них невозможен или не предусмотрен протоколом: `DECIDE` закрывает `apply-decision`
+ *   вместе с переходом, а `DONE` терминален (`assertNotTerminal`) и закрывается сразу в
+ *   `advanceTo`. Без этого их записи оставались бы `running` и `unclosed_stages` (§5.8)
+ *   не мог бы стать нулём ни на одном успешном цикле.
  * - **Повторный вход в этап** (после сбоя, §13) — `advance --to <текущий этап>` при
  *   `stage_status = 'error'`; при `running` сначала нужен `finish`.
  * - **Защиты §5.3.** `→ DECIDE` требует `review.<n>.md` и `evaluation.<n>.md` текущей
@@ -400,7 +405,15 @@ export function advanceTo(state, { to, now, ownerApproved = false, artifacts = {
     };
   }
 
-  return startStage(base, { stage: to, iteration: base.iteration, now });
+  const next = startStage(base, { stage: to, iteration: base.iteration, now });
+
+  // `DONE` — терминальный этап без своей работы (метрики и `unlock` делает супервизор),
+  // поэтому запись закрывается сразу: иначе `finish` для него запрещён
+  // (`assertNotTerminal`), запись навсегда остаётся `running` и попадает в
+  // `unclosed_stages` (§5.8).
+  if (to === 'DONE') return closeStage(next, { status: 'done', now });
+
+  return next;
 }
 
 /**
@@ -557,14 +570,19 @@ export function applyDecisionToState(state, { decision, now, escalation = null }
     );
   }
 
+  // `DECIDE` закрывается здесь же: работы у него нет (решение принимает `cycle-decide`),
+  // и без закрытия его запись остаётся `running` навсегда — `unclosed_stages` в
+  // `metrics.json` (§5.8) перестаёт быть сигналом. `escalate` закрывал запись и раньше.
+  const decided = closeStage(state, { status: 'done', now });
+
   switch (decision.action) {
     case 'REWORK':
-      return startStage(state, { stage: 'REWORK', now });
+      return startStage(decided, { stage: 'REWORK', now });
     case 'ACQUIRE_EVIDENCE':
       return startStage(
         {
-          ...state,
-          retries: { ...state.retries, evidence: state.retries.evidence + 1 },
+          ...decided,
+          retries: { ...decided.retries, evidence: decided.retries.evidence + 1 },
         },
         { stage: 'ACQUIRE_EVIDENCE', now },
       );
@@ -574,17 +592,20 @@ export function applyDecisionToState(state, { decision, now, escalation = null }
         throw new ConflictError(`RETRY_STAGE: недопустимый этап ${JSON.stringify(stage)} (§5.6)`);
       }
       return startStage(
-        { ...state, retries: { ...state.retries, [stage]: state.retries[stage] + 1 } },
+        { ...decided, retries: { ...decided.retries, [stage]: decided.retries[stage] + 1 } },
         { stage, now },
       );
     }
     case 'PROCEED':
     case 'PROCEED_WITH_UNVERIFIED':
-      return startStage(state, { stage: 'PR', now });
+      return startStage(decided, { stage: 'PR', now });
     case 'ESCALATE': {
       if (escalation === null) {
         throw new UsageError('apply-decision: для ESCALATE нужен escalation.json');
       }
+      // Эскалация — исключение: запись `DECIDE` закрывается как `error` с причиной
+      // (`escalateToState` → `closeOpenRecord`), а не как `done`. Поэтому сюда идёт
+      // исходное состояние, а не `decided`.
       return escalateToState(state, { escalation, now });
     }
     default:
@@ -600,6 +621,21 @@ export function applyDecisionToState(state, { decision, now, escalation = null }
  * @param {{ status: 'done'|'error', detail?: string|null, now: string }} options
  * @returns {Record<string, any>[]}
  */
+/**
+ * Закрывает текущий этап: запись в `history[]` получает `finished_at`/`status`, а
+ * `stage_status` — то же значение. Возвращает новое состояние, не изменяя входное.
+ * @param {Record<string, any>} state проверенное состояние
+ * @param {{ status: 'done'|'error', now: string }} options
+ * @returns {Record<string, any>}
+ */
+function closeStage(state, { status, now }) {
+  return {
+    ...state,
+    stage_status: status,
+    history: closeOpenRecord(state.history, { status, now }),
+  };
+}
+
 function closeOpenRecord(history, { status, detail = null, now }) {
   let index = -1;
   for (let position = history.length - 1; position >= 0; position -= 1) {

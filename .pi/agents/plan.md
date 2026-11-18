@@ -1,7 +1,7 @@
 ---
 name: plan
 description: 'Планирование: спека, декомпозиция задачи, план правок. Код не пишет.'
-model: polza-ai/z-ai/glm-5.3
+model: polza-ai/z-ai/glm-5.3-flash
 thinking: high
 tools: read, grep, find, ls
 ---
