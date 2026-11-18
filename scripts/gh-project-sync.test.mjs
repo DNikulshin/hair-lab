@@ -1,10 +1,14 @@
 /**
- * Тесты `scripts/gh-project-sync.sh` (issue #280).
+ * Тесты `scripts/gh-project-sync.sh` (issue #280, #283).
  *
  * Скрипт разговаривает с GitHub только через `gh`, поэтому тест подставляет свой `gh`
  * в PATH: он отдаёт заранее заготовленные ответы, а любой вызов записи (`item-add`,
  * `item-edit`) валит прогон кодом 2. Так проверяется главное свойство: в режиме
  * `DRY_RUN=1` в проект не уходит ни одной записи.
+ *
+ * Доска читается GraphQL-снимком (#283), поэтому фикстура — это страницы ответа
+ * `gh api graphql`: подставной `gh` отдаёт их по очереди, `page-0.json`, `page-1.json`, …
+ * и упирается в отсутствующий файл, если скрипт запросил лишнюю страницу.
  */
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
@@ -24,9 +28,14 @@ const SCRIPT = fileURLToPath(new URL('./gh-project-sync.sh', import.meta.url));
 const GH_SHIM = `#!/usr/bin/env bash
 set -euo pipefail
 case " $* " in
-  *" project field-list "*) cat "$FIXTURES/fields.json" ;;
-  *" project item-list "*) cat "$FIXTURES/board.json" ;;
-  *" project view "*) echo "PVT_test" ;;
+  *" api graphql "*)
+    # Страницы отдаются по порядку: какой запрос по счёту — такой файл и читается.
+    counter="$FIXTURES/page-counter"
+    n=$(cat "$counter" 2>/dev/null || echo 0)
+    echo $((n + 1)) > "$counter"
+    cat "$FIXTURES/page-$n.json"
+    ;;
+  *" api user "*) echo "DNikulshin" ;;
   *" issue list "*)
     filter=""
     prev=""
@@ -44,21 +53,19 @@ esac
 `;
 
 /** Поле Status со всеми опциями доски. */
-const FIELDS = {
-  fields: [
-    {
-      id: 'F_status',
-      name: 'Status',
-      options: [
-        { id: 'o_todo', name: 'Todo' },
-        { id: 'o_in_progress', name: 'In progress' },
-        { id: 'o_review', name: 'Review' },
-        { id: 'o_blocked', name: 'Blocked' },
-        { id: 'o_done', name: 'Done' },
-      ],
-    },
+const STATUS_FIELD = {
+  id: 'F_status',
+  options: [
+    { id: 'o_todo', name: 'Todo' },
+    { id: 'o_in_progress', name: 'In progress' },
+    { id: 'o_review', name: 'Review' },
+    { id: 'o_blocked', name: 'Blocked' },
+    { id: 'o_done', name: 'Done' },
   ],
 };
+
+/** Размер страницы, который запрашивает скрипт (`PAGE_SIZE`). */
+const PAGE_SIZE = 100;
 
 /**
  * @param {number} number
@@ -81,15 +88,50 @@ function issue(number, state, labels = []) {
  * @returns {object} карточка в форме `gh project item-list --format json`
  */
 function card(number, status) {
-  return { id: `PVTI_${number}`, status, content: { type: 'Issue', number } };
+  return {
+    id: `PVTI_${number}`,
+    content: { __typename: 'Issue', number },
+    status: status === undefined ? null : { name: status },
+  };
+}
+
+/**
+ * Страницы ответа `gh api graphql` — по 100 карточек, как отдаёт GitHub.
+ * @param {object[]} items
+ * @param {number} totalCount
+ * @returns {object[]}
+ */
+function pages(items, totalCount, statusField = STATUS_FIELD) {
+  const result = [];
+  for (let start = 0; start === 0 || start < items.length; start += PAGE_SIZE) {
+    const slice = items.slice(start, start + PAGE_SIZE);
+    const hasNext = start + PAGE_SIZE < items.length;
+    result.push({
+      data: {
+        repositoryOwner: {
+          projectV2: {
+            id: 'PVT_test',
+            statusField,
+            items: {
+              totalCount,
+              pageInfo: { hasNextPage: hasNext, endCursor: hasNext ? `c${start}` : null },
+              nodes: slice,
+            },
+          },
+        },
+      },
+    });
+    if (!hasNext) break;
+  }
+  return result;
 }
 
 /**
  * Готовит каталог с фикстурами и подставным `gh`, запускает скрипт.
- * @param {{ issues: object[], items: object[], totalCount?: number, env?: Record<string, string> }} options
+ * @param {{ issues: object[], items: object[], totalCount?: number, statusField?: object | null, env?: Record<string, string> }} options
  * @returns {{ code: number, stdout: string, stderr: string }}
  */
-function runSync({ issues, items, totalCount = items.length, env = {} }) {
+function runSync({ issues, items, totalCount = items.length, statusField, env = {} }) {
   const dir = mkdtempSync(join(tmpdir(), 'hair-lab-board-'));
   try {
     const bin = join(dir, 'bin');
@@ -101,9 +143,12 @@ function runSync({ issues, items, totalCount = items.length, env = {} }) {
     writeFileSync(gh, GH_SHIM);
     chmodSync(gh, 0o755);
 
-    writeFileSync(join(fixtures, 'fields.json'), JSON.stringify(FIELDS));
     writeFileSync(join(fixtures, 'issues.json'), JSON.stringify(issues));
-    writeFileSync(join(fixtures, 'board.json'), JSON.stringify({ totalCount, items }));
+    pages(items, totalCount, statusField === undefined ? STATUS_FIELD : statusField).forEach(
+      (page, index) => {
+        writeFileSync(join(fixtures, `page-${index}.json`), JSON.stringify(page));
+      },
+    );
 
     const result = spawnSync('bash', [SCRIPT], {
       encoding: 'utf8',
@@ -154,6 +199,29 @@ test('DRY_RUN на синхронной доске не предлагает и�
 
   assert.equal(code, 0);
   assert.match(stdout, /добавлено 0, обновлено 0, без изменений 2/);
+});
+
+test('доска читается постранично, а `@me` резолвится в логин', () => {
+  // Карточек больше одной страницы (PAGE_SIZE=100): их id со второй страницы тоже
+  // должны попасть в снимок, иначе синк счёл бы их отсутствующими и задублировал.
+  const items = Array.from({ length: PAGE_SIZE + 5 }, (_, index) => card(500 + index, 'Done'));
+  const issues = [
+    issue(10, 'OPEN', ['status:review']),
+    ...items.map((item) => issue(item.content.number, 'CLOSED')),
+  ];
+
+  const { code, stdout, stderr } = runSync({ issues, items, env: { OWNER: '@me' } });
+
+  assert.equal(code, 0, stderr);
+  assert.match(stdout, /добавить\s+#10 → Review/);
+  assert.match(stdout, new RegExp(`добавлено 1, обновлено 0, без изменений ${items.length}`));
+});
+
+test('без поля Status синк останавливается', () => {
+  const { code, stderr } = runSync({ issues: [issue(10, 'OPEN')], items: [], statusField: null });
+
+  assert.equal(code, 1);
+  assert.match(stderr, /нет поля Status/);
 });
 
 test('усечение выдачи issues останавливает синк', () => {

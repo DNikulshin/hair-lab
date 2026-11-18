@@ -45,9 +45,13 @@ https://github.com/users/DNikulshin/projects/4 — одна доска на пр
   закрытый issue попадает в Done.
 - Сверка: `./scripts/gh-project-sync.sh` — идемпотентна, запускается вручную в любой момент.
   `DRY_RUN=1 ./scripts/gh-project-sync.sh` печатает план и ничего не пишет в проект.
+  Доска читается одним GraphQL-снимком (`gh api graphql`): id проекта, поле `Status`
+  с опциями и карточки постранично по 100 — вместо трёх раздельных `gh project …`
+  (issue #283: ~10 s → ~5 s на пустом прогоне).
 - Автоматически: `board-sync.yml` по событиям `issues` (открытие, закрытие, смена меток)
-  и `pull_request`, плюс раз в сутки по расписанию как страховка. Ручной прогон —
-  Actions → Board sync → Run workflow.
+  и `pull_request`, плюс раз в сутки по расписанию как страховку. Ручной прогон —
+  Actions → Board sync → Run workflow. Метки `type:*`/`area:*`/`prio:*`/`size:*`
+  на колонку не влияют и полной сверки не запускают — только `status:*`.
 - Разделение прав: метки `status:*` переключает `board-labels.yml` (`GITHUB_TOKEN`),
   карточки и поле `Status` двигает `board-sync.yml` — ему нужен PAT.
 - Номер проекта переопределяется переменной репозитория `PROJECT_NUMBER` (по умолчанию 4).
