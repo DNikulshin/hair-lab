@@ -1,8 +1,11 @@
 import type { Db } from '../../shared/db';
-import type { PaymentGateway } from './payment-gateway';
+import type { GatewayPayment, PaymentGateway } from './payment-gateway';
 import {
+  applyPaymentSucceeded,
+  HOLDS_RECONCILE_LIMIT,
   listPendingRefunds,
   markRefunded,
+  markRefundRequired,
   PAYMENT_EXPIRED_REASON,
   recordRefundAttempt,
   refundIdempotenceKey,
@@ -17,13 +20,25 @@ import {
  * причина `payment_expired`), а платёж переводится в `canceled`. Слот освобождается сам:
  * EXCLUDE-констрейнт занятости смотрит только на записи со статусом `<> 'cancelled'`.
  *
- * Правила (issue #8):
- * - условия отбора стоят в `WHERE` самого `UPDATE`, а не в отдельном чтении: между
- *   «проверил» и «записал» нет окна, поэтому параллельный вебхук оплаты либо успевает
- *   подтвердить запись (она уже не попадает в выборку), либо видит её отменённой
- *   и запускает возврат;
- * - отменяются только `pending`-платежи: `succeeded` не трогаем — деньги вернёт обработчик
- *   уведомления, а если возврат там не удался — флаг `refund_required` и следующий тик;
+ * Правила (issue #8, #104):
+ * - перед отменой состояние платежа сверяется со шлюзом (`getPayment`): клиент мог оплатить
+ *   в последнюю секунду, а вебхук — ещё не дойти. Оплата применяется тем же переходом, что
+ *   и в обработчике уведомления (`applyPaymentSucceeded`) — письмо и идемпотентность те же;
+ * - условия отбора стоят в `WHERE` финального `UPDATE`, а не только в чтении: между сверкой
+ *   и записью есть окно (сеть), но параллельный вебхук и отмена разведены несовместимыми
+ *   `WHERE` — выигрывает ровно один, проигравший видит `count === 0`;
+ * - ошибка шлюза (сеть, не-2xx, несовпадение суммы) — не повод отменять: запись остаётся
+ *   `pending` и попадает в следующий тик. Отменять платёж по догадке нельзя — деньги уже
+ *   могли уйти;
+ * - очередь не блокируется неизвестным состоянием: запись, чья сверка не удалась (`getPayment`
+ *   бросил, `succeeded` без `paid`), запоминается в памяти процесса и в следующем тике
+ *   пропускается — сверяются следующие по дедлайну кандидаты. Набор отложенных ограничен
+ *   `MAX_DEFERRED_RECONCILES` и работает как очередь: вытесненная запись снова участвует
+ *   в отборе, то есть и отложенные перепроверяются по кругу. Один экземпляр `api` —
+ *   допущение развёртывания, многоинстансовость не требование (AGENTS.md);
+ * - отменяются только `pending`-платежи: `succeeded` не отменяем — сверка подтверждает запись
+ *   тем же переходом, что и уведомление, а если запись уже отменена — флаг `refund_required`
+ *   и возврат тем же тиком;
  * - обязательные возвраты (`payments.refund_required`) повторяются тем же тиком: сбой шлюза
  *   в момент уведомления не теряет деньги клиента. Ключ идемпотентности тот же, что в маршруте
  *   (`refund-<paymentId>`), поэтому повтор не возвращает деньги дважды;
@@ -43,7 +58,7 @@ export interface HoldsSweeperLogger {
 
 export interface HoldsSweeperDeps {
   db: Db;
-  /** Шлюз платежей: нужен для повтора обязательных возвратов. */
+  /** Шлюз платежей: сверка состояния платежа перед отменой и повтор обязательных возвратов. */
   gateway: PaymentGateway;
   /** Период тика (`PAYMENT_SWEEP_INTERVAL_MS`). Плагин запускает по нему интервал. */
   intervalMs: number;
@@ -55,6 +70,10 @@ export interface HoldsSweeperTickResult {
   expired: number;
   /** Сколько платежей переведено в `canceled`. */
   paymentsCanceled: number;
+  /** Сколько платежей сверено со шлюзом за тик (успешных вызовов `getPayment`). */
+  reconciled: number;
+  /** Сколько платежей подтверждено сверкой (`applyPaymentSucceeded`). */
+  confirmed: number;
   /** Сколько обязательных возвратов попытались повторить (включая неудачные). */
   refundsRetried: number;
   /** Сколько возвратов завершилось подтверждённым `succeeded`: платёж `refunded`, флаг снят. */
@@ -67,9 +86,20 @@ export interface HoldsSweeper {
   tick(now?: Date): Promise<HoldsSweeperTickResult>;
 }
 
+/**
+ * Сколько записей с неудавшейся сверкой держим в памяти между тиками.
+ *
+ * Ограничение памяти и размера окна выборки (тик читает не больше
+ * `HOLDS_RECONCILE_LIMIT + MAX_DEFERRED_RECONCILES` записей). От залипания защищает
+ * не размер, а ротация: одна отложенная запись возвращается в отбор каждый тик.
+ */
+const MAX_DEFERRED_RECONCILES = HOLDS_RECONCILE_LIMIT;
+
 const emptyResult = (): HoldsSweeperTickResult => ({
   expired: 0,
   paymentsCanceled: 0,
+  reconciled: 0,
+  confirmed: 0,
   refundsRetried: 0,
   refundsCompleted: 0,
 });
@@ -80,42 +110,190 @@ function errorNameOf(error: unknown): string {
 }
 
 /**
- * Истёкшие холды: запись `cancelled(payment_expired)`, её платёж `canceled`.
- * Одна транзакция: слот освобождается вместе со статусом платежа.
+ * Истёкшие холды: сверка с шлюзом, затем запись `cancelled(payment_expired)` и её платёж `canceled`.
+ *
+ * Порядок задан двумя ограничениями. Сеть нельзя держать в транзакции — поэтому состояния
+ * платежей читаются до неё, и кандидаты лишь отбираются (`orderBy` по дедлайну + лимит),
+ * а не отменяются. Отмена, в свою очередь, идёт одним условным `UPDATE`: если между сверкой
+ * и записью запись успел оплатить вебхук, она уже не `pending` и в выборку не попадает.
+ *
+ * Неизвестное состояние (ошибка шлюза, `succeeded` без `paid`) — не повод отменять: запись
+ * откладывается (`deferred`) и в следующем тике пропускается в отборе, а сверяются следующие
+ * по дедлайну кандидаты. Платёж без `yookassa_payment_id` (создание в шлюзе не удалось)
+ * и запись без платежа отменяются без вызова шлюза — денег там нет.
  */
 async function expireHolds(
   db: Db,
+  gateway: PaymentGateway,
   now: Date,
   logger: HoldsSweeperLogger,
-): Promise<Pick<HoldsSweeperTickResult, 'expired' | 'paymentsCanceled'>> {
-  return db.$transaction(async (tx) => {
-    // Один UPDATE с условиями в WHERE: список истёкших записей не читается заранее,
-    // поэтому запись, оплаченную между тиками, свипер не отменит.
+  deferred: Set<string>,
+): Promise<
+  Pick<HoldsSweeperTickResult, 'expired' | 'paymentsCanceled' | 'reconciled' | 'confirmed'>
+> {
+  // Отложенные перепроверяются по кругу: самая старая запись каждый тик возвращается в отбор.
+  // Без этого запись с постоянно падающей сверкой осталась бы в наборе навсегда и больше
+  // никогда не сверялась (и наоборот — без пропуска падающая голова держала бы очередь).
+  const retried = deferred.values().next().value;
+  if (retried !== undefined) deferred.delete(retried);
+
+  // Окно шире лимита на число отложенных: они стоят в голове выборки по дедлайну, поэтому
+  // без запаса свежие кандидаты за ними в тик не попали бы.
+  const candidates = await db.appointment.findMany({
+    where: { status: 'pending', paymentDeadlineAt: { lte: now } },
+    orderBy: { paymentDeadlineAt: 'asc' },
+    take: HOLDS_RECONCILE_LIMIT + deferred.size,
+    select: { id: true },
+  });
+  if (candidates.length === 0) {
+    // Истёкших холдов нет: отложенное больше не актуально (запись оплачена, отменена
+    // или дедлайн сдвинут), иначе набор рос бы на перезапусках нагрузки.
+    deferred.clear();
+    return { expired: 0, paymentsCanceled: 0, reconciled: 0, confirmed: 0 };
+  }
+
+  const fetched = new Set(candidates.map((row) => row.id));
+  // Запись, которой нет в выборке, отложенной быть не может: её больше нечего сверять
+  // (оплачена, отменена или дедлайн сдвинут). Без этого набор занимал бы окно вечно.
+  for (const appointmentId of deferred) {
+    if (!fetched.has(appointmentId)) deferred.delete(appointmentId);
+  }
+
+  /**
+   * Отложить запись до следующего тика: в конец очереди, с ограничением её длины.
+   * Вытесненная (самая старая) запись снова участвует в отборе — так неудачная сверка
+   * не залипает навсегда даже при постоянно падающем шлюзе.
+   */
+  const defer = (appointmentId: string): void => {
+    deferred.delete(appointmentId);
+    deferred.add(appointmentId);
+    while (deferred.size > MAX_DEFERRED_RECONCILES) {
+      const oldest = deferred.values().next().value;
+      if (oldest === undefined) break;
+      deferred.delete(oldest);
+    }
+  };
+
+  const candidateIds = candidates
+    .map((row) => row.id)
+    .filter((id) => !deferred.has(id))
+    .slice(0, HOLDS_RECONCILE_LIMIT);
+  // Только служебные поля: сумма нужна для сверки, id провайдера — для вызова шлюза.
+  // Персональные данные платежа не читаются.
+  const payments = await db.payment.findMany({
+    where: { appointmentId: { in: candidateIds }, status: 'pending' },
+    select: { id: true, appointmentId: true, amountKopecks: true, yookassaPaymentId: true },
+  });
+  // Платёж у записи один (unique `appointment_id`), поэтому карта, а не поиск в цикле.
+  const paymentByAppointment = new Map(payments.map((row) => [row.appointmentId, row]));
+
+  let reconciled = 0;
+  let confirmed = 0;
+  const cancelIds: string[] = [];
+
+  for (const appointmentId of candidateIds) {
+    const payment = paymentByAppointment.get(appointmentId);
+    if (payment === undefined || payment.yookassaPaymentId === null) {
+      cancelIds.push(appointmentId);
+      continue;
+    }
+
+    try {
+      const state: GatewayPayment = await gateway.getPayment(payment.yookassaPaymentId);
+      reconciled += 1;
+
+      if (state.status === 'succeeded') {
+        // `succeeded` без `paid` — неоплаченное подтверждение: считаем состояние неизвестным
+        // и запись не отменяем, чтобы не потерять оплату и не освободить оплаченный слот.
+        if (!state.paid) {
+          defer(appointmentId);
+          logger.warn(
+            { paymentId: payment.id, gatewayStatus: state.status },
+            'шлюз вернул succeeded без paid: состояние не считаем оплатой, запись ждёт',
+          );
+          continue;
+        }
+
+        // Тот же путь, что у уведомления: подтверждение записи, письмо в outbox,
+        // возврат при уже отменённой записи. Сверка лишь заменила источник истины.
+        const transition = await applyPaymentSucceeded(db, payment.id, {
+          amountKopecks: state.amountKopecks,
+        });
+        if (transition === null) {
+          deferred.delete(appointmentId);
+          continue;
+        }
+
+        // Запись уже отменена (клиент или салон): подтвердить нельзя, деньги возвращаем.
+        // Флаг снимает `retryPendingRefunds` того же тика — ключ `refund-<paymentId>` идемпотентен.
+        if (transition.needsRefund) await markRefundRequired(db, payment.id);
+        // Подтверждение снимет запись с очереди: откладывать больше нечего.
+        deferred.delete(appointmentId);
+        confirmed += 1;
+        logger.info(
+          { paymentId: payment.id, appointmentId: transition.appointmentId },
+          'оплата подтверждена сверкой перед истечением холда',
+        );
+        continue;
+      }
+
+      // `pending`/`canceled`: денег нет, холд истекает как обычно.
+      deferred.delete(appointmentId);
+      cancelIds.push(appointmentId);
+    } catch (error) {
+      // Сеть, не-2xx или несовпадение суммы: состояние неизвестно, запись не трогаем, но
+      // откладываем — иначе падающая голова выборки держала бы очередь вечно.
+      // В лог — только id платежа и имя ошибки: сумма и тела ответов не пишутся.
+      defer(appointmentId);
+      logger.error(
+        { paymentId: payment.id, errorName: errorNameOf(error) },
+        'сверка платежа с шлюзом не удалась, запись оставлена ждать следующего тика',
+      );
+    }
+  }
+
+  if (cancelIds.length === 0) {
+    return { expired: 0, paymentsCanceled: 0, reconciled, confirmed };
+  }
+
+  // Одна транзакция: слот освобождается вместе со статусом платежа. Условия стоят в WHERE,
+  // поэтому опоздавшая оплата (уже `confirmed`) или сдвинутый дедлайн не отменяются.
+  const canceled = await db.$transaction(async (tx) => {
     const expired = await tx.appointment.updateManyAndReturn({
-      where: { status: 'pending', paymentDeadlineAt: { lte: now } },
+      where: { id: { in: cancelIds }, status: 'pending', paymentDeadlineAt: { lte: now } },
       data: { status: 'cancelled', cancelReason: PAYMENT_EXPIRED_REASON },
       select: { id: true },
     });
 
     const appointmentIds = expired.map((row) => row.id);
-    if (appointmentIds.length === 0) return { expired: 0, paymentsCanceled: 0 };
+    if (appointmentIds.length === 0) return { appointmentIds, paymentsCanceled: 0 };
 
-    const payments = await tx.payment.updateMany({
+    const paymentsCanceled = await tx.payment.updateMany({
       where: { appointmentId: { in: appointmentIds }, status: 'pending' },
       data: { status: 'canceled' },
     });
 
+    return { appointmentIds, paymentsCanceled: paymentsCanceled.count };
+  });
+
+  if (canceled.appointmentIds.length > 0) {
     logger.info(
       {
-        expired: appointmentIds.length,
-        paymentsCanceled: payments.count,
-        appointmentIds,
+        expired: canceled.appointmentIds.length,
+        paymentsCanceled: canceled.paymentsCanceled,
+        reconciled,
+        appointmentIds: canceled.appointmentIds,
       },
       'истёкшие холды оплаты отменены',
     );
+  }
 
-    return { expired: appointmentIds.length, paymentsCanceled: payments.count };
-  });
+  return {
+    expired: canceled.appointmentIds.length,
+    paymentsCanceled: canceled.paymentsCanceled,
+    reconciled,
+    confirmed,
+  };
 }
 
 /**
@@ -191,15 +369,19 @@ async function retryPendingRefunds(
  */
 export function createHoldsSweeper(deps: HoldsSweeperDeps): HoldsSweeper {
   const { db, gateway, logger } = deps;
+  // Записи с неудавшейся сверкой, отложенные на следующий тик. Состояние живёт в памяти
+  // процесса: допущение — один экземпляр `api` (AGENTS.md), многоинстансовость не требование.
+  const deferred = new Set<string>();
 
   return {
     intervalMs: deps.intervalMs,
 
     async tick(now: Date = new Date()): Promise<HoldsSweeperTickResult> {
       try {
-        // Сначала холды (одна транзакция), потом возвраты (сеть). Возвраты идут даже если
-        // истёкших холдов нет: флаг мог остаться от сбоя шлюза в обработчике уведомления.
-        const holds = await expireHolds(db, now, logger);
+        // Сначала холды (сверка с шлюзом и одна транзакция отмены), потом возвраты (сеть).
+        // Возвраты идут даже если истёкших холдов нет: флаг мог остаться от сбоя шлюза
+        // в обработчике уведомления.
+        const holds = await expireHolds(db, gateway, now, logger, deferred);
         const refunds = await retryPendingRefunds(db, gateway, logger);
         return { ...holds, ...refunds };
       } catch (error) {
