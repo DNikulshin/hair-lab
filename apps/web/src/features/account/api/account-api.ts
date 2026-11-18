@@ -2,8 +2,10 @@ import {
   accountBookingResponseSchema,
   accountBookingsResponseSchema,
   authResponseSchema,
+  okResponseSchema,
   type AccountBooking,
   type AccountBookingsResponse,
+  type ClientAccount,
 } from '@hair-lab/contracts';
 import { withBasePath } from '@/shared/config/api';
 
@@ -27,8 +29,11 @@ export type AccountFailure = { kind: 'network' } | { kind: 'http'; status: numbe
 
 export type AccountResult<T> = { ok: true; data: T } | { ok: false; failure: AccountFailure };
 
-/** Прочитан ли текущий клиент (`GET /auth/me`): `401` — сессии нет. */
-export async function fetchCurrentClient(): Promise<AccountResult<{ id: string }>> {
+/**
+ * Текущий клиент (`GET /auth/me`): `401` — сессии нет. Возвращается аккаунт целиком
+ * (`id`, `email`, `emailVerifiedAt`): кабинет показывает, под кем открыт вход.
+ */
+export async function fetchCurrentClient(): Promise<AccountResult<ClientAccount>> {
   let response: Response;
   try {
     response = await fetch(withBasePath('/api/auth/me'), { cache: 'no-store' });
@@ -43,7 +48,32 @@ export async function fetchCurrentClient(): Promise<AccountResult<{ id: string }
 
   const parsed = authResponseSchema.safeParse(payload);
   if (!parsed.success) return { ok: false, failure: { kind: 'network' } };
-  return { ok: true, data: { id: parsed.data.client.id } };
+  return { ok: true, data: parsed.data.client };
+}
+
+/**
+ * Выход клиента (`POST /auth/logout`): API гасит сессию и стирает cookie.
+ * `ok: true` означает, что сервер подтвердил выход — только тогда экран уходит с кабинета.
+ */
+export async function logoutClient(): Promise<AccountResult<true>> {
+  let response: Response;
+  try {
+    response = await fetch(withBasePath('/api/auth/logout'), {
+      method: 'POST',
+      cache: 'no-store',
+    });
+  } catch {
+    return { ok: false, failure: { kind: 'network' } };
+  }
+
+  const payload = await readPayload(response);
+  if (!response.ok) {
+    return { ok: false, failure: { kind: 'http', status: response.status, body: payload } };
+  }
+  if (!okResponseSchema.safeParse(payload).success) {
+    return { ok: false, failure: { kind: 'network' } };
+  }
+  return { ok: true, data: true };
 }
 
 export interface AccountBookingsRequest {

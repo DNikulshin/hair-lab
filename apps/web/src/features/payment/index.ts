@@ -8,6 +8,7 @@
  * и разметка состояний (`model/payment-state`, `ui/`) остаются внутренними.
  */
 export {
+  clearPaymentDraft,
   paymentHandoff,
   paymentPagePath,
   readPaymentDraft,
