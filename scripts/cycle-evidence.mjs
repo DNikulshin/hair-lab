@@ -44,12 +44,15 @@
  * не попадают. Пакет собирается в памяти и пишется только при успехе: при ошибке файлы
  * не создаются и не перезаписываются.
  *
- * **Маскирование (§5.4).** В логи гейтов, сырые данные QA и `diff.patch` применяется
- * `redactLog`/`redactQa`: e-mail → `[email]`, телефоны → `[phone]`, `authorization`/
- * `cookie`/JWT/`postgres://<user>:<pass>@`/`key|token|secret|password…` → `[secret]`.
- * Структура диффа при этом не меняется: шаблоны не содержат переводов строк, поэтому
- * строки не удаляются и не склеиваются, а номера строк и `@@`-заголовки остаются прежними.
- * Хэши коммитов, UUID и номера строк маскировке не подлежат.
+ * **Маскирование (§5.4).** В логи гейтов и сырые данные QA применяется `redactLog`/
+ * `redactQa`: e-mail → `[email]`, телефоны → `[phone]`, `authorization`/`cookie`/JWT/
+ * `postgres://<user>:<pass>@`/`key|token|secret|password…` → `[secret]`. В `diff.patch`
+ * работает `redactPatch` — только контакты, JWT и пароль строки подключения: правила по
+ * ключам заменяли бы код справа от них (`token: Promise<void>`), и патч перестал бы
+ * применяться `git apply` (#246). Структура диффа не меняется: шаблоны не содержат
+ * переводов строк, поэтому строки не удаляются и не склеиваются, а номера строк и
+ * `@@`-заголовки остаются прежними. Хэши коммитов, UUID и номера строк маскировке не
+ * подлежат.
  *
  * **Лимиты (§5.2).** По сырому диффу: изменённых строк (`+`/`-` внутри ханков, без
  * `+++`/`---` и контекста) больше `LIMITS.maxDiffLines` или размер больше
@@ -81,7 +84,7 @@ import {
   iterNames,
   repoRoot,
 } from './lib/cycle/paths.mjs';
-import { redactLog, redactQa } from './lib/cycle/redact.mjs';
+import { redactLog, redactPatch, redactQa } from './lib/cycle/redact.mjs';
 import { validateGates, validateQaWeb, validateState } from './lib/cycle/validate.mjs';
 
 /** Заголовки секций форм issue (`.github/ISSUE_TEMPLATE/*.yml`). */
@@ -694,7 +697,7 @@ function buildPacket({ dir, root, base = null }) {
   /** @type {EvidenceFile[]} */
   const files = [
     // Маскирование не меняет структуру: строки и `@@`-заголовки остаются прежними.
-    { path: `${FIXED_NAMES.evidenceDir}/${EVIDENCE_FILES.diff}`, text: redactLog(rawDiff) },
+    { path: `${FIXED_NAMES.evidenceDir}/${EVIDENCE_FILES.diff}`, text: redactPatch(rawDiff) },
     // `gates.json` — байт-в-байт копия документа гейтов: оценщик сверяет статусы.
     { path: `${FIXED_NAMES.evidenceDir}/${EVIDENCE_FILES.gates}`, text: gatesText },
   ];

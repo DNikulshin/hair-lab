@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { describe, test } from 'node:test';
 
-import { redactLog, redactQa, scanSecrets } from './redact.mjs';
+import { redactLog, redactPatch, redactQa, scanSecrets } from './redact.mjs';
 
 /** Корень фикстур: `scripts/fixtures/cycle/`. */
 const FIXTURES = new URL('../../fixtures/cycle/', import.meta.url);
@@ -37,6 +37,25 @@ describe('redactLog: маскирование по таблице §5.4', () => 
       redactLog('{"authorization": "Basic dXNlcjpwYXNz"}'),
       '{"authorization": "[secret]"}',
     );
+  });
+
+  test('проза с «cookie:» не маскируется (#246)', () => {
+    assert.equal(
+      redactLog('cookie: проверяется только в production'),
+      'cookie: проверяется только в production',
+    );
+    assert.equal(
+      redactLog('set-cookie: ставится один раз при входе'),
+      'set-cookie: ставится один раз при входе',
+    );
+    assert.equal(
+      redactLog('authorization: проверяется только в production'),
+      'authorization: проверяется только в production',
+    );
+  });
+
+  test('сырой токен в authorization машинного вида маскируется', () => {
+    assert.equal(redactLog('authorization: abc123def456ghi789'), 'authorization: [secret]');
   });
 
   test('JWT заменяется на [secret]', () => {
@@ -105,6 +124,37 @@ describe('redactLog: границы', () => {
 
   test('пустая строка остаётся пустой', () => {
     assert.equal(redactLog(''), '');
+  });
+});
+
+describe('redactPatch', () => {
+  test('маскирует контакты, JWT и пароль строки подключения', () => {
+    assert.equal(redactPatch('contact user@example.com +79990000000'), 'contact [email] [phone]');
+    assert.equal(
+      redactPatch(
+        'const header = "Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ0ZXN0In0.c2lnbmF0dXJl";',
+      ),
+      'const header = "Authorization: Bearer [secret]";',
+    );
+    assert.equal(
+      redactPatch('DATABASE_URL=postgresql://app:s3cr3t@127.0.0.1:5432/hair_lab'),
+      'DATABASE_URL=postgresql://[secret]@127.0.0.1:5432/hair_lab',
+    );
+  });
+
+  test('не трогает код справа от ключей — патч остаётся кодом (#246)', () => {
+    const code = [
+      'async function createSessionToken(): Promise<void> {',
+      '  const token = request.cookies[STAFF_SESSION_COOKIE_NAME];',
+      '  if (typeof value === "string") return;',
+      '  // cookie: проверяется только в production',
+    ].join('\n');
+
+    assert.equal(redactPatch(code), code);
+  });
+
+  test('не строка — исключение', () => {
+    assert.throws(() => redactPatch(null), /ожидается строка/);
   });
 });
 

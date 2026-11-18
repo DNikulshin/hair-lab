@@ -1073,6 +1073,32 @@ describe('packet: пакет evidence/', () => {
     assert.match(patch, /\+contact: \[email\]/);
   });
 
+  test('diff.patch остаётся кодом: ключи token/cookie справа не маскируются (#246)', (t) => {
+    const { root, baseSha } = makeRepo(t);
+    const code = [
+      'base',
+      'async function createSessionToken(): Promise<void> {',
+      '  const token = request.cookies[STAFF_SESSION_COOKIE_NAME];',
+      '  // cookie: проверяется только в production',
+      '  if (typeof token === "string") return;',
+      '}',
+      '',
+    ].join('\n');
+    writeFileSync(join(root, 'tracked.txt'), code);
+    const dir = makeCycleDir(root, { baseSha });
+
+    assert.equal(runCli(root, ['packet', '--dir', dir]).status, 0);
+
+    const patch = evidence(dir, 'diff.patch');
+    // Код и проза после ключей сохранены байт-в-байт — цена ошибки #240: патч был невалиден.
+    assert.match(patch, /\+async function createSessionToken\(\): Promise<void> \{/);
+    assert.match(patch, /\+ {2}const token = request\.cookies\[STAFF_SESSION_COOKIE_NAME\];/);
+    assert.match(patch, /\+ {2}\/\/ cookie: проверяется только в production/);
+    assert.match(patch, /\+ {2}if \(typeof token === "string"\) return;/);
+    // Патч — валидный патч: обратное применение к рабочему дереву проходит проверку.
+    gitRun(root, ['apply', '--check', '--reverse', join(dir, 'evidence', 'diff.patch')]);
+  });
+
   test('два прогона packet дают одинаковые файлы', (t) => {
     const { root, baseSha } = makeRepo(t);
     writeFileSync(join(root, 'tracked.txt'), 'base\nchanged\n');
