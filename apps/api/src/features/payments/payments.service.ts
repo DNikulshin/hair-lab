@@ -579,6 +579,33 @@ export async function markRefundRequired(
 }
 
 /**
+ * Обязательство вернуть деньги по отменённой записи: `payments.refund_required = true`
+ * в той же транзакции, что и перевод записи в `cancelled` (клиентская и салонная отмена).
+ *
+ * Условия стоят в самом `WHERE`, а не в чтении перед записью: флаг не встанет платежу,
+ * который успел уйти в другой статус (возврат уже зафиксирован параллельным вызовом),
+ * и не перезапишется у платежа, которому флаг уже поставили. Платёж у записи один
+ * (unique `appointment_id`), поэтому `updateMany` — это один условный `UPDATE`.
+ *
+ * Ставится только `succeeded`: у `pending` денег ещё нет (опоздавшую оплату разберёт
+ * обработчик уведомления своим `needsRefund`), `canceled` и `refunded` уже разобраны
+ * уведомлением и свипером. Отсутствие платежа — не ошибка (режим без оплаты): строка
+ * просто не находится.
+ *
+ * `true` — флаг поставлен этим вызовом, `false` — платить было нечего или он уже стоял.
+ */
+export async function markRefundRequiredByAppointment(
+  tx: Prisma.TransactionClient,
+  appointmentId: string,
+): Promise<boolean> {
+  const updated = await tx.payment.updateMany({
+    where: { appointmentId, status: 'succeeded', refundRequired: false },
+    data: { refundRequired: true },
+  });
+  return updated.count === 1;
+}
+
+/**
  * Платежи с обязательным возвратом — задание для свипера.
  *
  * Только служебные поля и без персональных данных: `yookassa_payment_id` нужен шлюзу,

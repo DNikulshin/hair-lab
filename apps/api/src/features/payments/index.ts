@@ -28,6 +28,7 @@ export {
   listPendingRefunds,
   markRefunded,
   markRefundRequired,
+  markRefundRequiredByAppointment,
   PAYMENT_CANCELED_REASON,
   PAYMENT_CREATION_FAILED_REASON,
   PAYMENT_EXPIRED_REASON,
