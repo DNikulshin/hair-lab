@@ -4,6 +4,7 @@ import {
   formatSlotDateTime,
   formatSlotTime,
   groupSlotsByMaster,
+  isSameSlot,
   parseSlotsPayload,
 } from './slots-model';
 
@@ -53,6 +54,26 @@ describe('groupSlotsByMaster', () => {
 
   it('на пустом списке отдаёт пустой массив', () => {
     expect(groupSlotsByMaster([])).toEqual([]);
+  });
+});
+
+describe('isSameSlot', () => {
+  const midnight = '2030-03-04T06:00:00.000Z';
+
+  it('совпадают мастер и время — тот же слот', () => {
+    expect(isSameSlot(slot(masterA, midnight), slot(masterA, midnight))).toBe(true);
+  });
+
+  it('одно время у разных мастеров — разные слоты (#258)', () => {
+    // Сценарий бага: при «Любом свободном мастере» `15:00` есть в обеих группах,
+    // и подсвечивались обе кнопки сразу.
+    expect(isSameSlot(slot(masterA, midnight), slot(masterB, midnight))).toBe(false);
+  });
+
+  it('один мастер, разное время — разные слоты', () => {
+    expect(isSameSlot(slot(masterA, midnight), slot(masterA, '2030-03-04T07:00:00.000Z'))).toBe(
+      false,
+    );
   });
 });
 
