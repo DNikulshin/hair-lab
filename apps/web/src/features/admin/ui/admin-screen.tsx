@@ -30,6 +30,8 @@ import { StaffLoginForm } from './staff-login-form';
  * не даёт второму клику отправить второй запрос. Ответ API — обновлённая запись, поэтому
  * строка правится локально без рефетча. `409` — состояние изменилось (сообщение +
  * перечитать список), `404` — строку убираем, `401` — экран возвращается к форме входа.
+ * Кнопку отмены видит только роль `admin`: менеджеру отмена запрещена (#252), а причина
+ * и последствия отмены (письмо клиенту, деньги) — решение администратора.
  *
  * ПДн: в адресе страницы живёт только дата; ничего не пишем в `localStorage` и не логируем.
  */
@@ -259,6 +261,7 @@ export function AdminScreen({ timeZone }: AdminScreenProps) {
             timeZone={timeZone}
             busy={pendingAction !== null}
             currentAction={pendingAction?.id === item.id ? pendingAction.action : null}
+            canCancel={staff?.role === 'admin'}
             onAction={(action, reason) => runAction(item, action, reason)}
           />
         ))}

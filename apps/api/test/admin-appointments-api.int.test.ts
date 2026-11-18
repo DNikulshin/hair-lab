@@ -4,6 +4,7 @@ import {
   adminAppointmentsResponseSchema,
   apiErrorSchema,
   type BookingStatus,
+  type StaffRole,
 } from '@hair-lab/contracts';
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import { buildServer } from '../src/app/build-server';
@@ -24,7 +25,11 @@ import { createFixture, createTestDb, fakeClient } from './db/helpers';
  * с сортировкой и полным телефоном клиента, все переходы и их идемпотентность (повтор 200
  * без сдвига `updatedAt`), 409 на терминальных статусах, 404 на неизвестной записи,
  * письмо `booking_cancellation` и подавленное подтверждение в outbox при салонной отмене,
- * 400 на неверную дату и пустую причину.
+ * 400 на неверную дату и пустую причину, матрицу ролей (#252): `manager` ведёт день, но
+ * отменять салоном может только `admin` — 403 `forbidden`.
+ *
+ * По умолчанию сотрудник — `manager`: так основной сценарий проверяет самую узкую из
+ * допустимых ролей, а `admin` берётся там, где без него действие запрещено.
  *
  * Все данные вымышленные: почты только в зоне `example.invalid`, телефоны не существуют.
  */
@@ -49,12 +54,12 @@ const headers = (ip = nextIp()) => ({ 'x-forwarded-for': ip });
 const staffEmail = () => `staff-${randomUUID()}@example.invalid`;
 
 /** Сотрудник в БД с хешем вымышленного пароля (как в тесте staff-auth). */
-async function createStaff(): Promise<{ id: string; email: string }> {
+async function createStaff(role: StaffRole = 'manager'): Promise<{ id: string; email: string }> {
   const created = await db.staff.create({
     data: {
       email: staffEmail(),
       passwordHash: await hashPassword(password),
-      role: 'manager',
+      role,
     },
     select: { id: true, email: true },
   });
@@ -72,8 +77,8 @@ function sessionCookie(response: Awaited<ReturnType<typeof app.inject>>): string
 }
 
 /** Вход сотрудника по-настоящему, через маршрут: cookie и сессия в БД настоящие. */
-async function loginAsStaff(): Promise<string> {
-  const staff = await createStaff();
+async function loginAsStaff(role: StaffRole = 'manager'): Promise<string> {
+  const staff = await createStaff(role);
   const response = await app.inject({
     method: 'POST',
     url: '/staff/auth/login',
@@ -298,7 +303,8 @@ describe('переходы статусов записи', () => {
   });
 
   it('терминальные статусы не меняются: 409 conflict', async () => {
-    const cookie = await loginAsStaff();
+    // Роль `admin`: в наборе есть отмена салоном, а она менеджеру запрещена (#252).
+    const cookie = await loginAsStaff('admin');
     const { masterId, serviceId } = await setupCatalog();
     const date = salonDatePlus(2);
     const completedId = await createAppointment(masterId, serviceId, at(date, 9 * 60), {
@@ -364,7 +370,7 @@ describe('переходы статусов записи', () => {
 
 describe('POST /admin/appointments/:id/cancel', () => {
   it('пишет причину салона, снимает подтверждение и ставит письмо об отмене', async () => {
-    const cookie = await loginAsStaff();
+    const cookie = await loginAsStaff('admin');
     const { masterId, serviceId } = await setupCatalog();
     const id = await createAppointment(masterId, serviceId, at(salonDatePlus(2), 14 * 60), {
       status: 'confirmed',
@@ -425,7 +431,7 @@ describe('POST /admin/appointments/:id/cancel', () => {
   });
 
   it('отмену клиента не перезаписывает: 409 и прежняя причина', async () => {
-    const cookie = await loginAsStaff();
+    const cookie = await loginAsStaff('admin');
     const { masterId, serviceId } = await setupCatalog();
     const id = await createAppointment(masterId, serviceId, at(salonDatePlus(2), 15 * 60), {
       status: 'cancelled',
@@ -450,7 +456,7 @@ describe('POST /admin/appointments/:id/cancel', () => {
   });
 
   it('без почты клиента отмена проходит, письма нет', async () => {
-    const cookie = await loginAsStaff();
+    const cookie = await loginAsStaff('admin');
     const { masterId, serviceId } = await setupCatalog();
     const id = await createAppointment(masterId, serviceId, at(salonDatePlus(2), 16 * 60), {
       clientEmail: null,
@@ -469,7 +475,7 @@ describe('POST /admin/appointments/:id/cancel', () => {
   });
 
   it('пустая причина — 400 validation_error', async () => {
-    const cookie = await loginAsStaff();
+    const cookie = await loginAsStaff('admin');
     const { masterId, serviceId } = await setupCatalog();
     const id = await createAppointment(masterId, serviceId, at(salonDatePlus(2), 17 * 60));
 
@@ -484,5 +490,35 @@ describe('POST /admin/appointments/:id/cancel', () => {
       expect(apiErrorSchema.parse(response.json()).error.code).toBe('validation_error');
     }
     expect((await readAppointment(id)).status).toBe('pending');
+  });
+});
+
+describe('матрица ролей админки (#252)', () => {
+  it('менеджер ведёт день, но отменить салоном не может: 403 forbidden', async () => {
+    const cookie = await loginAsStaff('manager');
+    const { masterId, serviceId } = await setupCatalog();
+    const date = salonDatePlus(2);
+    const id = await createAppointment(masterId, serviceId, at(date, 13 * 60));
+
+    // День и операционные отметки менеджеру доступны: роль ограничивает только отмену.
+    const list = await app.inject({
+      method: 'GET',
+      url: `/admin/appointments?date=${date}`,
+      headers: { ...headers(), cookie },
+    });
+    expect(list.statusCode).toBe(200);
+
+    const cancel = await app.inject({
+      method: 'POST',
+      url: `/admin/appointments/${id}/cancel`,
+      headers: { ...headers(), cookie },
+      payload: { reason: 'мастер заболел' },
+    });
+
+    expect(cancel.statusCode).toBe(403);
+    expect(apiErrorSchema.parse(cancel.json()).error.code).toBe('forbidden');
+    // Роль проверяется до записи: статус не тронут, письма клиенту нет.
+    expect((await readAppointment(id)).status).toBe('pending');
+    expect(await readOutbox(id)).toEqual([]);
   });
 });

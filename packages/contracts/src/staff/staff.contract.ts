@@ -23,7 +23,8 @@ import { idSchema } from '../common/ids';
 
 /**
  * Роль сотрудника. Набор фиксирован: `admin` — полный доступ к админке, `manager` —
- * операционная работа. Матрица разрешений по ролям — отдельная задача.
+ * операционная работа. Матрица разрешений по ролям — `docs/decisions.md` (#252): список дня
+ * и операционные отметки доступны обеим ролям, отмена салоном — только `admin`.
  */
 export const staffRoleSchema = z.enum(['admin', 'manager']);
 export type StaffRole = z.infer<typeof staffRoleSchema>;
