@@ -7,6 +7,7 @@ import {
   idSchema,
   maskPhone,
   type AdminAppointment,
+  type StaffRole,
 } from '@hair-lab/contracts';
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import type { FastifyRequest } from 'fastify';
@@ -24,9 +25,10 @@ import {
 /**
  * Админка: записи на день и действия над ними (#242).
  *
- * Все маршруты закрыты `makeRequireStaff()` без ограничения роли (матрица ролей — отдельная
- * задача): без cookie `hl_staff_session` — 401, деактивированный сотрудник — тоже 401.
- * Клиентская cookie `hl_session` staff-маршруты не открывает: субъекты и сессии разные.
+ * Все маршруты закрыты `makeRequireStaff(...)` по матрице ролей (#252, `docs/decisions.md`):
+ * без cookie `hl_staff_session` — 401, деактивированный сотрудник — тоже 401, роль не из
+ * матрицы — 403 `forbidden`. Клиентская cookie `hl_session` staff-маршруты не открывает:
+ * субъекты и сессии разные.
  *
  * ПДн: полный телефон клиента отдаётся только в ответе авторизованному сотруднику. В логи
  * попадают лишь идентификаторы (запрос, сотрудник, запись), статус и телефон **маской** —
@@ -36,6 +38,15 @@ import {
  * 409 `conflict` — переход из текущего статуса недопустим. Повтор уже выполненного
  * действия — 200 с текущим состоянием записи.
  */
+
+/**
+ * Матрица ролей админки записей (#252): день и операционные отметки доступны обеим ролям,
+ * отмена салоном — только `admin`. Причина: `manager` ведёт день (подтверждает, отмечает
+ * визит и неявку), а отмена меняет ожидания клиента и деньги (письмо клиенту, оплата,
+ * позже возвраты) — это решение администратора. Зафиксировано в `docs/decisions.md`.
+ */
+const DAY_ROLES: readonly StaffRole[] = ['admin', 'manager'];
+const CANCEL_ROLES: readonly StaffRole[] = ['admin'];
 
 /** Действия без тела: подтверждение, завершение и неявка. */
 const bodylessActions = [
@@ -78,12 +89,16 @@ export const adminAppointmentsRoutes: FastifyPluginAsyncZod = async (app) => {
   app.get(
     '/admin/appointments',
     {
-      preHandler: makeRequireStaff(),
+      preHandler: makeRequireStaff(DAY_ROLES),
       schema: {
         tags: ['admin'],
         summary: 'Записи на день в часовом поясе салона',
         querystring: adminAppointmentsQuerySchema,
-        response: { 200: adminAppointmentsResponseSchema, 401: apiErrorSchema },
+        response: {
+          200: adminAppointmentsResponseSchema,
+          401: apiErrorSchema,
+          403: apiErrorSchema,
+        },
       },
     },
     async (request, reply) => {
@@ -109,7 +124,7 @@ export const adminAppointmentsRoutes: FastifyPluginAsyncZod = async (app) => {
     app.post(
       `/admin/appointments/:id/${action.path}`,
       {
-        preHandler: makeRequireStaff(),
+        preHandler: makeRequireStaff(DAY_ROLES),
         schema: {
           tags: ['admin'],
           summary: action.summary,
@@ -117,6 +132,7 @@ export const adminAppointmentsRoutes: FastifyPluginAsyncZod = async (app) => {
           response: {
             200: adminAppointmentResponseSchema,
             401: apiErrorSchema,
+            403: apiErrorSchema,
             404: apiErrorSchema,
             409: apiErrorSchema,
           },
@@ -136,7 +152,7 @@ export const adminAppointmentsRoutes: FastifyPluginAsyncZod = async (app) => {
   app.post(
     '/admin/appointments/:id/cancel',
     {
-      preHandler: makeRequireStaff(),
+      preHandler: makeRequireStaff(CANCEL_ROLES),
       schema: {
         tags: ['admin'],
         summary: 'Отмена салоном с причиной (pending|confirmed → cancelled)',
@@ -146,6 +162,7 @@ export const adminAppointmentsRoutes: FastifyPluginAsyncZod = async (app) => {
           200: adminAppointmentResponseSchema,
           400: apiErrorSchema,
           401: apiErrorSchema,
+          403: apiErrorSchema,
           404: apiErrorSchema,
           409: apiErrorSchema,
         },
