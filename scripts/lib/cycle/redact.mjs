@@ -3,7 +3,9 @@
  * `secrets_scan` (§5.5).
  *
  * Замены строго по таблице §5.4: строки не удаляются и не склеиваются (переводы строк
- * в шаблоны не входят), поэтому нумерация строк в диффе и логах не меняется.
+ * в шаблоны не входят), поэтому нумерация строк в диффе и логах не меняется. Для
+ * `evidence/diff.patch` есть отдельный вход `redactPatch`: правила по ключам ломали бы
+ * синтаксис кода (#246).
  * Shebang не нужен: модуль подключается из CLI-скриптов `cycle-*.mjs`.
  */
 
@@ -13,9 +15,13 @@
  */
 const H = '[^\\S\\n]';
 
-/** Значение заголовка авторизации: ключ сохраняется, значение заменяется на `[secret]`. */
-const AUTH_HEADER = new RegExp(
-  `(?<![A-Za-z0-9-])(authorization|set-cookie|cookie)(["']?${H}*[:=]${H}*["']?)(?:Bearer|Basic)?${H}*[^\\s"',;]+`,
+/**
+ * Заголовки авторизации и cookie: ключ и разделитель сохраняются, значение проверяет
+ * `isCredentialHeader`. Форма заголовка обязательна: иначе проза вида
+ * `cookie: проверяется только в production` теряла слова (#246).
+ */
+const HEADER = new RegExp(
+  `(?<![A-Za-z0-9-])(authorization|set-cookie|cookie)(["']?${H}*[:=]${H}*["']?)(?:(Bearer|Basic)${H}+)?([^\\s"',;]*)`,
   'gi',
 );
 
@@ -99,6 +105,37 @@ function keepKey(_match, name, separator) {
 }
 
 /**
+ * Заменяет значение заголовка на `[secret]`, если оно похоже на учётные данные.
+ * @param {string} match всё совпадение
+ * @param {string} name имя заголовка
+ * @param {string} separator разделитель с кавычками и пробелами
+ * @param {string | undefined} scheme `Bearer`/`Basic`, если указана
+ * @param {string} value значение
+ * @returns {string}
+ */
+function maskHeader(match, name, separator, scheme, value) {
+  if (!isCredentialHeader(name, scheme, value)) return match;
+  return `${name}${separator}[secret]`;
+}
+
+/**
+ * Похоже ли значение заголовка на учётные данные, а не на слово из прозы.
+ * `authorization` — схема с токеном или длинный токен машинного вида;
+ * `cookie`/`set-cookie` — обязательная пара `name=value`.
+ * @param {string} name
+ * @param {string | undefined} scheme
+ * @param {string} value
+ * @returns {boolean}
+ */
+function isCredentialHeader(name, scheme, value) {
+  if (scheme !== undefined) return value.length >= 8;
+  if (name.toLowerCase() === 'authorization') {
+    return value.length >= 12 && /\d/.test(value) && /[A-Za-z]/.test(value);
+  }
+  return value.includes('=');
+}
+
+/**
  * Маскирует телефон, только если цифр в нём достаточно для номера.
  * @param {string} match
  * @returns {string}
@@ -119,10 +156,30 @@ export function redactLog(text) {
   // Порядок важен: секреты вычищаются раньше контактов, чтобы значение-секрет,
   // содержащее e-mail или телефон, не превратилось в `[email]`/`[phone]`.
   return text
-    .replace(AUTH_HEADER, keepKey)
+    .replace(HEADER, maskHeader)
     .replace(JWT, '[secret]')
     .replace(PG_URL, 'postgresql://[secret]@')
     .replace(SECRET_ASSIGNMENT, keepKey)
+    .replace(EMAIL, '[email]')
+    .replace(PHONE_INTL, maskPhone)
+    .replace(PHONE_LOCAL, '[phone]');
+}
+
+/**
+ * Маскирование для `evidence/diff.patch` (§5.4): контакты, JWT и пароль строки
+ * подключения. Правила по ключам (`authorization`, `key|token|secret|password`) сюда не
+ * входят: справа от них в коде стоит выражение (`Promise<void>`, `===`, имя схемы),
+ * и `[secret]` заменял бы код — патч перестал бы применяться `git apply`, а оценщик —
+ * читать свидетельство. Секреты в диффе ловит гейт `secrets_scan` (§5.5).
+ * @param {string} text
+ * @returns {string}
+ */
+export function redactPatch(text) {
+  if (typeof text !== 'string') throw new TypeError('redactPatch: ожидается строка');
+
+  return text
+    .replace(JWT, '[secret]')
+    .replace(PG_URL, 'postgresql://[secret]@')
     .replace(EMAIL, '[email]')
     .replace(PHONE_INTL, maskPhone)
     .replace(PHONE_LOCAL, '[phone]');
