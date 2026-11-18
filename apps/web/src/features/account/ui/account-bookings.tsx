@@ -40,17 +40,17 @@ import { mapAccountError } from '../model/map-account-error';
  * Статус подтверждения почты не показываем: регистрация письмо не отправляет
  * (`emailVerifiedAt` заполняется только входом по ссылке), действие из кабинета предложить нечего.
  *
- * Оплата: у предстоящей записи со статусом `pending` показываем ссылку на страницу оплаты
- * только если в этой вкладке лежит черновик именно этой записи (`sessionStorage`) — иначе
- * страница оплаты откроется, но кнопки провайдера на ней не будет: ссылка живёт в черновике
- * вкладки, где оформляли запись. Без черновика строка говорит, что запись ещё не подтверждена,
- * и ссылку не обещает: её может не быть вовсе (`PAYMENTS_MODE=off`), а черновик вкладки мог быть
- * перезаписан другой записью. Навигация остаётся только «Отменить». Черновик читаем после
- * монтирования: `sessionStorage` есть только в браузере, а первый клиентский рендер должен
- * совпасть с серверным.
- * Текст нейтральный, потому что `pending` значит разное: при включённой оплате — «ждёт
- * предоплаты», при `PAYMENTS_MODE=off` — «ждёт подтверждения салона» (DTO кабинета платежей
- * не различает).
+ * Оплата: `pending` значит разное, и с #107 API говорит, что именно — аддитивным `awaitingPayment`.
+ * Запись ждёт оплаты (`awaitingPayment === true`): показываем «Ждёт оплаты» и либо ссылку на
+ * страницу оплаты, если в этой вкладке лежит черновик именно этой записи (`sessionStorage`),
+ * либо — без черновика — текст со ссылкой на ту вкладку, где оформляли запись. Черновик нужен
+ * только для кнопки провайдера: сам статус открывается по ссылке с id записи (её теперь несёт
+ * `return_url` ЮKassa). Запись ждёт подтверждения салона (`awaitingPayment !== true`):
+ * прежний нейтральный текст, ссылку не обещаем — её может не быть вовсе (`PAYMENTS_MODE=off`).
+ * Кнопка «Отменить» есть в обоих случаях — её доступность по-прежнему считает сервер (`cancellable`).
+ * Черновик читаем после монтирования: `sessionStorage` есть только в браузере, а первый
+ * клиентский рендер должен совпасть с серверным.
+ * Про возврат денег кабинет молчит: управление возвратом — отдельная задача (#103).
  */
 
 type Scope = 'upcoming' | 'past';
@@ -253,9 +253,9 @@ export function AccountBookings({ timeZone }: AccountBookingsProps) {
   }
 
   function renderPaymentAction(booking: AccountBooking) {
-    // Без черновика ссылку не показываем и не обещаем: её может не быть вовсе
-    // (`PAYMENTS_MODE=off`), а черновик вкладки мог быть перезаписан другой записью.
-    if (paymentDraftId !== booking.id) {
+    // Оплата не ждётся: `PAYMENTS_MODE=off` или запись ждёт подтверждения салона.
+    // Прежний нейтральный текст — ссылку не обещаем, её может не быть вовсе.
+    if (booking.awaitingPayment !== true) {
       return (
         <p className="text-sm">
           Запись ещё не подтверждена. Ссылка на оплату — в той вкладке, где вы записывались (если
@@ -264,9 +264,21 @@ export function AccountBookings({ timeZone }: AccountBookingsProps) {
       );
     }
 
+    // Холд жив, но черновика этой записи в вкладке нет: кнопку провайдера показать нечего,
+    // а сам статус открывается по ссылке с id записи.
+    if (paymentDraftId !== booking.id) {
+      return (
+        <p className="text-sm">
+          Запись ждёт оплаты. Ссылка на оплату — в той вкладке, где вы записывались; без оплаты
+          запись отменится автоматически.
+        </p>
+      );
+    }
+
     return (
       <div className="flex flex-col gap-1">
-        <p className="text-sm">Запись ещё не подтверждена.</p>
+        <p className="text-sm">Запись ждёт оплаты.</p>
+        <p className="text-xs text-muted">Без оплаты запись отменится автоматически.</p>
         <Link
           href={paymentPagePath(booking.id)}
           className="w-fit text-sm underline hover:text-accent"
@@ -330,7 +342,9 @@ export function AccountBookings({ timeZone }: AccountBookingsProps) {
           >
             <div className="flex flex-wrap items-baseline justify-between gap-2">
               <p className="font-medium">{booking.serviceName}</p>
-              <p className="text-sm text-muted">{bookingStatusLabel(booking.status)}</p>
+              <p className="text-sm text-muted">
+                {bookingStatusLabel(booking.status, booking.awaitingPayment)}
+              </p>
             </div>
             <p className="text-sm">{formatSlotDateTime(booking.startsAt, timeZone)}</p>
             <p className="text-sm text-muted">

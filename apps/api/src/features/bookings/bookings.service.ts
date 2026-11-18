@@ -14,6 +14,7 @@ import {
   BOOKING_CONFIRMATION_TYPE,
   buildBookingConfirmationPayload,
 } from './booking-confirmation.email';
+import { buildPaymentReturnUrl } from './payment-return-url';
 import { isSlotBookable, loadSchedules, salonDateOf } from './slots.service';
 
 /**
@@ -39,7 +40,10 @@ const CURRENCY = 'RUB' as const;
 export interface CreateBookingPaymentsOptions {
   /** Шлюз платежей: в тестах — поддельный, в проде — клиент ЮKassa. */
   gateway: PaymentGateway;
-  /** Куда вернуть клиента после оплаты (`YOOKASSA_RETURN_URL`). */
+  /**
+   * База адреса возврата после оплаты (`YOOKASSA_RETURN_URL`). id записи дописывает сервис
+   * (`buildPaymentReturnUrl`): без него возврат в другой вкладке не нашёл бы запись.
+   */
   returnUrl: string;
 }
 
@@ -231,7 +235,9 @@ async function createGatewayPayment(
       amountKopecks: input.booking.price.amountMinor,
       // Описание без ПДн: только услуга. Ни имени, ни телефона, ни почты.
       description: `Оплата записи: ${input.serviceName}`,
-      returnUrl: payments.returnUrl,
+      // Возврат с платёжной страницы ведёт на `/booking/payment?appointmentId=<id>`:
+      // статус открывается по ссылке даже в новой вкладке, где черновика нет.
+      returnUrl: buildPaymentReturnUrl(payments.returnUrl, input.appointmentId),
       idempotenceKey: `payment-${input.appointmentId}`,
     });
 

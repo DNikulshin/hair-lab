@@ -15,8 +15,15 @@ const STATUS_LABELS: Record<BookingStatus, string> = {
   no_show: 'Неявка',
 };
 
-/** Подпись статуса; неизвестный код не роняет рендер. */
-export function bookingStatusLabel(status: BookingStatus): string {
+/**
+ * Подпись статуса; неизвестный код не роняет рендер.
+ *
+ * `awaitingPayment` уточняет только `pending`: при включённой оплате запись ждёт денег,
+ * а не подтверждения салона. Поле в DTO аддитивное — старый API его не присылает,
+ * и тогда остаётся прежняя нейтральная подпись.
+ */
+export function bookingStatusLabel(status: BookingStatus, awaitingPayment = false): string {
+  if (status === 'pending' && awaitingPayment) return 'Ждёт оплаты';
   return STATUS_LABELS[status] ?? 'Статус неизвестен';
 }
 

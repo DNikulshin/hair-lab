@@ -190,6 +190,17 @@ describe('accountBookingSchema', () => {
     expect(() => accountBookingSchema.parse(withoutCancellable)).toThrow();
   });
 
+  it('принимает аддитивный awaitingPayment и остаётся валидной без него', () => {
+    expect(
+      accountBookingSchema.parse({ ...accountBooking, awaitingPayment: true }).awaitingPayment,
+    ).toBe(true);
+    // Старые клиенты поля не знают: без него схема по-прежнему валидна.
+    expect(accountBookingSchema.parse(accountBooking).awaitingPayment).toBeUndefined();
+    expect(() =>
+      accountBookingSchema.parse({ ...accountBooking, awaitingPayment: 'yes' }),
+    ).toThrow();
+  });
+
   it('отклоняет время без зоны, пустые имена и неизвестный статус', () => {
     expect(() =>
       accountBookingSchema.parse({ ...accountBooking, startsAt: '2030-03-04 06:00' }),

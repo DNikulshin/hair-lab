@@ -50,6 +50,7 @@ interface Row {
   clientEmail: string | null;
   cancelReason: string | null;
   updatedAt: Date;
+  paymentDeadlineAt: Date | null;
   master: { fullName: string };
   service: { name: string };
 }
@@ -68,6 +69,7 @@ function row(overrides: Partial<Row> = {}): Row {
     clientEmail: 'guest@example.invalid',
     cancelReason: null,
     updatedAt: new Date('2030-01-01T00:00:00.000Z'),
+    paymentDeadlineAt: null,
     master: { fullName: 'Тестовый Мастер' },
     service: { name: 'Стрижка' },
     ...overrides,
@@ -663,5 +665,55 @@ describe('listAccountBookings', () => {
     await expect(
       listAccountBookings(db, CLIENT_ID, query({ cursor: '2030-03-04T09:00:00.000Z|abc' }), NOW),
     ).rejects.toBeInstanceOf(InvalidCursorError);
+  });
+});
+
+describe('DTO кабинета: awaitingPayment', () => {
+  /** Дедлайн холда: есть только у записи, которая действительно ждёт оплаты. */
+  const HOLD_DEADLINE = new Date(NOW.getTime() + 10 * MINUTE_MS);
+
+  it('pending с дедлайном холда — «ждёт оплаты»', async () => {
+    const { db } = createDbStub([row({ status: 'pending', paymentDeadlineAt: HOLD_DEADLINE })]);
+
+    const [item] = (await listAccountBookings(db, CLIENT_ID, query(), NOW)).items;
+
+    // Поле есть всегда (булево, а не undefined): клиенту не нужно отличать «нет поля» от «false».
+    expect(item?.awaitingPayment).toBe(true);
+  });
+
+  it('pending без дедлайна (PAYMENTS_MODE=off) — «ждёт подтверждения салона»', async () => {
+    const { db } = createDbStub([row({ status: 'pending' })]);
+
+    const [item] = (await listAccountBookings(db, CLIENT_ID, query(), NOW)).items;
+
+    expect(item?.status).toBe('pending');
+    expect(item?.awaitingPayment).toBe(false);
+  });
+
+  it('confirmed с оставшимся дедлайном — оплата уже не ждётся', async () => {
+    const { db } = createDbStub([row({ status: 'confirmed', paymentDeadlineAt: HOLD_DEADLINE })]);
+
+    const [item] = (await listAccountBookings(db, CLIENT_ID, query(), NOW)).items;
+
+    expect(item?.awaitingPayment).toBe(false);
+  });
+
+  it('отмена холда: DTO отменённой записи говорит, что оплата не ждётся', async () => {
+    const { db } = createDbStub([row({ status: 'pending', paymentDeadlineAt: HOLD_DEADLINE })]);
+
+    const booking = await cancelAccountBooking(db, CLIENT_ID, BOOKING_ID, NOW);
+
+    expect(booking.status).toBe('cancelled');
+    expect(booking.awaitingPayment).toBe(false);
+  });
+
+  it('уже отменённая запись с дедлайном в прошлом — тоже false', async () => {
+    const { db } = createDbStub([
+      row({ status: 'cancelled', paymentDeadlineAt: new Date(NOW.getTime() - MINUTE_MS) }),
+    ]);
+
+    const booking = await cancelAccountBooking(db, CLIENT_ID, BOOKING_ID, NOW);
+
+    expect(booking.awaitingPayment).toBe(false);
   });
 });
