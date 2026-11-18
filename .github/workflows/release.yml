@@ -23,15 +23,14 @@ env:
   IMAGE_BASE: ${{ github.repository }}
 
 jobs:
-  # Что изменилось: пересобираем только затронутые образы (scripts/changed-components.mjs).
-  # Тег v*.*.*, workflow_dispatch, отсутствие базы для диффа — всегда оба образа.
+  # Что изменилось: docs-only push не должен гонять ни сборки, ни деплой.
+  # Тег v*.*.*, workflow_dispatch, отсутствие базы для диффа — считается «всё изменилось».
   changes:
     runs-on: ubuntu-latest
     outputs:
-      api: ${{ steps.detect.outputs.api }}
-      web: ${{ steps.detect.outputs.web }}
+      # Только «есть ли кодовые изменения»: раскладку по компонентам release не использует —
+      # набор образов задаёт статическая матрица job'а `images` (issue #109).
       any: ${{ steps.detect.outputs.any }}
-      matrix: ${{ steps.detect.outputs.matrix }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -72,18 +71,29 @@ jobs:
   images:
     needs: [verify-tag, changes]
     # Для push в main verify-tag пропускается — образы собираются как обычно.
-    # Пустая матрица (docs-only push) не запускает ни одной сборки.
+    # Ничего не изменилось (docs-only push) — job пропускается целиком.
+    #
+    # Матрица статическая: оба компонента при любом кодовом изменении (issue #109). Причина —
+    # у всех сервисов один `IMAGE_TAG` (sha коммита), и деплой тянет `api`, `api-migrations`
+    # и `web` именно с ним. Web-only push собирал бы только web, а `docker compose pull`
+    # на сервере падал бы на отсутствующем `api:<sha>`. Пересборка неизменённого api
+    # дёшева: слой `pnpm install` и сборка берутся из кэша `type=gha`.
     #
     # Здесь job-level `if` оставлен сознательно: эти чеки НЕ являются required в branch
     # protection, поэтому пропуск никого не блокирует. Если `images` когда-нибудь попадёт
-    # в required checks — перейти на статическую матрицу со step-level gate, как в ci.yml
-    # (job `docker`): у пропущенного job'а не создаются чеки с именами вида
-    # `images (api, …)`, и PR/деплой навсегда получит «Expected — Waiting for status».
+    # в required checks — перейти на step-level gate, как в ci.yml (job `docker`): у
+    # пропущенного job'а не создаются чеки с именами вида `images (api, …)`, и PR/деплой
+    # навсегда получит «Expected — Waiting for status».
     if: always() && needs.changes.result == 'success' && needs.changes.outputs.any == 'true' && (needs.verify-tag.result == 'success' || needs.verify-tag.result == 'skipped')
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
-      matrix: ${{ fromJSON(needs.changes.outputs.matrix) }}
+      matrix:
+        include:
+          - component: api
+            dockerfile: apps/api/Dockerfile
+          - component: web
+            dockerfile: apps/web/Dockerfile
     steps:
       - uses: actions/checkout@v4
 
