@@ -1,4 +1,7 @@
+import { randomUUID } from 'node:crypto';
 import {
+  accountBookingResponseSchema,
+  adminAppointmentResponseSchema,
   apiErrorSchema,
   bookingResponseSchema,
   paymentStatusResponseSchema,
@@ -16,6 +19,7 @@ import {
   type GatewayRefundStatus,
   type PaymentGateway,
 } from '../src/features/payments';
+import { hashPassword } from '../src/shared/auth/password';
 import { env } from '../src/shared/config/env';
 import { countOutboxFor, createFixture, createTestDb, fakeClient } from './db/helpers';
 
@@ -138,6 +142,11 @@ beforeEach(() => {
 
 afterEach(async () => {
   await fixture.cleanup();
+  if (staffIds.length > 0) {
+    // Сессии сотрудника удаляются каскадом вместе с ним.
+    await db.staff.deleteMany({ where: { id: { in: staffIds } } });
+    staffIds.length = 0;
+  }
 });
 
 afterAll(async () => {
@@ -205,8 +214,13 @@ function bookingBody(params: {
   };
 }
 
-async function postBooking(app: Server, body: object) {
-  const response = await app.inject({ method: 'POST', url: '/bookings', payload: body });
+async function postBooking(app: Server, body: object, cookie?: string) {
+  const response = await app.inject({
+    method: 'POST',
+    url: '/bookings',
+    payload: body,
+    ...(cookie === undefined ? {} : { headers: { cookie } }),
+  });
   return { statusCode: response.statusCode, body: response.json() as unknown, raw: response.body };
 }
 
@@ -219,7 +233,7 @@ async function firstSlot(
   return slots[0] as Slot;
 }
 
-async function bookFirstSlot(app: Server, daysAhead = 3) {
+async function bookFirstSlot(app: Server, daysAhead = 3, cookie?: string) {
   const salon = await setupSalon(daysAhead);
   const slot = await firstSlot(app, salon);
   const response = await postBooking(
@@ -230,6 +244,7 @@ async function bookFirstSlot(app: Server, daysAhead = 3) {
       startsAt: slot.startsAt,
       idempotencyKey: nextKey(),
     }),
+    cookie,
   );
   return { salon, slot, response };
 }
@@ -285,8 +300,84 @@ async function paymentOf(appointmentId: string) {
       yookassaPaymentId: true,
       confirmationUrl: true,
       refundRequired: true,
+      // Нужен, чтобы видеть, переписывалась ли строка повтором отмены.
+      updatedAt: true,
     },
   });
+}
+
+/** Cookie клиента: сессия в БД настоящая, запросы идут от имени аккаунта. */
+async function loginAsClient(): Promise<string> {
+  const clientId = await fixture.client();
+  return `hl_session=${await fixture.session(clientId)}`;
+}
+
+/** Сотрудники, созданные тестом: сессии уходят каскадом вместе с ними. */
+const staffIds: string[] = [];
+const password = 'example-staff-password-0003';
+let staffIpNumber = 70;
+
+function staffHeaders(): Record<string, string> {
+  staffIpNumber += 1;
+  return { 'x-forwarded-for': `10.3.1.${staffIpNumber}` };
+}
+
+/** Вход сотрудника по-настоящему, через маршрут: cookie и сессия в БД настоящие. */
+async function loginAsStaff(): Promise<string> {
+  const created = await db.staff.create({
+    data: {
+      email: `staff-${randomUUID()}@example.invalid`,
+      passwordHash: await hashPassword(password),
+      role: 'manager',
+    },
+    select: { id: true, email: true },
+  });
+  staffIds.push(created.id);
+
+  const response = await paidApp.inject({
+    method: 'POST',
+    url: '/staff/auth/login',
+    headers: staffHeaders(),
+    payload: { email: created.email, password },
+  });
+  expect(response.statusCode).toBe(200);
+
+  const header = response.headers['set-cookie'];
+  const raw = Array.isArray(header) ? header.join(';') : (header ?? '');
+  const match = raw.match(/(?:^|,\s*)hl_staff_session=([^;,]+)/);
+  if (!match?.[1]) throw new Error('hl_staff_session cookie was not returned');
+  return `hl_staff_session=${match[1]}`;
+}
+
+/** `DELETE /account/bookings/:id` от имени клиента. */
+function cancelAccountBookingRequest(cookie: string, id: string) {
+  return paidApp.inject({
+    method: 'DELETE',
+    url: `/account/bookings/${id}`,
+    headers: { cookie },
+  });
+}
+
+/** `POST /admin/appointments/:id/cancel` от имени сотрудника. */
+function cancelAdminAppointmentRequest(cookie: string, id: string, reason = 'мастер заболел') {
+  return paidApp.inject({
+    method: 'POST',
+    url: `/admin/appointments/${id}/cancel`,
+    headers: { ...staffHeaders(), cookie },
+    payload: { reason },
+  });
+}
+
+/** Уведомление об успешной оплате: запись подтверждается, платёж становится `succeeded`. */
+async function payAppointment(appointmentId: string) {
+  const payment = await paymentOf(appointmentId);
+  const webhook = await postWebhook(
+    paidApp,
+    webhookBody(payment.yookassaPaymentId as string, 'payment.succeeded'),
+    ALLOWED_IP,
+  );
+  expect(webhook.statusCode).toBe(200);
+  return payment;
 }
 
 /** Свипер с тем же шлюзом, что у сервера: тик вызывается тестом, а не таймером. */
@@ -814,5 +905,119 @@ describe('GET /bookings/:id/payment', () => {
     expect(errorCode(missing.json())).toBe('not_found');
     expect(broken.statusCode).toBe(400);
     expect(errorCode(broken.json())).toBe('validation_error');
+  });
+});
+
+describe('отмена оплаченной записи клиентом: refundRequired', () => {
+  it('C1/C4/C6: флаг ставится в транзакции отмены, повтор не меняет платёж, свипер возвращает деньги', async () => {
+    const cookie = await loginAsClient();
+    const { salon } = await bookFirstSlot(paidApp, 3, cookie);
+    const appointment = await appointmentOf(salon.masterId);
+    await payAppointment(appointment.id);
+
+    const paid = await paymentOf(appointment.id);
+    expect(paid.status).toBe('succeeded');
+    expect(paid.refundRequired).toBe(false);
+    expect((await appointmentOf(salon.masterId)).status).toBe('confirmed');
+
+    const cancelled = await cancelAccountBookingRequest(cookie, appointment.id);
+    expect(cancelled.statusCode).toBe(200);
+    expect(accountBookingResponseSchema.parse(cancelled.json()).booking.status).toBe('cancelled');
+
+    // Флаг стоит в той же транзакции, что и `cancelled`; статус платежа не переписывается:
+    // деньги действительно получены, возврат — дело свипера.
+    const afterCancel = await paymentOf(appointment.id);
+    expect(afterCancel.refundRequired).toBe(true);
+    expect(afterCancel.status).toBe('succeeded');
+    expect((await appointmentOf(salon.masterId)).status).toBe('cancelled');
+
+    // C4: повторная отмена — 200 и платёж не тронут (в том числе `updatedAt`).
+    const repeated = await cancelAccountBookingRequest(cookie, appointment.id);
+    expect(repeated.statusCode).toBe(200);
+    expect(accountBookingResponseSchema.parse(repeated.json()).booking.status).toBe('cancelled');
+    expect(await paymentOf(appointment.id)).toEqual(afterCancel);
+
+    // C6: свипер по-прежнему забирает запись с флагом и возвращает деньги тем же ключом.
+    const refundKey = `refund-${paid.id}`;
+    /** Вызовы возврата именно по нашему платежу: свипер тикает по всей БД. */
+    const refundCalls = () =>
+      fake.calls.createRefund.filter((call) => call.idempotenceKey === refundKey);
+
+    expect(refundCalls()).toHaveLength(0);
+    const tick = await createTestSweeper().tick();
+    expect(tick.refundsCompleted).toBeGreaterThanOrEqual(1);
+
+    const afterRefund = await paymentOf(appointment.id);
+    expect(afterRefund.status).toBe('refunded');
+    expect(afterRefund.refundRequired).toBe(false);
+    expect(refundCalls()).toHaveLength(1);
+    expect(refundCalls()[0]).toEqual({
+      yookassaPaymentId: paid.yookassaPaymentId,
+      amountKopecks: paid.amountKopecks,
+      idempotenceKey: refundKey,
+    });
+    // Запись остаётся отменённой: визита не будет.
+    expect((await appointmentOf(salon.masterId)).status).toBe('cancelled');
+  });
+});
+
+describe('отмена оплаченной записи салоном: refundRequired', () => {
+  it('C2/C4: салонная отмена ставит флаг, повтор не меняет платёж', async () => {
+    // Гостевая запись: сценарий из issue — клиент оплатил, салон отменил визит.
+    const { salon } = await bookFirstSlot(paidApp);
+    const appointment = await appointmentOf(salon.masterId);
+    await payAppointment(appointment.id);
+
+    const paid = await paymentOf(appointment.id);
+    expect(paid.status).toBe('succeeded');
+    expect(paid.refundRequired).toBe(false);
+
+    const cookie = await loginAsStaff();
+    const cancelled = await cancelAdminAppointmentRequest(cookie, appointment.id);
+    expect(cancelled.statusCode).toBe(200);
+    expect(adminAppointmentResponseSchema.parse(cancelled.json()).booking.status).toBe('cancelled');
+
+    const afterCancel = await paymentOf(appointment.id);
+    expect(afterCancel.refundRequired).toBe(true);
+    expect(afterCancel.status).toBe('succeeded');
+    expect((await appointmentOf(salon.masterId)).status).toBe('cancelled');
+
+    // C4: повтор салонной отмены идемпотентен (200) и платёж не трогает.
+    const repeated = await cancelAdminAppointmentRequest(cookie, appointment.id, 'другая причина');
+    expect(repeated.statusCode).toBe(200);
+    expect(adminAppointmentResponseSchema.parse(repeated.json()).booking.status).toBe('cancelled');
+    expect(await paymentOf(appointment.id)).toEqual(afterCancel);
+
+    // Флаг снимается только вместе с фактическим возвратом — не повтором отмены.
+    const refundKey = `refund-${paid.id}`;
+    expect(
+      fake.calls.createRefund.filter((call) => call.idempotenceKey === refundKey),
+    ).toHaveLength(0);
+  });
+});
+
+describe('отмена неоплаченной записи: refundRequired не ставится', () => {
+  it('C3: отмена до вебхука (платёж pending) — 200, флага нет, платёж остаётся pending', async () => {
+    const cookie = await loginAsClient();
+    const { salon } = await bookFirstSlot(paidApp, 3, cookie);
+    const appointment = await appointmentOf(salon.masterId);
+
+    const pending = await paymentOf(appointment.id);
+    expect(pending.status).toBe('pending');
+
+    const cancelled = await cancelAccountBookingRequest(cookie, appointment.id);
+    expect(cancelled.statusCode).toBe(200);
+    expect(accountBookingResponseSchema.parse(cancelled.json()).booking.status).toBe('cancelled');
+
+    // Денег по платежу нет: возвращать нечего, и отмена не падает.
+    const after = await paymentOf(appointment.id);
+    expect(after.status).toBe('pending');
+    expect(after.refundRequired).toBe(false);
+    expect(after.updatedAt).toEqual(pending.updatedAt);
+    expect((await appointmentOf(salon.masterId)).status).toBe('cancelled');
+    // Ни одной попытки возврата по этому платежу.
+    expect(
+      fake.calls.createRefund.filter((call) => call.idempotenceKey === `refund-${pending.id}`),
+    ).toHaveLength(0);
   });
 });

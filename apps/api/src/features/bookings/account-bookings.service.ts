@@ -6,6 +6,7 @@ import type {
 } from '@hair-lab/contracts';
 import { idSchema, isoDateTimeSchema, maskPhone } from '@hair-lab/contracts';
 import type { Db } from '../../shared/db';
+import { markRefundRequiredByAppointment } from '../payments/index';
 import { BOOKING_CANCELLATION_TYPE } from './booking-cancellation.email';
 import { BOOKING_CONFIRMATION_TYPE } from './booking-confirmation.email';
 
@@ -231,11 +232,12 @@ export async function listAccountBookings(
  * владелец проверяется в самом `WHERE` (до чтения), поэтому гонка «проверили → отменили»
  * невозможна, а чужая запись не может быть изменена даже теоретически.
  *
- * Отмена и письма — одной транзакцией. Если `updateMany` обновил строку (`count === 1`),
- * то `pending`-подтверждение становится `suppressed` (диспетчер берёт только `pending`),
- * а при непустой почте клиента ставится письмо `booking_cancellation` со снимком записи на
- * момент отмены. Идемпотентность даёт тот же условный `updateMany`: повторная отмена видит,
- * что строка уже не активна, обновить её не может и писем не ставит.
+ * Отмена, письма и флаг возврата — одной транзакцией. Если `updateMany` обновил строку
+ * (`count === 1`), то оплаченному платежу ставится `payments.refund_required` (деньги вернёт
+ * свипер возвратов), `pending`-подтверждение становится `suppressed` (диспетчер берёт только
+ * `pending`), а при непустой почте клиента ставится письмо `booking_cancellation` со снимком
+ * записи на момент отмены. Идемпотентность даёт тот же условный `updateMany`: повторная отмена
+ * видит, что строка уже не активна, обновить её не может и не трогает ни платежи, ни письма.
  *
  * Если ни одна строка не обновилась, перечитываем запись по `id`, чтобы объяснить причину:
  * нет записи или другой владелец → 404 (наличие чужих записей не раскрываем);
@@ -273,6 +275,10 @@ export async function cancelAccountBooking(
         where: { id, clientId },
         select: cancelledBookingSelect,
       });
+
+      // Деньги за отменённую запись остаются у салона, пока их не вернут: обязанность
+      // фиксируется флагом в этой же транзакции, возврат дальше добивает свипер.
+      await markRefundRequiredByAppointment(tx, id);
 
       // Подтверждение уже неуместно: `pending` → `suppressed` с коротким кодом причины.
       // Прочие статусы (sent, failed) не трогаем: письмо либо уже ушло, либо не уйдёт.

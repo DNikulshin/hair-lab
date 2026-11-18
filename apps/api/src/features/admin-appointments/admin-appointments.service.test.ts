@@ -36,6 +36,7 @@ const NOW = new Date('2030-06-15T09:00:00.000Z');
 const BOOKING_ID = '00000000-0000-4000-8000-000000000101';
 const OTHER_BOOKING_ID = '00000000-0000-4000-8000-000000000102';
 const UNKNOWN_ID = '00000000-0000-4000-8000-0000000001ff';
+const PAYMENT_ID = '00000000-0000-4000-8000-000000000105';
 
 /** Дата в TZ салона и её абсолютные границы: тест не зависит от пояса машины. */
 const DATE = '2030-06-15';
@@ -90,6 +91,26 @@ interface OutboxRow {
   status: 'pending' | 'sent' | 'failed' | 'suppressed';
   lastError: string | null;
   payload: unknown;
+}
+
+/** Строка платежа в стабе: отмена трогает только флаг возврата и статус не меняет. */
+interface PaymentRow {
+  id: string;
+  appointmentId: string;
+  status: 'pending' | 'succeeded' | 'canceled' | 'refunded';
+  amountKopecks: number;
+  refundRequired: boolean;
+}
+
+function paymentRow(overrides: Partial<PaymentRow> = {}): PaymentRow {
+  return {
+    id: PAYMENT_ID,
+    appointmentId: BOOKING_ID,
+    status: 'succeeded',
+    amountKopecks: 350_000,
+    refundRequired: false,
+    ...overrides,
+  };
 }
 
 /** Сравнение значений: для дат — по времени, для строк — по порядку (как в Postgres). */
@@ -153,7 +174,7 @@ function direction(orders: OrderBy | OrderBy[], key: keyof OrderBy): 1 | -1 {
  * переписывалась ли запись на повторном запросе. `$transaction` выполняет колбэк над тем же
  * стабом: транзакция в тесте без БД не нужна, важно, какие запросы делает сервис.
  */
-function createDbStub(rows: Row[], outboxRows: OutboxRow[] = []) {
+function createDbStub(rows: Row[], outboxRows: OutboxRow[] = [], paymentRows: PaymentRow[] = []) {
   const updateMany = vi.fn(async (args: { where: Where; data: Partial<Row> }) => {
     const matched = rows.filter((record) => matches(record, args.where));
     for (const record of matched) Object.assign(record, args.data, { updatedAt: NOW });
@@ -184,6 +205,13 @@ function createDbStub(rows: Row[], outboxRows: OutboxRow[] = []) {
     },
   );
 
+  // Платежи: сервис отмены только ставит флаг возврата — условие в WHERE, как в Prisma.
+  const paymentUpdateMany = vi.fn(async (args: { where: Where; data: Partial<PaymentRow> }) => {
+    const matched = paymentRows.filter((record) => matches(record, args.where));
+    for (const record of matched) Object.assign(record, args.data);
+    return { count: matched.length };
+  });
+
   const outboxUpdateMany = vi.fn(async (args: { where: Where; data: Partial<OutboxRow> }) => {
     const matched = outboxRows.filter((record) => matches(record, args.where));
     for (const record of matched) Object.assign(record, args.data);
@@ -206,11 +234,21 @@ function createDbStub(rows: Row[], outboxRows: OutboxRow[] = []) {
 
   const db = {
     appointment: { updateMany, findFirst, findFirstOrThrow, findMany },
+    payment: { updateMany: paymentUpdateMany },
     outboxMessage: { updateMany: outboxUpdateMany, create: outboxCreate },
     $transaction: async <T>(fn: (tx: Db) => Promise<T>): Promise<T> => fn(db as unknown as Db),
   } as unknown as Db;
 
-  return { db, updateMany, findMany, outboxRows, outboxUpdateMany, outboxCreate };
+  return {
+    db,
+    updateMany,
+    findMany,
+    paymentRows,
+    paymentUpdateMany,
+    outboxRows,
+    outboxUpdateMany,
+    outboxCreate,
+  };
 }
 
 describe('listAdminAppointments: день в TZ салона', () => {
@@ -523,5 +561,94 @@ describe('cancelAdminAppointment: причина салона и письма', 
       AdminAppointmentConflictError,
     );
     expect(record.cancelReason).toBe('payment_expired');
+  });
+});
+
+describe('флаг возврата при отмене', () => {
+  it('салонная отмена оплаченной записи ставит refundRequired и не меняет статус платежа', async () => {
+    const payment = paymentRow();
+    const record = row({ status: 'confirmed' });
+    const { db, paymentUpdateMany } = createDbStub([record], [], [payment]);
+
+    const appointment = await cancelAdminAppointment(db, BOOKING_ID, 'мастер заболел');
+
+    expect(appointment.status).toBe('cancelled');
+    // Условия — в самом WHERE: только оплаченный платёж без уже стоящего флага.
+    expect(paymentUpdateMany).toHaveBeenCalledTimes(1);
+    expect(paymentUpdateMany.mock.calls[0]?.[0]).toEqual({
+      where: { appointmentId: BOOKING_ID, status: 'succeeded', refundRequired: false },
+      data: { refundRequired: true },
+    });
+    expect(payment.refundRequired).toBe(true);
+    // Деньги действительно получены: статус остаётся succeeded, возврат — дело свипера.
+    expect(payment.status).toBe('succeeded');
+  });
+
+  it('платёж pending: флага нет, отмена проходит без ошибки', async () => {
+    const payment = paymentRow({ status: 'pending' });
+    const { db, paymentUpdateMany } = createDbStub([row()], [], [payment]);
+
+    const appointment = await cancelAdminAppointment(db, BOOKING_ID, 'мастер заболел');
+
+    expect(appointment.status).toBe('cancelled');
+    // Запрос всё равно один: условие по статусу не совпало — флаг не встал.
+    expect(paymentUpdateMany).toHaveBeenCalledTimes(1);
+    expect(payment.refundRequired).toBe(false);
+    expect(payment.status).toBe('pending');
+  });
+
+  it('платежа нет: отмена проходит без ошибки', async () => {
+    const { db, paymentUpdateMany } = createDbStub([row()]);
+
+    const appointment = await cancelAdminAppointment(db, BOOKING_ID, 'мастер заболел');
+
+    expect(appointment.status).toBe('cancelled');
+    expect(paymentUpdateMany).toHaveBeenCalledTimes(1);
+  });
+
+  it('повтор салонной отмены (200) не трогает платежи', async () => {
+    const payment = paymentRow({ refundRequired: true });
+    const record = row({
+      status: 'cancelled',
+      cancelReason: `${SALON_CANCEL_REASON_PREFIX}: мастер заболел`,
+    });
+    const { db, paymentUpdateMany } = createDbStub([record], [], [payment]);
+
+    const appointment = await cancelAdminAppointment(db, BOOKING_ID, 'другая причина');
+
+    expect(appointment.status).toBe('cancelled');
+    // Ветка повтора платежи не читает и не пишет: флаг уже стоит с первой отмены.
+    expect(paymentUpdateMany).not.toHaveBeenCalled();
+    expect(payment.refundRequired).toBe(true);
+  });
+
+  it('409 (запись отменил клиент) не трогает платежи', async () => {
+    const payment = paymentRow();
+    const record = row({ status: 'cancelled', cancelReason: 'cancelled_by_client' });
+    const { db, paymentUpdateMany } = createDbStub([record], [], [payment]);
+
+    await expect(cancelAdminAppointment(db, BOOKING_ID, 'мастер заболел')).rejects.toBeInstanceOf(
+      AdminAppointmentConflictError,
+    );
+    expect(paymentUpdateMany).not.toHaveBeenCalled();
+    expect(payment.refundRequired).toBe(false);
+  });
+
+  it('confirm, complete и no_show флаг не ставят', async () => {
+    for (const [target, run] of [
+      ['confirmed', confirmAdminAppointment],
+      ['completed', completeAdminAppointment],
+      ['no_show', markAdminAppointmentNoShow],
+    ] as const) {
+      const payment = paymentRow();
+      const record = row();
+      const { db, paymentUpdateMany } = createDbStub([record], [], [payment]);
+
+      const appointment = await run(db, BOOKING_ID);
+
+      expect(appointment.status).toBe(target);
+      expect(paymentUpdateMany).not.toHaveBeenCalled();
+      expect(payment.refundRequired).toBe(false);
+    }
   });
 });
