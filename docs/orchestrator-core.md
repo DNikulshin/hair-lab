@@ -288,19 +288,20 @@ node scripts/cycle-gates.mjs --dir D [--only id,id] [--base SHA]
 `gates/<id>.<n>.log` (при превышении 5 МБ сохраняется хвост). Тайм-аут завершает процесс и
 его потомков: `fail`, причина `timeout`.
 
-| id                | Команда                                   | required | Зависит           | Условие запуска                                                                            |
-| ----------------- | ----------------------------------------- | -------- | ----------------- | ------------------------------------------------------------------------------------------ |
-| `contracts_build` | `pnpm --filter @hair-lab/contracts build` | да       | —                 | всегда                                                                                     |
-| `typecheck`       | `pnpm typecheck`                          | да       | `contracts_build` | всегда                                                                                     |
-| `lint`            | `pnpm lint`                               | да       | —                 | всегда                                                                                     |
-| `check_arch`      | `pnpm check:arch`                         | да       | —                 | всегда                                                                                     |
-| `lint_workflows`  | `pnpm lint:workflows`                     | да       | —                 | дифф затрагивает `.github/workflows/`, иначе `skipped` (`not_applicable`)                  |
-| `test`            | `pnpm test`                               | да       | `contracts_build` | всегда                                                                                     |
-| `test_int`        | `pnpm test:int`                           | да       | `contracts_build` | дифф затрагивает `apps/api/` или `packages/contracts/`; нет БД → `not_run` (`no_database`) |
-| `test_scripts`    | `pnpm test:scripts`                       | да       | —                 | дифф затрагивает `scripts/`, иначе `skipped`                                               |
-| `check_harness`   | `pnpm check:harness`                      | да       | —                 | дифф затрагивает `.pi/`, `scripts/cycle-*`, `AGENTS.md`; иначе `skipped`                   |
-| `format_check`    | `pnpm format:check`                       | да       | —                 | всегда                                                                                     |
-| `secrets_scan`    | встроенный (`scanSecrets`)                | да       | —                 | всегда                                                                                     |
+| id                 | Команда                                   | required | Зависит           | Условие запуска                                                                            |
+| ------------------ | ----------------------------------------- | -------- | ----------------- | ------------------------------------------------------------------------------------------ |
+| `contracts_build`  | `pnpm --filter @hair-lab/contracts build` | да       | —                 | всегда                                                                                     |
+| `typecheck`        | `pnpm typecheck`                          | да       | `contracts_build` | всегда                                                                                     |
+| `lint`             | `pnpm lint`                               | да       | —                 | всегда                                                                                     |
+| `check_arch`       | `pnpm check:arch`                         | да       | —                 | всегда                                                                                     |
+| `lint_workflows`   | `pnpm lint:workflows`                     | да       | —                 | дифф затрагивает `.github/workflows/`, иначе `skipped` (`not_applicable`)                  |
+| `test`             | `pnpm test`                               | да       | `contracts_build` | всегда                                                                                     |
+| `migrations_clean` | `pnpm migrations:clean`                   | да       | —                 | дифф затрагивает `apps/api/`; нет БД → `not_run` (`no_database`)                           |
+| `test_int`         | `pnpm test:int`                           | да       | `contracts_build` | дифф затрагивает `apps/api/` или `packages/contracts/`; нет БД → `not_run` (`no_database`) |
+| `test_scripts`     | `pnpm test:scripts`                       | да       | —                 | дифф затрагивает `scripts/`, иначе `skipped`                                               |
+| `check_harness`    | `pnpm check:harness`                      | да       | —                 | дифф затрагивает `.pi/`, `scripts/cycle-*`, `AGENTS.md`; иначе `skipped`                   |
+| `format_check`     | `pnpm format:check`                       | да       | —                 | всегда                                                                                     |
+| `secrets_scan`     | встроенный (`scanSecrets`)                | да       | —                 | всегда                                                                                     |
 
 `secrets_scan` проверяет только добавленные строки диффа: PEM-заголовки приватных ключей,
 `AKIA[0-9A-Z]{16}`, JWT, `postgres://user:pass@` с непустым не-шаблонным паролем, присвоения
@@ -319,6 +320,13 @@ node scripts/cycle-gates.mjs --dir D [--only id,id] [--base SHA]
 typecheck 11 с, lint 9 с, test 12 с против миллисекунд из кэша, #216). Затрагивает только
 задачи turbo: `test_int` в `turbo.json` уже `cache: false`, а `check_arch`, `check_harness`,
 `format_check`, `lint:workflows` и `test:scripts` кэша не имеют.
+
+`migrations_clean` проверяет «миграция работает на чистой БД» (#250): скрипт
+`scripts/migrations-clean.mjs` создаёт временную базу `<database>_gate_<pid>_<время>` на том же
+сервере, применяет `prisma migrate deploy`, проверяет `prisma migrate status` и удаляет базу
+в `finally`. `DROP`/`CREATE` выполняются только для этого имени — данные проекта не затрагиваются.
+Класс отказа определяется по логу так же, как у `test_int`; недоступная БД → `not_run (no_database)`.
+Правам к роли из `DATABASE_URL` нужен `CREATEDB`.
 
 `test_int` запускает `pnpm test:int` как есть: turbo пробрасывает `DATABASE_URL`, задача зависит
 от `db:generate` и не кэшируется; скрипт `.env*` не читает, поэтому `DATABASE_URL` экспортируется

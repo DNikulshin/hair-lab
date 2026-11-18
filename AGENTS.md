@@ -27,21 +27,22 @@
 
 Если скрипта нет в `package.json` — сообщи об этом, команду не выдумывай.
 
-| Что                                                    | Команда                                                   |
-| ------------------------------------------------------ | --------------------------------------------------------- |
-| Установка                                              | `pnpm install`                                            |
-| Сборка контрактов (обязательно перед типами и тестами) | `pnpm --filter @hair-lab/contracts build`                 |
-| Типы                                                   | `pnpm typecheck`                                          |
-| Линтер                                                 | `pnpm lint`                                               |
-| Форматирование (проверка / автофикс)                   | `pnpm format:check` / `pnpm format`                       |
-| Workflow GitHub Actions                                | `pnpm lint:workflows`                                     |
-| Границы слоёв и пакетов                                | `pnpm check:arch`                                         |
-| Harness агентов и моделей                              | `pnpm check:harness`                                      |
-| Unit-тесты                                             | `pnpm test`                                               |
-| Интеграционные тесты (нужны Postgres и окружение)      | `pnpm test:int`                                           |
-| Новая миграция (dev)                                   | `pnpm --filter @hair-lab/api db:migrate:dev --name <имя>` |
-| Применить миграции                                     | `pnpm --filter @hair-lab/api db:migrate:deploy`           |
-| Запуск в dev                                           | `pnpm dev`                                                |
+| Что                                                        | Команда                                                   |
+| ---------------------------------------------------------- | --------------------------------------------------------- |
+| Установка                                                  | `pnpm install`                                            |
+| Сборка контрактов (обязательно перед типами и тестами)     | `pnpm --filter @hair-lab/contracts build`                 |
+| Типы                                                       | `pnpm typecheck`                                          |
+| Линтер                                                     | `pnpm lint`                                               |
+| Форматирование (проверка / автофикс)                       | `pnpm format:check` / `pnpm format`                       |
+| Workflow GitHub Actions                                    | `pnpm lint:workflows`                                     |
+| Границы слоёв и пакетов                                    | `pnpm check:arch`                                         |
+| Harness агентов и моделей                                  | `pnpm check:harness`                                      |
+| Unit-тесты                                                 | `pnpm test`                                               |
+| Интеграционные тесты (нужны Postgres и окружение)          | `pnpm test:int`                                           |
+| Новая миграция (dev)                                       | `pnpm --filter @hair-lab/api db:migrate:dev --name <имя>` |
+| Применить миграции                                         | `pnpm --filter @hair-lab/api db:migrate:deploy`           |
+| Проверка «миграции на чистой БД» (гейт `migrations_clean`) | `pnpm migrations:clean` (нужен `DATABASE_URL`)            |
+| Запуск в dev                                               | `pnpm dev`                                                |
 
 Порядок проверки после правок: `contracts build` → `format:check` → `typecheck` → `lint` +
 `check:arch` + `check:harness` → `lint:workflows` → затронутые тесты.

@@ -209,7 +209,7 @@ describe('cycle-gates: план прогона', () => {
 
     assert.deepEqual(
       skipped.map((item) => item.id),
-      ['lint_workflows', 'test_int', 'test_scripts', 'check_harness'],
+      ['lint_workflows', 'migrations_clean', 'test_int', 'test_scripts', 'check_harness'],
     );
     assert.ok(skipped.every((item) => item.reason === 'not_applicable'));
     assert.equal(plan.length, GATES.length);
@@ -219,6 +219,10 @@ describe('cycle-gates: план прогона', () => {
     const cases = [
       ['.github/workflows/ci.yml', 'lint_workflows'],
       ['apps/api/src/bookings.ts', 'test_int'],
+      [
+        'apps/api/prisma/migrations/20261117193026_add_staff_auth/migration.sql',
+        'migrations_clean',
+      ],
       ['packages/contracts/src/index.ts', 'test_int'],
       ['scripts/lib/cycle/git.mjs', 'test_scripts'],
       ['scripts/cycle-gates.mjs', 'check_harness'],
@@ -499,6 +503,33 @@ describe('cycle-gates: test_int по логу', () => {
       assert.equal(classifyTestIntLog(text), expected);
     });
   }
+
+  test('лог migrations_clean классифицируется по тем же признакам', async (t) => {
+    const dir = makeCycleDir(t);
+    /** Раннер гейта пишет лог как настоящий: классификация читает файл лога. */
+    const runner = async (definition, options) => {
+      if (definition.id !== 'migrations_clean') return outcome();
+      writeFileSync(
+        options.logFile,
+        "Error: P1001: Can't reach database server at `127.0.0.1:55432`\n",
+      );
+      return outcome({ status: 'fail', exit: 1 });
+    };
+
+    const run = await runGates({
+      changed: ['apps/api/prisma/schema.prisma'],
+      iteration: 1,
+      dir,
+      now: () => FIXED_NOW,
+      runner,
+    });
+
+    const entry = run.gates.find((gate) => gate.id === 'migrations_clean');
+    assert.deepEqual(
+      { status: entry?.status, reason: entry?.reason, log: entry?.log },
+      { status: 'not_run', reason: 'no_database', log: 'gates/migrations_clean.1.log' },
+    );
+  });
 
   test('классификатор отклоняет нестроковый вход', () => {
     assert.throws(() => classifyTestIntLog(null), TypeError);

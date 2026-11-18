@@ -171,11 +171,12 @@ evidence/                  пакет для оценщика (§7)
 ```
 
 Идентификаторы гейтов: `contracts_build`, `typecheck`, `lint`, `check_arch`,
-`lint_workflows`, `test`, `test_int`, `test_scripts`, `check_harness`, `format_check`, `secrets_scan`.
+`lint_workflows`, `test`, `migrations_clean`, `test_int`, `test_scripts`, `check_harness`,
+`format_check`, `secrets_scan`.
 Статус `skipped` — условие запуска не выполнено (не считается непроверенным); файлы по
 итерациям: `gates.<n>.json`.
-`test_int` обязателен, если дифф затрагивает `apps/api/` или `packages/contracts/`; без базы
-статус `not_run`, причина `no_database`.
+`migrations_clean` и `test_int` обязательны, если дифф затрагивает `apps/api/` (у `test_int`
+ещё и `packages/contracts/`); без базы статус `not_run`, причина `no_database`.
 
 ### `review.json`
 
