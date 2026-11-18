@@ -14,6 +14,23 @@ export function parseSlotsPayload(payload: unknown): Slot[] | null {
   return parsed.success ? parsed.data.items : null;
 }
 
+/**
+ * Один и тот же слот: совпадают мастер и время начала.
+ *
+ * Сравнивать только время нельзя: при «Любом свободном мастере» одни и те же `15:00` есть
+ * в группах нескольких мастеров, и подсвечивались все сразу (#258). Кому уйдёт запись,
+ * решает `masterId`.
+ * @param a
+ * @param b
+ * @returns
+ */
+export function isSameSlot(
+  a: Pick<Slot, 'masterId' | 'startsAt'>,
+  b: Pick<Slot, 'masterId' | 'startsAt'>,
+): boolean {
+  return a.masterId === b.masterId && a.startsAt === b.startsAt;
+}
+
 /** Слоты одного мастера: в форме группа подписана его именем. */
 export interface MasterSlots {
   masterId: string;

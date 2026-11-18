@@ -31,6 +31,7 @@ import {
   formatSlotDateTime,
   formatSlotTime,
   groupSlotsByMaster,
+  isSameSlot,
   type DateOption,
 } from '../model/slots-model';
 
@@ -345,7 +346,10 @@ export function BookingWizard({
             ) : null}
             <ul className="flex flex-wrap gap-2">
               {group.slots.map((item) => {
-                const selected = slot?.startsAt === item.startsAt;
+                // Мастер в сравнении обязателен: при «Любом свободном мастере» одно и то же
+                // время есть в нескольких группах, и подсветка только по времени давала
+                // два «выбранных» слота (#258).
+                const selected = slot !== null && isSameSlot(slot, item);
                 return (
                   <li key={`${item.masterId}-${item.startsAt}`}>
                     <button
@@ -564,7 +568,14 @@ export function BookingWizard({
           <p className="text-xs text-muted">
             Выберите свободное время — после этого заявку можно отправить.
           </p>
-        ) : null}
+        ) : (
+          // Выбор называем словами: при «Любом свободном мастере» подсвеченный слот сам
+          // по себе не говорит, к какому мастеру уйдёт запись.
+          <p role="status" className="text-xs text-muted">
+            Выбрано: {formatSlotDateTime(slot.startsAt, timeZone)} —{' '}
+            {masterNames.get(slot.masterId) ?? 'мастер салона'}.
+          </p>
+        )}
       </form>
     </div>
   );
