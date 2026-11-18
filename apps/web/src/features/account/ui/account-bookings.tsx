@@ -4,11 +4,16 @@ import Link from 'next/link';
 import { Button } from '@/shared/ui/button';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import type { AccountBooking } from '@hair-lab/contracts';
+import type { AccountBooking, ClientAccount } from '@hair-lab/contracts';
 import { formatSlotDateTime } from '@/features/booking';
 import { formatDuration, formatPrice } from '@/features/catalog';
-import { paymentPagePath, readPaymentDraft } from '@/features/payment';
-import { cancelBooking, fetchAccountBookings, fetchCurrentClient } from '../api/account-api';
+import { clearPaymentDraft, paymentPagePath, readPaymentDraft } from '@/features/payment';
+import {
+  cancelBooking,
+  fetchAccountBookings,
+  fetchCurrentClient,
+  logoutClient,
+} from '../api/account-api';
 import { bookingStatusLabel, isActiveStatus } from '../model/account-status';
 import { mapAccountError } from '../model/map-account-error';
 
@@ -27,6 +32,13 @@ import { mapAccountError } from '../model/map-account-error';
  *
  * ПДн: имя и маска телефона приходят с сервера, полного номера и почты в ответе нет;
  * ничего не пишем в `localStorage` и не логируем.
+ *
+ * Вход и выход: кабинет показывает, под кем он открыт (`email` из `GET /auth/me`), и даёт
+ * кнопку «Выйти». Выход подтверждает сервер (`POST /auth/logout`) — только после `ok` экран
+ * уходит на главную и чистит черновик оплаты вкладки (он привязан к сессии). Сбой выхода —
+ * сообщение и никакого «будто вышли»: сессия остаётся, человек может повторить.
+ * Статус подтверждения почты не показываем: регистрация письмо не отправляет
+ * (`emailVerifiedAt` заполняется только входом по ссылке), действие из кабинета предложить нечего.
  *
  * Оплата: у предстоящей записи со статусом `pending` показываем ссылку на страницу оплаты
  * только если в этой вкладке лежит черновик именно этой записи (`sessionStorage`) — иначе
@@ -59,6 +71,8 @@ export function AccountBookings({ timeZone }: AccountBookingsProps) {
   const router = useRouter();
   const [scope, setScope] = useState<Scope>('upcoming');
   const [state, setState] = useState<ViewState>('loading');
+  const [client, setClient] = useState<ClientAccount | null>(null);
+  const [loggingOut, setLoggingOut] = useState(false);
   const [items, setItems] = useState<AccountBooking[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -86,6 +100,7 @@ export function AccountBookings({ timeZone }: AccountBookingsProps) {
       if (!active) return;
       if (!session.ok) {
         if (session.failure.kind === 'http' && session.failure.status === 401) {
+          setClient(null);
           setState('unauthorized');
           router.replace('/login');
           return;
@@ -99,6 +114,7 @@ export function AccountBookings({ timeZone }: AccountBookingsProps) {
       if (!active) return;
       if (!result.ok) {
         if (result.failure.kind === 'http' && result.failure.status === 401) {
+          setClient(null);
           setState('unauthorized');
           router.replace('/login');
           return;
@@ -109,6 +125,7 @@ export function AccountBookings({ timeZone }: AccountBookingsProps) {
       }
 
       setItems(result.data.items);
+      setClient(session.data);
       setState('ready');
     })();
 
@@ -126,6 +143,29 @@ export function AccountBookings({ timeZone }: AccountBookingsProps) {
 
   function handleRetry() {
     setReloadToken((token) => token + 1);
+  }
+
+  async function handleLogout() {
+    if (loggingOut) return;
+    setLoggingOut(true);
+    setError(null);
+    setNotice(null);
+
+    const result = await logoutClient();
+
+    setLoggingOut(false);
+
+    if (!result.ok) {
+      setError(mapAccountError(result.failure));
+      return;
+    }
+
+    // Черновик оплаты принадлежал сессии: после выхода он не должен пережить её в вкладке.
+    clearPaymentDraft();
+    setClient(null);
+    setItems([]);
+    setPaymentDraftId(null);
+    router.replace('/');
   }
 
   async function handleCancel(id: string) {
@@ -312,6 +352,24 @@ export function AccountBookings({ timeZone }: AccountBookingsProps) {
 
   return (
     <div className="flex flex-col gap-6">
+      {client === null ? null : (
+        <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border pb-4">
+          <div className="flex flex-col gap-1">
+            <p className="text-xs text-muted">Вы вошли как</p>
+            <p className="break-all text-sm font-medium">{client.email}</p>
+          </div>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => void handleLogout()}
+            disabled={loggingOut}
+          >
+            {loggingOut ? 'Выходим…' : 'Выйти'}
+          </Button>
+        </div>
+      )}
+
       <div className="flex flex-wrap gap-2" role="group" aria-label="Мои записи">
         {TABS.map((tab) => (
           <button
