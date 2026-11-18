@@ -52,6 +52,14 @@ docker compose up -d db
 Порт и учётные данные — в `docker-compose.yml`, переопределяются переменными окружения
 (`POSTGRES_PORT`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`).
 
+**Порт публикуется только на loopback** — `127.0.0.1:${POSTGRES_PORT:-5432}:5432` (#124), как
+api и web в `docker-compose.prod.yml`. Поэтому `pnpm test:int` и MCP `postgres` ходят на
+`127.0.0.1:55432`, а подключиться к dev-БД с другого устройства в сети нельзя.
+
+Привязку к `127.0.0.1` не убирать и не заменять на `0.0.0.0`: у dev-БД пароль из шаблона
+окружения (`change_me`), а Docker публикует порты в обход INPUT-цепочки `ufw`, то есть
+`DEFAULT_INPUT_POLICY=DROP` от этого не защищает.
+
 Если 5432 уже занят локальным PostgreSQL, поднимаем dev-БД на другом порту и правим `DATABASE_URL`:
 
 ```bash
