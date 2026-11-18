@@ -51,7 +51,7 @@ protect_main() {
       "docker (web, apps/web/Dockerfile)"
     ]
   },
-  "enforce_admins": false,
+  "enforce_admins": true,
   "required_pull_request_reviews": {
     "required_approving_review_count": 0,
     "dismiss_stale_reviews": true
@@ -61,7 +61,7 @@ protect_main() {
   "allow_deletions": false
 }
 JSON
-  echo "  main: PR обязателен, force-push и удаление запрещены, нужны зелёные checks"
+  echo "  main: PR обязателен (и для владельца), force-push и удаление запрещены, нужны зелёные checks"
 }
 
 echo "→ метки"

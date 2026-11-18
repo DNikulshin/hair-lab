@@ -86,6 +86,9 @@ fix(web): не терять выбранный слот при ошибке се
 - PR не мержится, пока не зелёные `checks`, `docker (api, apps/api/Dockerfile)`,
   `docker (web, apps/web/Dockerfile)`
   (правила ветки `main`, включаются `./scripts/gh-setup.sh --protect`).
+- Правила действуют и для владельца: `enforce_admins: true` — прямой push в `main` через
+  UI/API/CLI отклоняется, PR и зелёные checks обязательны всем. Временное снятие защиты
+  — осознанное действие владельца, возврат — тем же `--protect`.
 
 ## Метки и релизы
 
@@ -102,6 +105,12 @@ fix(web): не терять выбранный слот при ошибке се
 ./scripts/gh-setup.sh            # метки, вехи, бэклог
 ./scripts/gh-setup.sh --protect  # правила ветки main (после первого push)
 ```
+
+`--protect` ставит PR как единственный путь в `main` для всех, включая владельца
+(`enforce_admins: true`), требует зелёные `checks` и `docker (api|web)` в актуальном
+состоянии с `main` (`strict: true`), запрещает force-push и удаление ветки. Проверка:
+`gh api repos/DNikulshin/hair-lab/branches/main/protection --jq '.enforce_admins.enabled'`
+→ `true`. Автотестов на это нет: настройка живёт в GitHub — проверяется выводом API.
 
 Доска GitHub Projects (колонки по `status:*`) создаётся отдельно — нужен scope `project`:
 
