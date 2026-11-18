@@ -668,14 +668,16 @@ export function codePassDone(history) {
 }
 
 /**
- * Зелёный ли обязательный гейт (§5.5, §9): `pass` или `not_run` с причиной `no_database`
- * (исключение §5.6: БД может отсутствовать). `skipped` и `not_run` по любой другой причине
- * — не зелёный: данных для draft PR не хватает.
+ * Зелёный ли обязательный гейт (§5.5, §9): `pass`, `not_run` с причиной `no_database`
+ * (исключение §5.6: БД может отсутствовать) или `skipped` с причиной `not_applicable`
+ * (#248: условие гейта не выполнено — это не «не проверили»). `skipped` по другой причине
+ * и `not_run` с `timeout`/`tool_missing`/`blocked_by` — не зелёные.
  * @param {Record<string, any>} gate запись `gates[]`
  * @returns {boolean}
  */
 function gateGreen(gate) {
   if (gate.status === 'pass') return true;
+  if (gate.status === 'skipped') return gate.reason === 'not_applicable';
   return gate.status === 'not_run' && gate.reason === 'no_database';
 }
 

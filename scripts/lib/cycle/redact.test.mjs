@@ -82,6 +82,29 @@ describe('redactLog: маскирование по таблице §5.4', () => 
     assert.equal(redactLog('passwd=abcdefgh'), 'passwd=[secret]');
   });
 
+  test('код и проза после ключа не маскируются (#264)', () => {
+    // Выражения и обращения к свойствам — из `diff.patch`, теряли смысл до #264.
+    assert.equal(redactLog('key={item.id}'), 'key={item.id}');
+    assert.equal(redactLog('token: Promise<void> {'), 'token: Promise<void> {');
+    assert.equal(
+      redactLog('authorization: headers.set("cookie", value)'),
+      'authorization: headers.set("cookie", value)',
+    );
+    // camelCase-имена — идентификаторы, а не секреты.
+    assert.equal(redactLog('password: passwordSchema'), 'password: passwordSchema');
+    assert.equal(redactLog('token: cookieToken'), 'token: cookieToken');
+    // Проза на русском: значение из кириллицы без цифр.
+    assert.equal(redactLog('token: недействительный'), 'token: недействительный');
+    assert.equal(redactLog('pwd: оченьдлинныйпароль'), 'pwd: оченьдлинныйпароль');
+    assert.equal(redactLog('password: не менее 8 символов'), 'password: не менее 8 символов');
+  });
+
+  test('секрет с цифрами и смешанным регистром по-прежнему маскируется', () => {
+    assert.equal(redactLog('password: SuperSecret123'), 'password: [secret]');
+    assert.equal(redactLog('password: Пароль123'), 'password: [secret]');
+    assert.equal(redactLog('secret: Zx9-train-only-0000'), 'secret: [secret]');
+  });
+
   test('короткое значение после ключа не маскируется', () => {
     assert.equal(redactLog('pwd=abc'), 'pwd=abc');
   });

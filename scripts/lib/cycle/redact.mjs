@@ -31,11 +31,27 @@ const JWT = /\beyJ[A-Za-z0-9_-]*\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g;
 /** Строка подключения с паролем: `postgres(ql)://user:pass@` → `postgresql://[secret]@`. */
 const PG_URL = /\bpostgres(?:ql)?:\/\/[^\s:/@]+:([^\s@/]+)@/gi;
 
-/** Присвоение секрета: значение от 8 символов после `=` или `:`. */
+/**
+ * Присвоение секрета: значение от 8 символов после `=` или `:`. Маскирует не всё
+ * подряд — `isSecretValue` отсекает код и прозу (#264): иначе `key={item.id}`,
+ * `token: Promise<void>` и `pwd: недействительный` теряли смысл в логах и отчётах.
+ */
 const SECRET_ASSIGNMENT = new RegExp(
   `(?<![A-Za-z0-9])(key|token|secret|password|passwd|pwd)(["']?${H}*[:=]${H}*["']?)([^\\s"',;]{8,})`,
   'gi',
 );
+
+/** Обращение к свойству (`item.id`) — код, а не значение секрета. */
+const PROPERTY_PATH = /^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)+$/;
+
+/**
+ * camelCase-имя (`passwordSchema`, `cookieToken`) — идентификатор, а не секрет.
+ * Только строчная первая буква: `SuperSecret` так не отсекается и маскируется.
+ */
+const CAMEL_CASE_NAME = /^[a-z][A-Za-z]*[A-Z][A-Za-z]*$/;
+
+/** Буквы кириллицы: значение из них — проза на русском, а не секрет. */
+const CYRILLIC = /[\u0400-\u04FF]/;
 
 const EMAIL = /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g;
 
@@ -105,6 +121,32 @@ function keepKey(_match, name, separator) {
 }
 
 /**
+ * Маскирует присвоение только тогда, когда значение похоже на секрет, код или прозу.
+ * @param {string} match всё совпадение
+ * @param {string} name ключ (`key`, `token`, `password`, …)
+ * @param {string} separator разделитель с кавычками и пробелами
+ * @param {string} value значение
+ * @returns {string}
+ */
+function maskAssignment(match, name, separator, value) {
+  return isSecretValue(value) ? keepKey(match, name, separator) : match;
+}
+
+/**
+ * Секрет ли значение присвоения. Исключения (#264) — то, что секретом не является:
+ * выражение или обращение к свойству (`Promise<void>`, `item.id`), camelCase-имя
+ * (`passwordSchema`) и проза на кириллице (`недействительный`). Всё остальное
+ * маскируется: слабый пароль `abcdefgh` тоже секрет.
+ * @param {string} value
+ * @returns {boolean}
+ */
+function isSecretValue(value) {
+  if (EXPRESSION_SYNTAX.test(value) || PROPERTY_PATH.test(value)) return false;
+  if (CAMEL_CASE_NAME.test(value)) return false;
+  return !(CYRILLIC.test(value) && !/\d/.test(value));
+}
+
+/**
  * Заменяет значение заголовка на `[secret]`, если оно похоже на учётные данные.
  * @param {string} match всё совпадение
  * @param {string} name имя заголовка
@@ -159,7 +201,7 @@ export function redactLog(text) {
     .replace(HEADER, maskHeader)
     .replace(JWT, '[secret]')
     .replace(PG_URL, 'postgresql://[secret]@')
-    .replace(SECRET_ASSIGNMENT, keepKey)
+    .replace(SECRET_ASSIGNMENT, maskAssignment)
     .replace(EMAIL, '[email]')
     .replace(PHONE_INTL, maskPhone)
     .replace(PHONE_LOCAL, '[phone]');
