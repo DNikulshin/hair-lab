@@ -20,6 +20,9 @@ import { BOOKING_CONFIRMATION_TYPE } from './booking-confirmation.email';
  *   момента, «прошлые» — всё остальное: прошедшие по времени, отменённые, завершённые, неявки;
  * - отменить можно активную запись, до начала которой осталось не меньше `CANCEL_MIN_LEAD_MS`
  *   (два часа); иначе — 409 `conflict`. Повторная отмена уже отменённой идемпотентна (200);
+ * - «ждёт оплаты» и «ждёт подтверждения салона» различает аддитивное `awaitingPayment`:
+ *   сервер ставит его по дедлайну холда (`pending` + непустой `paymentDeadlineAt`), клиент
+ *   это правило не дублирует, а старые клиенты поля просто игнорируют;
  * - чужая и несуществующая запись неразличимы: обе дают 404 (наличие чужих записей не раскрываем);
  * - причина отмены ставится сервером (`CANCEL_REASON`), клиент её не присылает.
  *
@@ -85,6 +88,8 @@ interface AccountBookingRow {
   durationMin: number;
   clientName: string;
   clientPhone: string;
+  /** Дедлайн холда: не `null` только когда запись ждёт оплаты. */
+  paymentDeadlineAt: Date | null;
   master: { fullName: string };
   service: { name: string };
 }
@@ -102,6 +107,7 @@ const accountBookingSelect = {
   durationMin: true,
   clientName: true,
   clientPhone: true,
+  paymentDeadlineAt: true,
   master: { select: { fullName: true } },
   service: { select: { name: true } },
 } as const;
@@ -124,6 +130,9 @@ function isCancellable(row: AccountBookingRow, now: Date): boolean {
 /**
  * Строка БД → DTO кабинета: копейки → money, время → ISO, телефон → маска,
  * `cancellable` считает сервер по текущему моменту.
+ *
+ * `awaitingPayment` тоже считает сервер: дедлайн холда есть только у записи, которая ждёт
+ * оплаты, поэтому join с `payments` не нужен. При `PAYMENTS_MODE=off` дедлайна нет — `false`.
  */
 function toAccountBookingDto(row: AccountBookingRow, now: Date): AccountBooking {
   return {
@@ -138,6 +147,7 @@ function toAccountBookingDto(row: AccountBookingRow, now: Date): AccountBooking 
     clientName: row.clientName,
     clientPhoneMasked: maskPhone(row.clientPhone),
     cancellable: isCancellable(row, now),
+    awaitingPayment: row.status === 'pending' && row.paymentDeadlineAt !== null,
   };
 }
 

@@ -449,9 +449,16 @@ describe('POST /bookings: режим оплаты включён', () => {
       appointmentId: appointment.id,
       amountKopecks: 350_000,
       description: 'Оплата записи: Стрижка',
-      returnUrl: env.YOOKASSA_RETURN_URL,
+      returnUrl: expect.any(String),
       idempotenceKey: `payment-${appointment.id}`,
     });
+    // Возврат с платёжной страницы несёт id записи: статус открывается и в новой вкладке,
+    // где черновика `sessionStorage` нет. База из окружения при этом не теряется.
+    const returnUrl = new URL(input.returnUrl);
+    const returnBase = new URL(env.YOOKASSA_RETURN_URL);
+    expect(returnUrl.origin).toBe(returnBase.origin);
+    expect(returnUrl.pathname).toBe(returnBase.pathname);
+    expect(returnUrl.searchParams.get('appointmentId')).toBe(appointment.id);
     expect(JSON.stringify(fake.calls.createPayment)).not.toContain(fakeClient.phone);
     expect(JSON.stringify(fake.calls.createPayment)).not.toContain(fakeClient.email);
     expect(JSON.stringify(fake.calls.createPayment)).not.toContain(fakeClient.name);

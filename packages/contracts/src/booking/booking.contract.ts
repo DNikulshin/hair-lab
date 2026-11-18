@@ -131,7 +131,9 @@ export type BookingResponse = z.infer<typeof bookingResponseSchema>;
  * - `cancellable` считает сервер по правилу салона (статус `pending`/`confirmed`
  *   и до начала приёма осталось не меньше двух часов). Клиент это правило не дублирует:
  *   изменившееся правило не потребует обновления приложения, а UI читает только `cancellable`;
- * - контактов клиента в ответе нет: только имя и маска телефона (`clientPhoneMasked`).
+ * - контактов клиента в ответе нет: только имя и маска телефона (`clientPhoneMasked`);
+ * - `awaitingPayment` отличает «ждёт оплаты» от «ждёт подтверждения салона»: поле аддитивное,
+ *   старые клиенты его игнорируют и показывают прежний нейтральный текст для `pending`.
  */
 export const accountBookingSchema = z.object({
   id: idSchema,
@@ -145,6 +147,11 @@ export const accountBookingSchema = z.object({
   clientName: z.string().min(1),
   clientPhoneMasked: z.string().min(1).optional(),
   cancellable: z.boolean(),
+  /**
+   * Запись держит холд и ждёт оплаты (сервер: `status === 'pending'` и дедлайн холда задан).
+   * `false`/отсутствие — оплата не ждётся: `PAYMENTS_MODE=off` или запись ждёт салон.
+   */
+  awaitingPayment: z.boolean().optional(),
 });
 export type AccountBooking = z.infer<typeof accountBookingSchema>;
 

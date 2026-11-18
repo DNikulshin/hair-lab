@@ -79,6 +79,8 @@ interface BookingOptions {
   status?: Status;
   /** `null` — запись без почты: письмо об отмене ставить некуда. */
   clientEmail?: string | null;
+  /** Дедлайн холда: задан только у записи, которая ждёт оплаты (`awaitingPayment`). */
+  paymentDeadlineAt?: Date | null;
 }
 
 /**
@@ -99,6 +101,9 @@ async function addBooking(
       clientId,
       ...(options.status === undefined ? {} : { status: options.status }),
       ...(options.clientEmail === undefined ? {} : { clientEmail: options.clientEmail }),
+      ...(options.paymentDeadlineAt === undefined
+        ? {}
+        : { paymentDeadlineAt: options.paymentDeadlineAt }),
     },
   });
 }
@@ -231,6 +236,26 @@ describe('GET /account/bookings', () => {
       past.id,
     ]);
     expect(history.items.every((item) => item.cancellable === false)).toBe(true);
+  });
+
+  it('awaitingPayment различает «ждёт оплаты» и «ждёт подтверждения»', async () => {
+    const { masterId, serviceId, clientId, cookie } = await setup();
+    const hold = await addBooking(masterId, serviceId, fromNow(5 * DAY_MS), clientId, {
+      status: 'pending',
+      paymentDeadlineAt: fromNow(10 * MINUTE_MS),
+    });
+    // `PAYMENTS_MODE=off`: та же запись `pending`, но холда и дедлайна нет.
+    const waitingSalon = await addBooking(masterId, serviceId, fromNow(6 * DAY_MS), clientId, {
+      status: 'pending',
+    });
+    const confirmed = await addBooking(masterId, serviceId, fromNow(7 * DAY_MS), clientId, {
+      status: 'confirmed',
+    });
+
+    const listing = accountBookingsResponseSchema.parse((await listBookings(cookie)).body);
+
+    expect(listing.items.map((item) => item.id)).toEqual([hold.id, waitingSalon.id, confirmed.id]);
+    expect(listing.items.map((item) => item.awaitingPayment)).toEqual([true, false, false]);
   });
 
   it('в ответе только маска телефона: полного номера и почты нет', async () => {
@@ -367,6 +392,7 @@ describe('DELETE /account/bookings/:id', () => {
     expect(body.id).toBe(booking.id);
     expect(body.status).toBe('cancelled');
     expect(body.cancellable).toBe(false);
+    expect(body.awaitingPayment).toBe(false);
     expect(body.clientPhoneMasked).toBe('+7 (***) ***-**-00');
     // В ответе только маска: полного номера и почты клиента нет.
     expect(cancelled.raw).not.toContain(fakeClient.phone);
@@ -377,6 +403,25 @@ describe('DELETE /account/bookings/:id', () => {
 
     // EXCLUDE не держит отменённые: время снова доступно к записи.
     expect((await getSlots(serviceId, date)).map((item) => item.startsAt)).toContain(slot.startsAt);
+  });
+
+  it('отмена холда оплаты: awaitingPayment снимается в ответе', async () => {
+    const { masterId, serviceId, clientId, cookie } = await setup();
+    const booking = await addBooking(masterId, serviceId, fromNow(5 * DAY_MS), clientId, {
+      status: 'pending',
+      paymentDeadlineAt: fromNow(10 * MINUTE_MS),
+    });
+
+    const before = accountBookingsResponseSchema.parse((await listBookings(cookie)).body);
+    expect(before.items[0]?.awaitingPayment).toBe(true);
+
+    const cancelled = await cancelBooking(cookie, booking.id);
+
+    expect(cancelled.statusCode).toBe(200);
+    const body = accountBookingResponseSchema.parse(cancelled.body).booking;
+    expect(body.status).toBe('cancelled');
+    // Оплата больше не ждётся: кабинет не должен предлагать оплатить отменённую запись.
+    expect(body.awaitingPayment).toBe(false);
   });
 
   it('отмена в пределах двух часов — 409, запись остаётся активной', async () => {
