@@ -7,10 +7,12 @@ import {
   applyPaymentSucceeded,
   findPaymentByAppointment,
   listPendingRefunds,
+  listRefundsNeedingAttention,
   markRefunded,
   markRefundRequired,
   PAYMENT_CANCELED_REASON,
   PaymentAmountMismatchError,
+  recordRefundAttempt,
 } from './payments.service';
 
 /**
@@ -49,6 +51,8 @@ interface PaymentRow {
   yookassaPaymentId: string | null;
   confirmationUrl: string | null;
   refundRequired: boolean;
+  refundId: string | null;
+  refundStatus: 'succeeded' | 'pending' | 'canceled' | 'unknown' | null;
   createdAt: Date;
 }
 
@@ -62,10 +66,14 @@ interface OutboxRow {
 
 type Row = Record<string, unknown>;
 
-/** Условия `where`, которые использует сервис: равенство, `in`, `lte` и `not`. */
+/** Условия `where`, которые использует сервис: равенство, `in`, `lte`, `not` и `OR`. */
 function matches(row: Row, where: Row): boolean {
   return Object.entries(where).every(([key, condition]) => {
     const value = row[key];
+    // Обзор требующих внимания соединяет два условия через `OR` (долг или отказ провайдера).
+    if (key === 'OR' && Array.isArray(condition)) {
+      return (condition as Row[]).some((clause) => matches(row, clause));
+    }
     if (condition !== null && typeof condition === 'object') {
       const asRecord = condition as Record<string, unknown>;
       if (Array.isArray(asRecord['in'])) return (asRecord['in'] as unknown[]).includes(value);
@@ -110,6 +118,8 @@ function createFakeDb(options: FakeOptions = {}): { db: Db; state: FakeState } {
         yookassaPaymentId: '2a1b0d2f-000f-5000-9000-1f0000000000',
         confirmationUrl: 'https://yoomoney.example.invalid/pay',
         refundRequired: false,
+        refundId: null,
+        refundStatus: null,
         createdAt: CREATED_AT,
         ...options.payment,
       },
@@ -446,8 +456,29 @@ describe('markRefunded', () => {
     // Пока флаг стоял, свипер мог бы вернуть деньги второй раз — после возврата его нет.
     expect(state.payments[0]?.status).toBe('refunded');
     expect(state.payments[0]?.refundRequired).toBe(false);
+    // Факт возврата остаётся в БД: id провайдера и терминальный статус — тем же UPDATE.
+    expect(state.payments[0]?.refundId).toBe('refund-1');
+    expect(state.payments[0]?.refundStatus).toBe('succeeded');
     const refundUpdate = state.updates.find((call) => call.data['status'] === 'refunded');
-    expect(refundUpdate?.data).toEqual({ status: 'refunded', refundRequired: false });
+    expect(refundUpdate?.data).toEqual({
+      status: 'refunded',
+      refundRequired: false,
+      refundId: 'refund-1',
+      refundStatus: 'succeeded',
+    });
+  });
+
+  it('повтор возврата — no-op с прежними данными в БД', async () => {
+    const { db, state } = createFakeDb({ payment: { status: 'succeeded' } });
+
+    await markRefunded(db, PAYMENT_ID, 'refund-1');
+    const repeated = await markRefunded(db, PAYMENT_ID, 'refund-2');
+
+    expect(repeated).toMatchObject({ status: 'refunded', changed: false, refundId: 'refund-2' });
+    // Терминальный статус и id первого возврата не перезаписываются: деньги вернулись один раз.
+    expect(state.payments[0]?.status).toBe('refunded');
+    expect(state.payments[0]?.refundId).toBe('refund-1');
+    expect(state.payments[0]?.refundStatus).toBe('succeeded');
   });
 
   it('повтор возврата — no-op', async () => {
@@ -466,6 +497,77 @@ describe('markRefunded', () => {
 
     expect(transition).toMatchObject({ status: 'pending', changed: false });
     expect(state.payments[0]?.status).toBe('pending');
+  });
+});
+
+describe('recordRefundAttempt', () => {
+  // Статусы, которые не значат «деньги вернулись»: `pending` — в пути, `canceled` — отказ,
+  // `unknown` — ответ не распознан. Все три обязаны остаться в БД: иначе отказ провайдера
+  // виден только в логе, а `unknown` неотличим от «попыток не было» (NULL).
+  for (const status of ['pending', 'canceled', 'unknown'] as const) {
+    it(`пишет статус ${status} и id возврата, не снимая флаг`, async () => {
+      const { db, state } = createFakeDb({
+        payment: { status: 'succeeded', refundRequired: true },
+      });
+
+      const recorded = await recordRefundAttempt(db, PAYMENT_ID, 'refund-1', status);
+
+      expect(recorded).toBe(true);
+      expect(state.payments[0]?.refundId).toBe('refund-1');
+      expect(state.payments[0]?.refundStatus).toBe(status);
+      // Обязанность вернуть деньги остаётся: её снимает только `markRefunded`.
+      expect(state.payments[0]?.refundRequired).toBe(true);
+      // Статус платежа не меняется: деньги у нас, это факт.
+      expect(state.payments[0]?.status).toBe('succeeded');
+      // Guard в самом UPDATE, а не в чтении перед ним.
+      const update = state.updates.find((call) => call.data['refundId'] === 'refund-1');
+      expect(update?.where).toEqual({ id: PAYMENT_ID, refundRequired: true });
+    });
+  }
+
+  it('не трогает уже возвращённый платёж', async () => {
+    const { db, state } = createFakeDb({
+      payment: {
+        status: 'refunded',
+        refundRequired: false,
+        refundId: 'refund-1',
+        refundStatus: 'succeeded',
+      },
+    });
+
+    const recorded = await recordRefundAttempt(db, PAYMENT_ID, 'refund-2', 'canceled');
+
+    // Флаг снят вместе с возвратом — условие не совпало, терминальные данные не перезаписаны.
+    expect(recorded).toBe(false);
+    expect(state.payments[0]?.status).toBe('refunded');
+    expect(state.payments[0]?.refundId).toBe('refund-1');
+    expect(state.payments[0]?.refundStatus).toBe('succeeded');
+  });
+
+  it('перезапись — прогресс того же возврата: pending становится canceled', async () => {
+    const { db, state } = createFakeDb({
+      payment: {
+        status: 'succeeded',
+        refundRequired: true,
+        refundId: 'refund-1',
+        refundStatus: 'pending',
+      },
+    });
+
+    await recordRefundAttempt(db, PAYMENT_ID, 'refund-1', 'canceled');
+
+    // Ключ идемпотентности выводится из id платежа, поэтому перезапись — тот же возврат.
+    expect(state.payments[0]?.refundId).toBe('refund-1');
+    expect(state.payments[0]?.refundStatus).toBe('canceled');
+    expect(state.payments[0]?.refundRequired).toBe(true);
+  });
+
+  it('неизвестный платёж — false без ошибки', async () => {
+    const { db } = createFakeDb();
+
+    await expect(
+      recordRefundAttempt(db, '99999999-9999-4999-8999-999999999999', 'refund-1', 'pending'),
+    ).resolves.toBe(false);
   });
 });
 
@@ -548,6 +650,8 @@ describe('listPendingRefunds', () => {
     yookassaPaymentId: '2a1b0d2f-000f-5000-9000-2f0000000000',
     confirmationUrl: null,
     refundRequired: true,
+    refundId: null,
+    refundStatus: null,
     createdAt: new Date('2030-03-04T05:10:00.000Z'),
   };
 
@@ -562,6 +666,8 @@ describe('listPendingRefunds', () => {
           yookassaPaymentId: '2a1b0d2f-000f-5000-9000-1f0000000000',
           confirmationUrl: null,
           refundRequired: true,
+          refundId: null,
+          refundStatus: null,
           createdAt: CREATED_AT,
         },
         secondPayment,
@@ -574,6 +680,8 @@ describe('listPendingRefunds', () => {
           yookassaPaymentId: '2a1b0d2f-000f-5000-9000-3f0000000000',
           confirmationUrl: null,
           refundRequired: false,
+          refundId: null,
+          refundStatus: null,
           createdAt: CREATED_AT,
         },
         // Флаг есть, а id у провайдера нет: возвращать не по чему.
@@ -585,6 +693,8 @@ describe('listPendingRefunds', () => {
           yookassaPaymentId: null,
           confirmationUrl: null,
           refundRequired: true,
+          refundId: null,
+          refundStatus: null,
           createdAt: CREATED_AT,
         },
       ],
@@ -637,6 +747,97 @@ describe('listPendingRefunds', () => {
     const { db } = createFakeDb();
 
     await expect(listPendingRefunds(db)).resolves.toEqual([]);
+  });
+});
+
+describe('listRefundsNeedingAttention', () => {
+  /** Строка платежа с значениями по умолчанию: в тесте важны только refund-поля. */
+  function refundRow(overrides: Partial<PaymentRow> & Pick<PaymentRow, 'id'>): PaymentRow {
+    return {
+      appointmentId: APPOINTMENT_ID,
+      status: 'succeeded',
+      amountKopecks: AMOUNT,
+      yookassaPaymentId: '2a1b0d2f-000f-5000-9000-4f0000000000',
+      confirmationUrl: null,
+      refundRequired: false,
+      refundId: null,
+      refundStatus: null,
+      createdAt: CREATED_AT,
+      ...overrides,
+    };
+  }
+
+  it('отбирает долг по флагу и отказ провайдера, остальное не трогает', async () => {
+    const debtId = '55555555-5555-4555-8555-555555555551';
+    const rejectedId = '55555555-5555-4555-8555-555555555552';
+    const { db } = createFakeDb({
+      payments: [
+        // Долг: возврат ещё не выполнен, попытки не было.
+        refundRow({ id: PAYMENT_ID, refundRequired: true }),
+        // Провайдер отказал, а флаг кто-то снял руками: разбор всё равно нужен.
+        refundRow({ id: rejectedId, refundId: 'refund-2', refundStatus: 'canceled' }),
+        // Возврат выполнен — разбирать нечего.
+        refundRow({
+          id: debtId,
+          status: 'refunded',
+          refundId: 'refund-3',
+          refundStatus: 'succeeded',
+        }),
+        // Попыток не было и долга нет (NULL ≠ unknown/canceled).
+        refundRow({ id: '55555555-5555-4555-8555-555555555553' }),
+      ],
+    });
+
+    const attention = await listRefundsNeedingAttention(db);
+
+    expect(attention.map((item) => item.paymentId)).toEqual([PAYMENT_ID, rejectedId]);
+    expect(attention[0]).toEqual({
+      paymentId: PAYMENT_ID,
+      appointmentId: APPOINTMENT_ID,
+      status: 'succeeded',
+      amountKopecks: AMOUNT,
+      refundRequired: true,
+      refundId: null,
+      refundStatus: null,
+      yookassaPaymentId: '2a1b0d2f-000f-5000-9000-4f0000000000',
+      createdAt: CREATED_AT,
+    });
+    // Состав полей — id, статусы и копейки: персональных данных клиента здесь нет.
+    const serialized = JSON.stringify(attention);
+    expect(serialized).not.toContain(CLIENT_EMAIL);
+    expect(serialized).not.toContain('Тестовая Клиентка');
+  });
+
+  it('уважает лимит и отдаёт старые первыми', async () => {
+    const oldest = refundRow({
+      id: '55555555-5555-4555-8555-555555555561',
+      refundRequired: true,
+      createdAt: new Date('2030-03-04T04:00:00.000Z'),
+    });
+    const middle = refundRow({
+      id: '55555555-5555-4555-8555-555555555562',
+      refundRequired: true,
+      createdAt: new Date('2030-03-04T04:30:00.000Z'),
+    });
+    const newest = refundRow({
+      id: '55555555-5555-4555-8555-555555555563',
+      refundRequired: true,
+      createdAt: new Date('2030-03-04T05:00:00.000Z'),
+    });
+    const { db } = createFakeDb({ payments: [newest, oldest, middle] });
+
+    const limited = await listRefundsNeedingAttention(db, 2);
+
+    expect(limited.map((item) => item.paymentId)).toEqual([oldest.id, middle.id]);
+    // Лимит по умолчанию вмещает все три строки.
+    const all = await listRefundsNeedingAttention(db);
+    expect(all.map((item) => item.paymentId)).toEqual([oldest.id, middle.id, newest.id]);
+  });
+
+  it('без долгов и отказов — пустой список', async () => {
+    const { db } = createFakeDb();
+
+    await expect(listRefundsNeedingAttention(db)).resolves.toEqual([]);
   });
 });
 
