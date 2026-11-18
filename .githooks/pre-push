@@ -1,0 +1,5 @@
+#!/bin/sh
+# Pre-push проверка: push в защищённые ветки (main, master) запрещён — только PR.
+# Подключается через `git config core.hooksPath .githooks` (это делает `prepare` в package.json).
+# Обойти: `git push --no-verify` — осознанно, AGENTS.md.
+exec node "$(git rev-parse --show-toplevel)/scripts/pre-push.mjs"
