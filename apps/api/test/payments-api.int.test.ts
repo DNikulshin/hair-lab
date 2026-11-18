@@ -607,10 +607,14 @@ describe('POST /payments/webhooks/yookassa', () => {
     const yookassaPaymentId = payment.yookassaPaymentId as string;
 
     // Холд истёк: свипер смотрит на `payment_deadline_at`, поэтому подменяем «сейчас».
+    // Сверка перед отменой спрашивает шлюз: денег нет (`pending`), поэтому холд снимается.
+    fake.controls.status = 'pending';
     const sweeper = createTestSweeper();
     const tick = await sweeper.tick(new Date(Date.now() + (PAYMENT_HOLD_MINUTES + 5) * MINUTE_MS));
 
     expect(tick).toMatchObject({ expired: 1, paymentsCanceled: 1 });
+    // Клиент платит уже после отмены: уведомление перезапрашивает состояние — там `succeeded`.
+    fake.controls.status = 'succeeded';
     const expired = await appointmentOf(salon.masterId);
     expect(expired.status).toBe('cancelled');
     expect(expired.cancelReason).toBe('payment_expired');
@@ -685,10 +689,14 @@ describe('POST /payments/webhooks/yookassa', () => {
     const yookassaPaymentId = payment.yookassaPaymentId as string;
 
     // Холд истёк: запись отменена, платёж снят. Клиент всё равно платит.
+    // Сверка видит `pending` — денег нет — и холд снимается; иначе сверка подтвердила бы запись.
+    fake.controls.status = 'pending';
     const sweeper = createTestSweeper();
     const tick = await sweeper.tick(new Date(Date.now() + (PAYMENT_HOLD_MINUTES + 5) * MINUTE_MS));
     expect(tick).toMatchObject({ expired: 1, paymentsCanceled: 1 });
     expect((await paymentOf(appointment.id)).status).toBe('canceled');
+    // Дальше клиент платит: уведомление перезапрашивает состояние — там `succeeded`.
+    fake.controls.status = 'succeeded';
 
     const refundKey = `refund-${payment.id}`;
     /** Вызовы возврата именно по нашему платежу: свипер тикает по всей БД. */
@@ -743,6 +751,8 @@ describe('POST /payments/webhooks/yookassa', () => {
     const yookassaPaymentId = payment.yookassaPaymentId as string;
 
     // Холд истёк: запись отменена, платёж снят. Клиент всё равно платит.
+    // Сверка видит `pending` — денег нет — и холд снимается; иначе сверка подтвердила бы запись.
+    fake.controls.status = 'pending';
     const sweeper = createTestSweeper();
     const tick = await sweeper.tick(new Date(Date.now() + (PAYMENT_HOLD_MINUTES + 5) * MINUTE_MS));
     expect(tick).toMatchObject({ expired: 1, paymentsCanceled: 1 });
@@ -751,6 +761,8 @@ describe('POST /payments/webhooks/yookassa', () => {
     expect(expired.status).toBe('cancelled');
     expect(expired.cancelReason).toBe('payment_expired');
     expect((await paymentOf(appointment.id)).status).toBe('canceled');
+    // Дальше клиент платит: уведомление перезапрашивает состояние — там `succeeded`.
+    fake.controls.status = 'succeeded';
 
     // API возвратов недоступен в момент уведомления. Ретрай внутри обработчика бессмысленен:
     // провайдеру нужен ответ 200, а его повтор уведомления уже ничего не вернёт (платёж
