@@ -4,6 +4,7 @@ import {
   listPendingRefunds,
   markRefunded,
   PAYMENT_EXPIRED_REASON,
+  recordRefundAttempt,
   refundIdempotenceKey,
   type PendingRefund,
 } from './payments.service';
@@ -146,6 +147,9 @@ async function retryPendingRefunds(
       });
       if (refund.status !== 'succeeded') {
         // Флаг в БД не трогаем: возврат не завершён, следующий тик повторит его.
+        // Фактический статус провайдера пишем: `canceled` виден в БД (обзор требующих
+        // внимания), а не только в логе, и отличается от NULL («попыток не было»).
+        await recordRefundAttempt(db, item.paymentId, refund.refundId, refund.status);
         logger.error(
           {
             paymentId: item.paymentId,

@@ -2,6 +2,7 @@ import type { BookingStatus, PaymentStatus } from '@hair-lab/contracts';
 import type { Prisma } from '../../generated/prisma/client';
 import type { Db } from '../../shared/db';
 import { BOOKING_CONFIRMATION_TYPE, buildBookingConfirmationPayload } from '../bookings/index';
+import type { GatewayRefundStatus } from './payment-gateway';
 
 /**
  * Доменная логика оплаты записи: переходы статусов платежа и связанной записи.
@@ -478,11 +479,12 @@ export async function applyPaymentCanceled(
  *
  * Флаг снимается в той же транзакции, что и статус: иначе свипер после успешного возврата
  * повторял бы его следующим тиком. В ветке «уже `refunded`» флага быть не может: он ставится
- * только платежу в `succeeded`/`canceled`, а снимается здесь же.
+ * только платежу в `succeeded`/`canceled`, а снимается здесь же, поэтому повторный вызов
+ * (идемпотентность) не перезаписывает ни `refund_id`, ни `refund_status`.
  *
- * `refundId` пока не хранится: в схеме PR1 нет колонки под него (возврат один на платёж),
- * он возвращается вызывающему для лога и трассировки в ЮKassa. Появится колонка — id
- * начнёт сохраняться здесь же.
+ * `refundId` и терминальный статус `succeeded` пишутся тем же `UPDATE`, что и переход в `refunded`:
+ * факт и статус последней попытки возврата остаются в БД (`payments.refund_id`,
+ * `payments.refund_status`), а не только в логе.
  */
 export async function markRefunded(
   db: Db,
@@ -504,7 +506,7 @@ export async function markRefunded(
     // провайдер мог отменить платёж в момент возврата, но деньги у него уже были.
     const updated = await tx.payment.updateMany({
       where: { id: paymentId, status: { in: ['succeeded', 'canceled'] } },
-      data: { status: 'refunded', refundRequired: false },
+      data: { status: 'refunded', refundRequired: false, refundId, refundStatus: 'succeeded' },
     });
     if (updated.count === 0) {
       const current = await tx.payment.findUniqueOrThrow({
@@ -524,6 +526,36 @@ export async function markRefunded(
       refundId,
     };
   });
+}
+
+/**
+ * Неуспешная попытка возврата: фактический статус провайдера и его id остаются в БД.
+ *
+ * Зачем: лог — не место для факта. `canceled` (провайдер отказал) и `pending` (деньги ещё в пути)
+ * видит человек при разборе, а `unknown` (ответ не распознан) отличается от NULL («попыток
+ * не было») только в схеме.
+ *
+ * Флаг `refund_required` не снимается и не ставится: снимает его только `markRefunded` вместе
+ * с переходом в `refunded`. Условие `refund_required = true` в `WHERE` даёт guard от гонки:
+ * уже возвращённый платёж (флаг снят) не получит несостоявшийся статус задним числом.
+ *
+ * Идемпотентность возврата не страдает: ключ `refund-<paymentId>` выводится из id платежа,
+ * а не из сохранённого статуса, поэтому перезапись статуса — это прогресс того же возврата
+ * (`pending` → `canceled` становится виден).
+ *
+ * `true` — строка обновлена, `false` — платёж уже `refunded` (или его нет).
+ */
+export async function recordRefundAttempt(
+  db: Db,
+  paymentId: string,
+  refundId: string,
+  refundStatus: Exclude<GatewayRefundStatus, 'succeeded'>,
+): Promise<boolean> {
+  const updated = await db.payment.updateMany({
+    where: { id: paymentId, refundRequired: true },
+    data: { refundId, refundStatus },
+  });
+  return updated.count === 1;
 }
 
 /**
@@ -638,6 +670,74 @@ export async function listPendingRefunds(
           },
         ],
   );
+}
+
+/**
+ * Сколько строк отдаёт обзор возвратов по умолчанию. Обзор — для человека, а не поток:
+ * больше полусотни одновременных разборов — уже авария, а не рабочий режим.
+ */
+export const REFUNDS_NEEDING_ATTENTION_LIMIT = 50;
+
+/**
+ * Строка обзора «возвраты, требующие внимания»: только id, статусы и копейки.
+ *
+ * `yookassa_payment_id` — id провайдера (не ПДн): без него ручной разбор в личном кабинете
+ * ЮKassa невозможен. Ни телефона, ни почты, ни имени клиента здесь нет и не будет.
+ */
+export interface RefundNeedingAttention {
+  paymentId: string;
+  appointmentId: string;
+  status: PaymentStatus;
+  amountKopecks: number;
+  refundRequired: boolean;
+  refundId: string | null;
+  refundStatus: GatewayRefundStatus | null;
+  yookassaPaymentId: string | null;
+  createdAt: Date;
+}
+
+/**
+ * «Возвраты, требующие внимания» одним запросом: долг по флагу или отказ провайдера.
+ *
+ * Отбор — `refund_required = true` (возврат ещё не выполнен) ИЛИ `refund_status = 'canceled'`
+ * (провайдер отказал, повторы могут длиться бесконечно, а разбирать надо руками). Старые —
+ * первыми, как в свипере: никто не ждёт вечно, пока новые забирают лимит.
+ *
+ * Маршрута у обзора пока нет (админки и матрицы разрешений тоже) — это функция сервиса,
+ * готовая к подключению. ПДн не читаются: только id платёжа/записи, статусы и копейки.
+ */
+export async function listRefundsNeedingAttention(
+  db: Db,
+  limit: number = REFUNDS_NEEDING_ATTENTION_LIMIT,
+): Promise<RefundNeedingAttention[]> {
+  const rows = await db.payment.findMany({
+    where: { OR: [{ refundRequired: true }, { refundStatus: 'canceled' }] },
+    select: {
+      id: true,
+      appointmentId: true,
+      status: true,
+      amountKopecks: true,
+      refundRequired: true,
+      refundId: true,
+      refundStatus: true,
+      yookassaPaymentId: true,
+      createdAt: true,
+    },
+    orderBy: { createdAt: 'asc' },
+    take: limit,
+  });
+
+  return rows.map((row) => ({
+    paymentId: row.id,
+    appointmentId: row.appointmentId,
+    status: row.status,
+    amountKopecks: row.amountKopecks,
+    refundRequired: row.refundRequired,
+    refundId: row.refundId,
+    refundStatus: row.refundStatus,
+    yookassaPaymentId: row.yookassaPaymentId,
+    createdAt: row.createdAt,
+  }));
 }
 
 /** Платёж записи для страницы статуса оплаты. `null` — платежа нет (оплата не создавалась). */

@@ -37,6 +37,8 @@ interface PaymentRow {
   yookassaPaymentId: string | null;
   confirmationUrl: string | null;
   refundRequired: boolean;
+  refundId: string | null;
+  refundStatus: 'succeeded' | 'pending' | 'canceled' | 'unknown' | null;
   createdAt: Date;
 }
 
@@ -101,6 +103,8 @@ function payment(
     yookassaPaymentId: null,
     confirmationUrl: null,
     refundRequired: false,
+    refundId: null,
+    refundStatus: null,
     createdAt: CREATED_AT,
     ...overrides,
   };
@@ -405,6 +409,9 @@ describe('createHoldsSweeper', () => {
     const refunded = state.payments.find((row) => row.id === PAYMENT_REFUND_ID);
     expect(refunded?.status).toBe('refunded');
     expect(refunded?.refundRequired).toBe(false);
+    // Факт возврата остаётся в БД вместе с переходом в `refunded`.
+    expect(refunded?.refundId).toBe('refund-1');
+    expect(refunded?.refundStatus).toBe('succeeded');
     expect(entries.some((entry) => entry.obj['refundId'] === 'refund-1')).toBe(true);
   });
 
@@ -457,6 +464,9 @@ describe('createHoldsSweeper', () => {
       const row = state.payments.find((item) => item.id === PAYMENT_REFUND_ID);
       expect(row?.status, status).toBe('succeeded');
       expect(row?.refundRequired, status).toBe(true);
+      // Фактический статус провайдера остаётся в БД: отказ виден не только в логе.
+      expect(row?.refundId, status).toBe('refund-1');
+      expect(row?.refundStatus, status).toBe(status);
 
       const failure = entries.find((entry) => entry.level === 'error');
       expect(failure?.obj, status).toEqual({
@@ -521,6 +531,9 @@ describe('createHoldsSweeper', () => {
     const failed = state.payments.find((row) => row.id === PAYMENT_REFUND_ID);
     expect(failed?.status).toBe('succeeded');
     expect(failed?.refundRequired).toBe(true);
+    // Сетевой сбой — не факт от провайдера: `refund_id`/`refund_status` не пишутся.
+    expect(failed?.refundId).toBeNull();
+    expect(failed?.refundStatus).toBeNull();
     expect(state.payments.find((row) => row.id === PAYMENT_REFUND_ID_2)?.status).toBe('refunded');
 
     // В лог об ошибке — только id платежа и имя ошибки: ни суммы, ни текста исключения.

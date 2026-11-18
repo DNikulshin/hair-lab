@@ -314,6 +314,13 @@ model Payment {
   // Снимается в той же транзакции, где платёж становится `refunded`.
   refundRequired Boolean @default(false) @map("refund_required")
 
+  // Факт и статус последней попытки возврата: id возврата в ЮKassa (если провайдер его вернул)
+  // и его статус в терминах домена. NULL — попыток не было; `unknown` — попытка была, ответ
+  // провайдера не распознан. Терминальный `succeeded` пишется только вместе с переходом платежа
+  // в `refunded` (`markRefunded`), неуспешный статус флаг `refund_required` не снимает.
+  refundId     String?       @map("refund_id")
+  refundStatus RefundStatus? @map("refund_status")
+
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
@@ -336,6 +343,17 @@ enum PaymentStatus {
   refunded
 
   @@map("payment_status")
+}
+
+/// Статус возврата (совпадает с доменным `GatewayRefundStatus`). `unknown` — попытка была,
+/// но ответ провайдера не распознан: отличие от NULL («попыток не было») важно для разбора.
+enum RefundStatus {
+  succeeded
+  pending
+  canceled
+  unknown
+
+  @@map("refund_status")
 }
 
 /// Очередь исходящих писем (transactional outbox).

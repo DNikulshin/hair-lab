@@ -17,6 +17,7 @@ import {
   findPaymentByYookassaId,
   markRefunded,
   markRefundRequired,
+  recordRefundAttempt,
   refundIdempotenceKey,
 } from './payments.service';
 import { isYookassaIp } from './yookassa-ip';
@@ -120,7 +121,10 @@ async function applySucceeded(
 
     // Флаг возврата не снимаем: обязанность вернуть деньги переживёт этот ответ, а свипер
     // повторит возврат с тем же ключом идемпотентности — второй раз деньги не уйдут.
+    // Фактический статус провайдера пишем в БД: `canceled` — сигнал для ручного разбора,
+    // а лог не место для факта (перезапуск, ротация логов).
     await markRefundRequired(db, input.paymentId);
+    await recordRefundAttempt(db, input.paymentId, refund.refundId, refund.status);
     request.log.error(
       { paymentId: input.paymentId, refundId: refund.refundId, refundStatus: refund.status },
       refund.status === 'canceled'
