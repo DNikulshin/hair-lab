@@ -285,8 +285,12 @@ node scripts/cycle-gates.mjs --dir D [--only id,id] [--base SHA]
 `secrets_scan` проверяет только добавленные строки диффа: PEM-заголовки приватных ключей,
 `AKIA[0-9A-Z]{16}`, JWT, `postgres://user:pass@` с непустым не-шаблонным паролем, присвоения
 `secret|token|password|api_key` строковым литералом ≥12 символов, кроме явных заглушек
-(`example`, `changeme`, `xxx`, `<…>`) и файла `.env.example`. Находка → `fail`, `file:line`
-в логе без значения.
+(`example`, `changeme`, `xxx`, `<…>`) и файла `.env.example`. Значение без кавычек
+(`.env`-строка вида `API_KEY=…`) считается секретом только в «машинном» виде — одновременно
+цифры и буквы, без синтаксиса выражения (скобки, индексация, `.`, `$`, угловые и обратные
+кавычки): иначе `request.cookies[…]`, `createSessionToken()`, `passwordSchema` и `` `${…}` ``
+давали ложные находки и лишнюю итерацию (#245). Находка → `fail`, `file:line` в логе без
+значения.
 
 Гейты запускаются с `TURBO_FORCE=true` (`gateEnv`): `pass` в `gates.<n>.json` — это живой
 прогон, а не результат из кэша turbo («FULL TURBO»). Кэш turbo адресуется по хешу входов,

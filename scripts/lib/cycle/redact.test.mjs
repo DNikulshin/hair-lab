@@ -197,6 +197,38 @@ describe('scanSecrets', () => {
     assert.deepEqual(scanSecrets(['password="short"', 'token=abc']), []);
   });
 
+  test('выражения кода справа от ключа — не находка (#245)', () => {
+    assert.deepEqual(
+      scanSecrets([
+        'const token = request.cookies[STAFF_SESSION_COOKIE_NAME];',
+        'const token = createSessionToken();',
+        'password: passwordSchema',
+        'const token = obj.prop;',
+        'const token = `expired-staff-token-${randomUUID()}`;',
+      ]),
+      [],
+    );
+  });
+
+  test('строковый литерал и машинное «сырое» значение по-прежнему находка', () => {
+    assert.deepEqual(
+      scanSecrets([
+        'const token = "Zx9-train-only-0000";',
+        'API_KEY=sk_live_51H8xYqR2bF7tLm',
+        'AWS_SECRET=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY',
+      ]),
+      [
+        { line: 1, kind: 'assigned_secret' },
+        { line: 2, kind: 'assigned_secret' },
+        { line: 3, kind: 'assigned_secret' },
+      ],
+    );
+  });
+
+  test('«сырое» значение без цифр (слово или имя) — не находка', () => {
+    assert.deepEqual(scanSecrets(['token=abcdefghijklmnop', 'secret: qwertyuiopasdf']), []);
+  });
+
   test('значение с боевым секретом и словом example внутри — находка', () => {
     // Сценарий ревью: поиск заглушек по подстроке скрывал такие секреты.
     assert.deepEqual(scanSecrets(['api_key=prodexample12345678']), [

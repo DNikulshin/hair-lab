@@ -53,11 +53,26 @@ const AWS_ACCESS_KEY = /\bAKIA[0-9A-Z]{16}\b/;
 
 const JWT_DETECT = /\beyJ[A-Za-z0-9_-]*\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/;
 
-/** Присвоение секрета: строковый литерал или «голое» значение от 12 символов (§5.5). */
-const ASSIGNED_SECRET = new RegExp(
-  `(?<![A-Za-z0-9])(api[-_]?key|secret|token|password)${H}*[:=]${H}*(?:"([^"]{12,})"|'([^']{12,})'|([^\\s"',;#]{12,}))`,
+/** Присвоение секрета строковым литералом от 12 символов (§5.5). */
+const ASSIGNED_SECRET_LITERAL = new RegExp(
+  `(?<![A-Za-z0-9])(api[-_]?key|secret|token|password)${H}*[:=]${H}*(?:"([^"]{12,})"|'([^']{12,})')`,
   'gi',
 );
+
+/**
+ * Присвоение «сырого» секрета без кавычек — строка вида `API_KEY=…` из `.env` или
+ * конфига (§5.5). Значение дополнительно проверяет `looksLikeRawSecret`.
+ */
+const ASSIGNED_SECRET_RAW = new RegExp(
+  `(?<![A-Za-z0-9])(api[-_]?key|secret|token|password)${H}*[:=]${H}*([^\\s"',;#]{12,})`,
+  'gi',
+);
+
+/**
+ * Синтаксис выражения в значении: вызов `foo()`, поле `obj.prop`, индекс `arr[0]`,
+ * шаблон `${…}`, дженерик `<…>`. Такое значение — код, а не секрет.
+ */
+const EXPRESSION_SYNTAX = /[()[\]{}$`<>]/;
 
 /**
  * Явные заглушки: похожи на секрет, но им не являются (§5.5). Проверка идёт по всему
@@ -156,15 +171,32 @@ function hasPostgresPassword(text) {
 }
 
 /**
- * Есть ли в строке присвоение секрета строковым литералом от 12 символов,
- * не являющееся заглушкой.
+ * Похоже ли «сырое» (без кавычек) значение на секрет, а не на выражение кода или имя.
+ * Требование — цифры вместе с буквами: `request.cookies[…]`, `createSessionToken()`,
+ * `passwordSchema` и `expired-staff-token-${randomUUID()}` дают прозу, а не секрет,
+ * тогда как `sk_live_51H8…` и `Zx9-train-only-0000` — машинное значение.
+ * @param {string} value
+ * @returns {boolean}
+ */
+function looksLikeRawSecret(value) {
+  if (EXPRESSION_SYNTAX.test(value)) return false;
+  return /\d/.test(value) && /[A-Za-z]/.test(value);
+}
+
+/**
+ * Есть ли в строке присвоение секрета от 12 символов, не являющееся заглушкой:
+ * строковый литерал или «сырое» значение машинного вида.
  * @param {string} text
  * @returns {boolean}
  */
 function hasAssignedSecret(text) {
-  for (const match of text.matchAll(ASSIGNED_SECRET)) {
-    const value = match[2] ?? match[3] ?? match[4] ?? '';
+  for (const match of text.matchAll(ASSIGNED_SECRET_LITERAL)) {
+    const value = match[2] ?? match[3] ?? '';
     if (!isPlaceholder(value)) return true;
+  }
+  for (const match of text.matchAll(ASSIGNED_SECRET_RAW)) {
+    const value = match[2] ?? '';
+    if (looksLikeRawSecret(value) && !isPlaceholder(value)) return true;
   }
   return false;
 }
