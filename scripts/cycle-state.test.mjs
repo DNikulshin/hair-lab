@@ -609,7 +609,16 @@ describe('cycle-state: переходы §5.3', () => {
           const state = stateJson(dir);
           assert.equal(validateState(state).ok, true, validateState(state).errors.join('\n'));
           assert.equal(state.stage, to);
-          assert.equal(state.stage_status, 'running');
+          // `DONE` — терминальный этап без своей работы: запись закрывается сразу
+          // (`unclosed_stages` в `metrics.json` иначе не смог бы стать нулём).
+          if (to === 'DONE') {
+            assert.equal(state.stage_status, 'done');
+            const last = state.history.at(-1);
+            assert.equal(last.stage, 'DONE');
+            assert.equal(last.finished_at, LATER);
+          } else {
+            assert.equal(state.stage_status, 'running');
+          }
         } else {
           forbidden += 1;
           assert.equal(stateText(dir), before, `${from} → ${to}: файл изменился при отказе`);
@@ -941,6 +950,58 @@ describe('cycle-state: apply-decision', () => {
 
     assert.equal(runCli(root, ['apply-decision', '--dir', dir, '--now', LATER]).status, 0);
     assert.equal(stateJson(dir).iteration, 1);
+  });
+
+  test('apply-decision закрывает запись DECIDE вместе с переходом', (t) => {
+    const { root, dir } = decideCycle(t, decisionDoc('PROCEED'), {
+      state: {
+        history: [
+          historyEntry('INIT', 'done'),
+          historyEntry('DECIDE', 'running', { finished: false }),
+        ],
+      },
+    });
+
+    assert.equal(runCli(root, ['apply-decision', '--dir', dir, '--now', LATER]).status, 0);
+    const state = stateJson(dir);
+    const decide = state.history.find((entry) => entry.stage === 'DECIDE');
+
+    assert.equal(state.stage, 'PR');
+    assert.equal(decide.status, 'done');
+    assert.equal(decide.finished_at, LATER);
+    assert.equal(
+      state.history.filter((entry) => entry.finished_at === null).length,
+      1,
+      'открытой остаётся только запись нового этапа',
+    );
+  });
+
+  test('advance в DONE даёт закрытую запись и закрывает цикл', (t) => {
+    const repo = makeRepo(t);
+    const dir = makeCycle(repo.root, {
+      state: stateDoc(repo.baseSha, {
+        stage: 'PR',
+        stage_status: 'done',
+        history: [historyEntry('INIT', 'done'), historyEntry('PR', 'done')],
+      }),
+      files: { 'decision.1.json': `${JSON.stringify(decisionDoc('PROCEED'), null, 2)}\n` },
+    });
+
+    const advance = runCli(repo.root, ['advance', '--dir', dir, '--to', 'DONE', '--now', LATER]);
+    assert.equal(advance.status, 0, advance.stderr);
+
+    const state = stateJson(dir);
+    const last = state.history.at(-1);
+    assert.equal(state.stage, 'DONE');
+    assert.equal(state.stage_status, 'done');
+    assert.equal(last.stage, 'DONE');
+    assert.equal(last.status, 'done');
+    assert.equal(last.finished_at, LATER, 'запись DONE закрыта сразу: finish для неё запрещён');
+    assert.equal(
+      state.history.filter((entry) => entry.finished_at === null).length,
+      0,
+      'незакрытых записей нет — unclosed_stages станет нулём',
+    );
   });
 
   test('PROCEED и PROCEED_WITH_UNVERIFIED ведут в PR', (t) => {
