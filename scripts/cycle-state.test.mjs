@@ -1407,7 +1407,7 @@ describe('cycle-state: обязательные гейты зелёные (manda
   /** Необязательный гейт с `fail`: он не влияет на draft PR. */
   const optionalFail = { ...gate('optional', 'fail'), required: false };
 
-  /** Матрица §9: только `pass` и `not_run`/`no_database` считаются зелёными. */
+  /** Матрица §9: зелёные — `pass`, `skipped`/`not_applicable` и `not_run`/`no_database`. */
   const cases = [
     { name: 'нет документа', doc: null, iteration: 1, expected: false },
     { name: 'пустой gates[]', doc: gatesDoc(sha, []), iteration: 1, expected: false },
@@ -1442,8 +1442,20 @@ describe('cycle-state: обязательные гейты зелёные (manda
       expected: false,
     },
     {
-      name: 'обязательный skipped — провал',
+      name: 'обязательный skipped по not_applicable — не провал (#248)',
       doc: gatesDoc(sha, [gate('lint_workflows', 'skipped', 'not_applicable')]),
+      iteration: 1,
+      expected: true,
+    },
+    {
+      name: 'обязательный skipped по другой причине — провал',
+      doc: gatesDoc(sha, [gate('lint_workflows', 'skipped', 'tool_missing')]),
+      iteration: 1,
+      expected: false,
+    },
+    {
+      name: 'обязательный skipped без причины — провал',
+      doc: gatesDoc(sha, [gate('lint_workflows', 'skipped')]),
       iteration: 1,
       expected: false,
     },

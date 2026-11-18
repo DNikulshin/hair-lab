@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -13,6 +14,7 @@ import {
   parseCriteria,
   renderEscalationBanner,
   renderPrBody,
+  summaryItems,
 } from './cycle-pr-body.mjs';
 
 /** Путь к CLI: тесты секций запускают его отдельным процессом, как супервизор. */
@@ -113,6 +115,16 @@ describe('секции шаблона', () => {
       text.includes('- Добавлен `scripts/cycle-pr-body.mjs`: тело PR в stdout'),
       'пункты «Что сделано» берутся из code-report.<n>.md',
     );
+  });
+
+  test('отчёт без раздела «Что сделано» — заглушка, а не «Расхождения с планом» (#249)', () => {
+    const text = body('no-what-done');
+    const done = section(text, 'Что сделано');
+
+    assert.match(done, /Пункты «Что сделано» не найдены в `code-report\.1\.md`/);
+    assert.equal(done.includes('Расхождения'), false, 'чужие пункты в «Что сделано» не едут');
+    assert.equal(done.includes('Не проверено'), false);
+    assert.match(done, new RegExp(`Closes #${fixtureJson('no-what-done', 'state.json').issue}\\b`));
   });
 
   test('все секции шаблона на месте и идут в его порядке', () => {
@@ -244,6 +256,72 @@ describe('секции шаблона', () => {
   test('«Как проверять» перечисляет гейты, оставшиеся на человека', () => {
     assert.ok(body('unverified').includes('- `test_int` — not_run (no_database)'));
     assert.ok(body('proceed').includes('Все гейты пройдены или неприменимы: ручных шагов нет.'));
+  });
+});
+
+describe('summaryItems: источник пунктов «Что сделано» (#249)', () => {
+  const names = {
+    codeReport: 'code-report.1.md',
+    plan: 'plan.1.md',
+    gates: 'gates.1.json',
+    reviewMd: 'review.1.md',
+    evaluationMd: 'evaluation.1.md',
+    decision: 'decision.1.json',
+  };
+
+  /**
+   * Временный каталог цикла с нужными файлами.
+   * @param {Record<string, string>} files
+   * @returns {string}
+   */
+  function cycleDir(files) {
+    const dir = mkdtempSync(join(tmpdir(), 'hair-lab-pr-body-'));
+    for (const [name, text] of Object.entries(files)) writeFileSync(join(dir, name), text);
+    return dir;
+  }
+
+  test('явный раздел «Что сделано» выигрывает у остальных', () => {
+    const dir = cycleDir({
+      'code-report.1.md': [
+        '## Расхождения с планом',
+        '- расхождение',
+        '## Что сделано',
+        '- сделано 1',
+        '- сделано 2',
+      ].join('\n'),
+    });
+
+    assert.deepEqual(summaryItems(dir, names), ['сделано 1', 'сделано 2']);
+  });
+
+  test('без явного раздела — первый раздел после «Файлы»', () => {
+    const dir = cycleDir({
+      'code-report.1.md': [
+        '# Отчёт',
+        '## Файлы',
+        '- `scripts/a.mjs`',
+        '## Что в документе',
+        '- пункт из раздела после «Файлы»',
+        '## Расхождения с планом',
+        '- расхождение',
+      ].join('\n'),
+    });
+
+    assert.deepEqual(summaryItems(dir, names), ['пункт из раздела после «Файлы»']);
+  });
+
+  test('нет подходящего раздела и нет «Файлы» — пустой список', () => {
+    const dir = cycleDir({
+      'code-report.1.md': '## Не проверено\n\n- не проверено\n',
+    });
+
+    assert.deepEqual(summaryItems(dir, names), []);
+  });
+
+  test('нет отчёта `code` — пункты берутся из плана', () => {
+    const dir = cycleDir({ 'plan.1.md': '# План\n\n- шаг 1\n- шаг 2\n' });
+
+    assert.deepEqual(summaryItems(dir, names), ['шаг 1', 'шаг 2']);
   });
 });
 

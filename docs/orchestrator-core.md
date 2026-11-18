@@ -200,11 +200,12 @@ lock [--dir D] [--slug S] | unlock [--dir D]  блокировка дерева,
   а не молчаливый успех;
 - `escalate` вычисляет `draft_pr_allowed` (§9): проход `code` завершён и обязательные гейты
   зелёные, то есть `gates.<n>.json` текущей итерации валиден, содержит ≥ 1 гейт
-  `required: true`, и каждый обязательный гейт — `pass` или `not_run` с причиной
-  `no_database`; причина ∈ {`iteration_limit`, `budget`, `agent_output_invalid`}. Проверка
-  fail-safe: нет файла, битый документ, чужая итерация, пустой список гейтов, обязательный
-  `fail`, `skipped` или `not_run` по другой причине → `false` (неполные данные — не повод
-  открывать draft PR).
+  `required: true`, и каждый обязательный гейт — `pass`, `skipped` с причиной
+  `not_applicable` или `not_run` с причиной `no_database` (#248: пропуск по неприменимости —
+  это не «не проверили»); причина ∈ {`iteration_limit`, `budget`, `agent_output_invalid`}.
+  Проверка fail-safe: нет файла, битый документ, чужая итерация, пустой список гейтов,
+  обязательный `fail`, `skipped` по другой причине или `not_run` по другой причине → `false`
+  (неполные данные — не повод открывать draft PR).
 
 **Блокировка (`lock`/`unlock`).** Файл `.pi/artifacts/.lock` = `{ pid, slug|null, created_at }`.
 В `pid` пишется **родительский** процесс (`ppid`) — супервизор, который ведёт цикл: сам
@@ -244,19 +245,25 @@ packet   --dir D [--base SHA]                   собирает evidence/ дл�
 
 **Маскирование** (логи и сырые данные QA):
 
-| Что                                                    | Замена                   |
-| ------------------------------------------------------ | ------------------------ |
-| e-mail                                                 | `[email]`                |
-| телефон (форматы `+7`, `8`, общий `\+\d…`)             | `[phone]`                |
-| значения после `authorization`, `cookie`, `set-cookie` | `[secret]`               |
-| JWT (`eyJ….….…`)                                       | `[secret]`               |
-| `postgres(ql)://user:pass@`                            | `postgresql://[secret]@` |
-| значение после `key                                    | token                    | secret | password | passwd | pwd` (`=`или`:`, ≥8 символов) | `[secret]` |
+| Что                                                                                        | Замена                   |
+| ------------------------------------------------------------------------------------------ | ------------------------ |
+| e-mail                                                                                     | `[email]`                |
+| телефон (форматы `+7`, `8`, общий `\+\d…`)                                                 | `[phone]`                |
+| значения после `authorization`, `cookie`, `set-cookie`                                     | `[secret]`               |
+| JWT (`eyJ….….…`)                                                                           | `[secret]`               |
+| `postgres(ql)://user:pass@`                                                                | `postgresql://[secret]@` |
+| значение после `key`/`token`/`secret`/`password`/`passwd`/`pwd` (`=` или `:`, ≥8 символов) | `[secret]`               |
 
 Правило по `authorization`/`cookie`/`set-cookie` срабатывает только на учётные данные:
 схема `Bearer`/`Basic` с токеном или токен машинного вида для `authorization`, обязательная
 пара `name=value` для cookie. Проза вида `cookie: проверяется только в production`
 не маскируется (#246).
+
+Правило по `key`/`token`/`password` **не маскирует код и прозу** (#264): выражение
+(`key={item.id}`, `token: Promise<void>`), обращение к свойству (`item.id`), camelCase-имя
+(`passwordSchema`, `cookieToken`) и значение из букв кириллицы без цифр
+(`token: недействительный` — это текст, а не значение). Всё остальное маскируется, включая
+слабый пароль `password=abcdefgh` и смешанный регистр (`SuperSecret123`).
 
 **В `evidence/diff.patch`** применяется `redactPatch` — только e-mail, телефоны, JWT и
 пароль строки подключения. Правила по ключам (`authorization`, `key|token|secret|password`)
@@ -341,6 +348,8 @@ node scripts/cycle-decide.mjs --dir D [--iteration N]
      stage = первый невалидный из [REVIEW, EVALUATE]
      retries[stage] < 1  → RETRY_STAGE(stage)
      иначе               → ESCALATE(agent_output_invalid)
+   Причина дополняется путями полей для починки (#247): до 5 строк
+   `invalid:<STAGE> <файл>: <путь поля>: <что не так>` в `reasons[]`, полный список — в stderr.
 2. Блокеры (каждый обязан быть валиден, иначе downgraded → FOLLOW-UP):
    a. required-гейт со status = fail                                       → gate:<id>
    b. review: BLOCKER, валиден если file, repro, ref разрешается, !preexisting
@@ -386,6 +395,12 @@ node scripts/cycle-pr-body.mjs --dir D [--draft-escalation]
 `gates.<n>.json` (не чекбоксы от руки), раздел «Независимая оценка» — вердикт, таблица
 критериев со статусами и ссылками, `unverified` и `partial`, число итераций, расхождения
 ревью и оценки; «Вне скоупа» — из `followups.md`; строка `Closes #<issue>` обязательна.
+
+Пункты «Что сделано» берутся из отчёта `code-report.<n>.md`: раздел «Что сделано» (или
+«Что изменено»), а если его нет — первый раздел после «Файлы» (#249). «Расхождения
+с планом» и «Не проверено» в этот раздел не попадают; нет подходящего раздела —
+строка-заглушка со ссылкой на отчёт. Нет отчёта `code` — пункты из `plan.<n>.md`.
+
 С `--draft-escalation` в начале добавляется баннер с причинами и открытыми замечаниями.
 Вывод — stdout. Для `PROCEED_WITH_UNVERIFIED` добавляется блок «не проверено» с чекбоксами
 для владельца; один факт из `decision.unverified[]` (`evaluation unverified: <what>`) и

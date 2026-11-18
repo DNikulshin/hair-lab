@@ -17,7 +17,8 @@
  * были бы выдуманными. Перед сборкой каждый документ проходит валидатор схемы из
  * `lib/cycle/validate.mjs` — своего разбора структуры здесь нет.
  *
- * **Структура.** Секции шаблона идут в его порядке: «Что сделано» (пункты из артефактов
+ * **Структура.** Секции шаблона идут в его порядке: «Что сделано» (пункты из раздела
+ * «Что сделано»/«Что изменено» отчёта `code`, #249)
  * прохода и обязательная строка `Closes #<issue>` из `state.issue`), «Как проверять»
  * (что осталось проверить руками по исходам гейтов), «Проверки» (чекбоксы из
  * `gates.<n>.json`: `- [x]` только у `pass`/`skipped`), «Независимая оценка» (§5.7:
@@ -118,6 +119,18 @@ const CHECKBOX = /^\[[ xX]\][ \t]*(.*)$/;
 
 /** Заголовок markdown: закрывает предыдущий пункт списка. */
 const HEADING = /^#{1,6}[ \t]/;
+
+/** Заголовок любого уровня с текстом: используется при разборе разделов отчёта. */
+const SECTION_HEADING = /^#{1,6}[ \t]+(.+?)[ \t]*#*[ \t]*$/;
+
+/**
+ * Разделы отчёта `code`, из которых берутся пункты «Что сделано» (#249).
+ * Первый шаблон — явный раздел; второй — запасной вариант из issue: раздел отчёта,
+ * идущий сразу после «Файлы»/«Изменённые файлы». «Расхождения с планом»,
+ * «Не проверено» и «Follow-ups» в PR-тело больше не попадают.
+ */
+const WHAT_DONE_HEADING = /^что[ \t]+(?:сделано|изменено)(?:[ \t]|$)/i;
+const FILES_HEADING = /^(?:изменённые[ \t]+|измененные[ \t]+|созданные[ \t]+)?файлы(?:[ \t]|$)/i;
 
 /**
  * Префикс источника в `decision.unverified[]`: `cycle-decide` пишет `evaluation unverified: <what>`
@@ -370,22 +383,71 @@ export function renderEscalationBanner(escalation) {
 }
 
 /**
+ * Пункты разделов markdown. Возвращает разделы в порядке файла: заголовок и его пункты
+ * (проза и вложенные заголовки пунктами не становятся). Нужен, чтобы взять пункты
+ * конкретного раздела, а не всего отчёта (#249).
+ * @param {string} markdown
+ * @returns {{ title: string, items: string[] }[]}
+ */
+export function sections(markdown) {
+  if (typeof markdown !== 'string') throw new TypeError('sections: ожидается строка');
+
+  /** @type {{ title: string, items: string[] }[]} */
+  const result = [];
+  /** @type {{ title: string, items: string[] }|null} */
+  let current = null;
+
+  for (const line of markdown.split(/\r?\n/)) {
+    const heading = SECTION_HEADING.exec(line);
+    if (heading !== null) {
+      current = { title: heading[1], items: [] };
+      result.push(current);
+      continue;
+    }
+    if (current === null) continue;
+
+    const match = LIST_ITEM.exec(line);
+    if (match === null) continue;
+    const checkbox = CHECKBOX.exec(match[1]);
+    const value = (checkbox === null ? match[1] : checkbox[1]).trim();
+    if (value !== '') current.items.push(value);
+  }
+
+  return result;
+}
+
+/**
  * Пункты «Что сделано»: первые `SUMMARY_LIMIT` пунктов `code-report.<n>.md`, при его
- * отсутствии — `plan.<n>.md`. Формулировки берутся из артефактов дословно, своих скрипт
- * не придумывает; маскирование (§5.4) применяет `renderPrBody`.
+ * отсутствии — `plan.<n>.md`. В отчёте `code` берётся явный раздел «Что сделано»
+ * («Что изменено»), иначе — первый раздел после «Файлы» (#249). Формулировки берутся из
+ * артефактов дословно, своих скрипт не придумывает; маскирование (§5.4) применяет
+ * `renderPrBody`. Нет подходящего раздела — нет пунктов: текст из «Расхождений»
+ * или «Не проверено» хуже пустого списка.
  * @param {string} dir каталог цикла
  * @param {ReturnType<typeof iterNames>} names имена файлов итерации
  * @returns {string[]}
  */
 export function summaryItems(dir, names) {
-  for (const file of [names.codeReport, names.plan]) {
-    const path = join(dir, file);
-    if (!existsSync(path)) continue;
+  const reportPath = join(dir, names.codeReport);
+  if (existsSync(reportPath)) {
+    const reportSections = sections(readFileSync(reportPath, 'utf8'));
+    const explicit = reportSections.find((item) => WHAT_DONE_HEADING.test(item.title));
+    if (explicit !== undefined && explicit.items.length > 0) {
+      return explicit.items.slice(0, SUMMARY_LIMIT);
+    }
 
-    const items = listItems(readFileSync(path, 'utf8'));
-    if (items.length > 0) return items.slice(0, SUMMARY_LIMIT);
+    const filesIndex = reportSections.findIndex((item) => FILES_HEADING.test(item.title));
+    const afterFiles = filesIndex === -1 ? undefined : reportSections[filesIndex + 1];
+    if (afterFiles !== undefined && afterFiles.items.length > 0) {
+      return afterFiles.items.slice(0, SUMMARY_LIMIT);
+    }
+    return [];
   }
-  return [];
+
+  const planPath = join(dir, names.plan);
+  if (!existsSync(planPath)) return [];
+  const items = listItems(readFileSync(planPath, 'utf8'));
+  return items.slice(0, SUMMARY_LIMIT);
 }
 
 /**
@@ -430,7 +492,15 @@ export function renderPrBody(inputs) {
 
   // Что сделано: пункты из артефактов прохода и обязательная ссылка на issue.
   const doneLines = ['## Что сделано', ''];
-  if (summary.length > 0) doneLines.push(...summary.map((item) => `- ${redacted(item)}`), '');
+  if (summary.length > 0) {
+    doneLines.push(...summary.map((item) => `- ${redacted(item)}`), '');
+  } else {
+    // Пустой раздел честнее чужих пунктов из «Расхождений» или «Не проверено» (#249).
+    doneLines.push(
+      `Пункты «Что сделано» не найдены в \`${iterNames(state.iteration).codeReport}\`.`,
+      '',
+    );
+  }
   doneLines.push(`Closes #${state.issue}`);
   sections.push(doneLines.join('\n'));
 

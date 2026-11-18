@@ -1188,7 +1188,12 @@ describe('CLI: запись решения', () => {
     assert.equal(second.status, 0, second.stderr);
     const escalated = JSON.parse(second.stdout);
     assert.equal(escalated.action, 'ESCALATE');
-    assert.deepEqual(escalated.reasons, ['escalate:agent_output_invalid']);
+    // #247: к причине добавлены пути полей из валидатора, полный список — в stderr.
+    assert.deepEqual(escalated.reasons, [
+      'escalate:agent_output_invalid',
+      'invalid:REVIEW review.1.md: нет блока ```json или JSON не разбирается (в markdown нет размеченного блока ```json)',
+    ]);
+    assert.match(second.stderr, /cycle-decide: review\.1\.md: нет блока/);
   });
 
   test('битый JSON в блоке md — правило 1', (t) => {
@@ -1203,6 +1208,36 @@ describe('CLI: запись решения', () => {
     assert.equal(result.status, 0, result.stderr);
     assert.equal(JSON.parse(result.stdout).action, 'RETRY_STAGE');
     assert.equal(existsSync(join(dir, 'review.1.json')), false);
+  });
+
+  test('невалидная схема называет поля: пути из валидатора в reasons и stderr (#247)', (t) => {
+    const repo = makeRepo(t);
+    const { scores: _scores, ...withoutScores } = evaluationDoc();
+    const dir = makeCycleDir(repo.root, {
+      reviewMd: mdBlock(reviewDoc()),
+      evaluationMd: mdBlock(withoutScores),
+    });
+
+    const result = runCli(repo.root, ['--dir', dir]);
+
+    assert.equal(result.status, 0, result.stderr);
+    const decision = JSON.parse(result.stdout);
+    assert.equal(decision.action, 'RETRY_STAGE');
+    assert.equal(decision.retry_stage, 'EVALUATE');
+    assert.equal(decision.reasons[0], 'retry:EVALUATE agent_output_invalid');
+    const details = decision.reasons.slice(1);
+    assert.ok(details.length > 0, 'к причине добавлены пути полей');
+    assert.ok(details.length <= 5, 'в решение попадает не больше пяти ошибок');
+    assert.ok(
+      details.every((item) => item.startsWith('invalid:EVALUATE evaluation.1.md: ') === true),
+      'каждая подробность называет этап и файл',
+    );
+    assert.ok(
+      details.some((item) => item.includes('evaluation.scores') === true),
+      'видно, какого поля не хватило',
+    );
+    assert.match(result.stderr, /cycle-decide: evaluation\.1\.md: evaluation\.scores/);
+    assert.equal(existsSync(join(dir, 'evaluation.1.json')), false);
   });
 
   test('последний блок md побеждает и перезаписывает прежний json', (t) => {

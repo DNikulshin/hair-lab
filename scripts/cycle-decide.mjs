@@ -50,7 +50,8 @@
  * менять только вместе с тестами):
  * - `reasons[]`: `gate:<id>: fail`, `review:<SEV> <id>`, `evaluation:<SEV> <id>`,
  *   `criteria:<id> <status>`, `retry:<STAGE> agent_output_invalid`,
- *   `escalate:<reason>`;
+ *   `escalate:<reason>`; при невалидном выводе агента сразу за основной причиной идут
+ *   `invalid:<STAGE> <файл>: <путь поля>: <что не так>` (до 5 штук, #247);
  * - `rework_items[]`: `<id> [SEV] <file:line> — <summary>; сценарий: <repro>` (ревью),
  *   `<id> [SEV] <свидетельство> — <claim>; сценарий: <repro>` (defect),
  *   `<id> [unmet] — <note>; свидетельства: <…>` (критерий),
@@ -67,14 +68,16 @@
  * из него PR-сводка ПДн не разглашают. Не маскируются `id`, `file`, `line`, `severity`,
  * `status` и готовые ссылки `path:line`: иначе поедут контракты строк `rework_items[]`
  * и метрика `unresolved_refs`. В `reasons[]` свободного текста нет (только вид элемента,
- * серьёзность/статус и id), поэтому маскирование к нему не применяется.
+ * серьёзность/статус и id), поэтому маскирование к нему не применяется. Единственное
+ * исключение — пути полей из сообщений валидатора (`invalid:<STAGE> …`): это имена из
+ * схемы Приложения A, а не данные цикла.
  *
  * Коды выхода: `0` — решение записано; `2` — ошибка использования или внутренняя
  * (нет/битый `state.json` или `gates.<n>.json`, битый `qa-web.json`, мусор в аргументах).
  * Shebang нужен: файл запускается напрямую.
  */
 import { existsSync, readFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { basename, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { changedFiles } from './lib/cycle/git.mjs';
@@ -98,6 +101,12 @@ const EVALUATE_STAGE = 'EVALUATE';
 
 /** Причина `not_run` гейта, при которой добор невозможен (нет БД). */
 const NO_DATABASE = 'no_database';
+
+/**
+ * Сколько ошибок схемы попадает в `reasons[]` при невалидном выводе агента (#247).
+ * Полный список всё равно печатается в stderr: решение не должно распухать.
+ */
+const INVALID_OUTPUT_LIMIT = 5;
 
 /** Префикс путей web-приложения: по нему решается, нужна ли браузерная проверка. */
 const WEB_PREFIX = 'apps/web';
@@ -140,6 +149,9 @@ const DOWNGRADE_REASONS = Object.freeze({
  * @property {number|null} [costRub] стоимость цикла по `usage.json` и `evals/prices.json`:
  *   `null` (по умолчанию) — замера нет (нет `usage.json`, неизвестна модель или цены),
  *   и тогда бюджетный порог не проверяется: ноль был бы выдуманными данными
+ * @property {Record<string, string[]>} [agentErrors] ошибки схемы по этапам
+ *   (`REVIEW`/`EVALUATE`) из md-блока агента: первые `INVALID_OUTPUT_LIMIT` попадают
+ *   в `reasons[]` при срабатывании правила 1 (#247)
  */
 
 /**
@@ -313,6 +325,21 @@ function defectDowngradeReason(defect, resolvedRefs) {
 }
 
 /**
+ * Ошибки схемы этапа для `reasons[]`: не больше `INVALID_OUTPUT_LIMIT` штук и без
+ * повторов (валидатор может сообщить одно и то же с разными путями). Это подсказка
+ * агенту на повтор, а не замена полного вывода в stderr.
+ * @param {Record<string, string[]>} agentErrors
+ * @param {string} stage
+ * @returns {string[]}
+ */
+function invalidOutputDetails(agentErrors, stage) {
+  const list = agentErrors === null || agentErrors === undefined ? [] : agentErrors[stage];
+  if (!Array.isArray(list)) return [];
+  const unique = [...new Set(list.filter((item) => isText(item)))];
+  return unique.slice(0, INVALID_OUTPUT_LIMIT);
+}
+
+/**
  * Расчёт решения цикла. Чистая функция: файлов не читает и не пишет, время и
  * случайность не использует — на одних и тех же входах результат совпадает.
  * @param {DecideInputs} inputs
@@ -330,6 +357,7 @@ export function decide(inputs) {
     webDiff,
     root,
     costRub = null,
+    agentErrors = {},
   } = inputs;
 
   /** @type {Record<string, number>} */
@@ -391,12 +419,16 @@ export function decide(inputs) {
   const invalidStage = review === null ? REVIEW_STAGE : evaluation === null ? EVALUATE_STAGE : null;
   if (invalidStage !== null) {
     const stageRetries = invalidStage === REVIEW_STAGE ? retries.REVIEW : retries.EVALUATE;
-    if (stageRetries < 1) {
-      reasons.push(`retry:${invalidStage} agent_output_invalid`);
-      return finalize('RETRY_STAGE', { retryStage: invalidStage });
+    const retry = stageRetries < 1;
+    reasons.push(
+      retry ? `retry:${invalidStage} agent_output_invalid` : 'escalate:agent_output_invalid',
+    );
+    // Причина «agent_output_invalid» сама по себе не говорит, что чинить (#247):
+    // рядом кладём пути полей из валидатора, полный список — в stderr CLI.
+    for (const detail of invalidOutputDetails(agentErrors, invalidStage)) {
+      reasons.push(`invalid:${invalidStage} ${detail}`);
     }
-    reasons.push('escalate:agent_output_invalid');
-    return finalize('ESCALATE');
+    return retry ? finalize('RETRY_STAGE', { retryStage: invalidStage }) : finalize('ESCALATE');
   }
 
   /** @type {import('./lib/cycle/refs.mjs').RefContext} */
@@ -646,19 +678,27 @@ function readOptionalJson(file, validator, label) {
  * или схема нарушена. Это вход правила 1, а не отказ CLI.
  * @param {string} file
  * @param {(doc: unknown) => { ok: boolean, errors: string[] }} validator
- * @returns {Record<string, any>|null}
+ * @returns {{ doc: Record<string, any>|null, errors: string[] }}
  */
 function readAgentBlock(file, validator) {
-  if (!existsSync(file)) return null;
+  const label = basename(file);
+  if (!existsSync(file)) return { doc: null, errors: [`${label}: файл не найден`] };
 
   /** @type {unknown} */
   let doc;
   try {
     doc = extractLastJsonBlock(readFileSync(file, 'utf8'));
-  } catch {
-    return null;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      doc: null,
+      errors: [`${label}: нет блока \`\`\`json или JSON не разбирается (${message})`],
+    };
   }
-  return validator(doc).ok ? /** @type {Record<string, any>} */ (doc) : null;
+
+  const result = validator(doc);
+  if (result.ok) return { doc: /** @type {Record<string, any>} */ (doc), errors: [] };
+  return { doc: null, errors: result.errors.map((item) => `${label}: ${item}`) };
 }
 
 /**
@@ -677,8 +717,10 @@ function main() {
     const names = iterNames(iteration);
 
     const gates = readRequiredJson(join(dir, names.gates), validateGates, names.gates);
-    const review = readAgentBlock(join(dir, names.reviewMd), validateReview);
-    const evaluation = readAgentBlock(join(dir, names.evaluationMd), validateEvaluation);
+    const reviewBlock = readAgentBlock(join(dir, names.reviewMd), validateReview);
+    const evaluationBlock = readAgentBlock(join(dir, names.evaluationMd), validateEvaluation);
+    const review = reviewBlock.doc;
+    const evaluation = evaluationBlock.doc;
     const qaWeb = readOptionalJson(join(dir, FIXED_NAMES.qaWeb), validateQaWeb, FIXED_NAMES.qaWeb);
 
     // Web-дифф читается от базы цикла; индекс не меняется (его готовит супервизор).
@@ -687,6 +729,11 @@ function main() {
     // Бюджет (правило 7 §5.6): на момент DECIDE `metrics.json` ещё не написан, поэтому
     // стоимость считается по накопленному `usage.json`. Нет замера — `null`, не ноль.
     const costRub = cycleCostRub({ dir, models: state.models, prices: readPriceSnapshot(root) });
+
+    const agentErrors = {
+      [REVIEW_STAGE]: reviewBlock.errors,
+      [EVALUATE_STAGE]: evaluationBlock.errors,
+    };
 
     const decision = decide({
       iteration,
@@ -699,7 +746,13 @@ function main() {
       webDiff,
       root,
       costRub,
+      agentErrors,
     });
+
+    // Полный список ошибок схемы — в stderr (решение говорит только кодом причины, #247).
+    for (const message of [...reviewBlock.errors, ...evaluationBlock.errors]) {
+      process.stderr.write(`cycle-decide: ${message}\n`);
+    }
 
     // Артефакты из md пишутся только при валидном блоке (D4): иначе оставляем
     // предыдущие файлы нетронутыми, а правило 1 уже отражено в решении.
