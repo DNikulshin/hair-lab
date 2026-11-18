@@ -27,8 +27,16 @@ concurrency:
 
 jobs:
   sync:
+    # Полная сверка нужна не на каждую метку: `type:*`, `area:*`, `prio:*`, `size:*`
+    # на колонку не влияют, а событий от них много. Колонку двигают только `status:*`
+    # (их же ставит `board-labels.yml`), поэтому остальные метки прогон не запускают.
     # PR из форка не получает секретов — синк там всё равно не выполнить.
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    if: |
+      (github.event_name != 'issues'
+        || (github.event.action != 'labeled' && github.event.action != 'unlabeled')
+        || startsWith(github.event.label.name, 'status:'))
+      && (github.event_name != 'pull_request'
+        || github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ secrets.PROJECT_TOKEN }}
