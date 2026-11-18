@@ -71,6 +71,14 @@ Fine-grained PAT (рекомендуется — минимальные прав
    или Settings → Secrets and variables → Actions → New repository secret.
 6. Проверить: Actions → Board sync → Run workflow; в логе — «без изменений <N>».
 
+Почему в workflow `OWNER: '@me'`, а не логин: `gh project … --owner <логин>` сначала
+определяет тип владельца запросом `user(login:)`, которого fine-grained PAT не получает —
+gh падает с `unknown owner type` (проверено прогоном 44397670721: сначала `Resource not
+accessible by personal access token (user.projectV2)`, после выдачи прав — `unknown owner type`).
+`@me` резолвится через `viewer` и работает с обоими типами токена; репозиторий передаётся
+отдельно (`REPO`). Локальный запуск скрипта без переменных по-прежнему берёт `DNikulshin`
+и требует classic-токена со scope `project`.
+
 Classic PAT как альтернатива: https://github.com/settings/tokens/new?scopes=project,repo&description=hair-lab-board-sync
 — scope `project` (запись в Projects) и `repo` (чтение issues).
 

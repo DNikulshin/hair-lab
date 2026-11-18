@@ -32,7 +32,11 @@ jobs:
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ secrets.PROJECT_TOKEN }}
-      OWNER: ${{ github.repository_owner }}
+      # `@me`, а не `github.repository_owner`: `gh project … --owner <login>` сначала определяет
+      # тип владельца запросом `user(login:)`, а fine-grained PAT такого запроса не получает и
+      # gh падает с «unknown owner type» (проверено прогоном 44397670721). `@me` резолвится
+      # через `viewer` и работает с обоими типами токена; репозиторий задан отдельно (REPO).
+      OWNER: '@me'
       REPO: ${{ github.repository }}
       PROJECT_NUMBER: ${{ vars.PROJECT_NUMBER || '4' }}
     steps:
