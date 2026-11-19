@@ -27,8 +27,11 @@ import { markRefundRequiredByAppointment } from '../payments/index';
  *   `updatedAt`) и писем не ставит;
  * - причина салонной отмены пишется в `cancel_reason` как `cancelled_by_salon: <причина>`:
  *   по конвенции клиентской отмены (`cancelled_by_client`) видно, кто отменил. Повтор
- *   салонной отмены идемпотентен; если запись отменил клиент (или её сняла оплата),
- *   это 409 — чужую причину не перезаписываем;
+ *   салонной отмены идемпотентен; голое `cancelled_by_salon` без причины считается
+ *   салонной отменой (так выглядят ручные правки и строки до нормализации, #253); если
+ *   запись отменил клиент (или её сняла оплата), это 409 — чужую причину не перезаписываем;
+ * - отмена снимает дедлайн холда (`payment_deadline_at = NULL`): отменённая запись оплаты
+ *   не ждёт, платёжные пути чистят его так же;
  * - отмена и письма — одной транзакцией (outbox): `pending`-подтверждение становится
  *   `suppressed`, письмо `booking_cancellation` ставится только при непустой почте клиента.
  *   Сбой отправки письма отмену не ломает — письмо отправит фоновый диспетчер;
@@ -134,9 +137,18 @@ export function salonCancelReason(reason: string): string {
   return `${SALON_CANCEL_REASON_PREFIX}: ${reason}`;
 }
 
-/** Отменил ли запись салон этим маршрутом: только тогда повтор отмены идемпотентен. */
+/**
+ * Отменил ли запись салон этим маршрутом: только тогда повтор отмены идемпотентен.
+ *
+ * Голое `cancelled_by_salon` (без «: причина») тоже считается салонной отменой: так выглядят
+ * строки, поправленные руками или созданные до нормализации (#253). Повтор отмены по ним — 200
+ * без перезаписи причины, а не 409: иначе исправить такую запись из админки было бы нечем.
+ */
 function isSalonCancellation(cancelReason: string | null): boolean {
-  return cancelReason !== null && cancelReason.startsWith(`${SALON_CANCEL_REASON_PREFIX}: `);
+  return (
+    cancelReason === SALON_CANCEL_REASON_PREFIX ||
+    (cancelReason !== null && cancelReason.startsWith(`${SALON_CANCEL_REASON_PREFIX}: `))
+  );
 }
 
 /**
@@ -163,9 +175,9 @@ export async function listAdminAppointments(
  * перечитыванием. Успешный переход возвращает снимок записи; повтор (целевой статус уже
  * стоит) — снимок без изменений; отсутствие записи — 404; любой другой статус — 409.
  *
- * `cancelReason` задан только для отмены: тогда же ставится `payments.refund_required`
- * оплаченному платежу, снимается `pending`-подтверждение и ставится письмо об отмене
- * (всё — та же транзакция).
+ * `cancelReason` задан только для отмены: тогда же снимается дедлайн холда, ставится
+ * `payments.refund_required` оплаченному платежу, снимается `pending`-подтверждение
+ * и ставится письмо об отмене (всё — та же транзакция).
  */
 async function transition(
   db: Db,
@@ -177,7 +189,12 @@ async function transition(
   return db.$transaction(async (tx) => {
     const updated = await tx.appointment.updateMany({
       where: { id, status: { in: [...allowedFrom] } },
-      data: cancelReason === undefined ? { status: target } : { status: target, cancelReason },
+      data: {
+        status: target,
+        ...(cancelReason === undefined ? {} : { cancelReason }),
+        // Отмена снимает и дедлайн холда: отменённая запись оплаты не ждёт (как в платежах).
+        ...(target === 'cancelled' ? { paymentDeadlineAt: null } : {}),
+      },
     });
 
     if (updated.count === 1) {

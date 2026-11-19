@@ -24,7 +24,9 @@ import { BOOKING_CONFIRMATION_TYPE } from './booking-confirmation.email';
  *   сервер ставит его по дедлайну холда (`pending` + непустой `paymentDeadlineAt`), клиент
  *   это правило не дублирует, а старые клиенты поля просто игнорируют;
  * - чужая и несуществующая запись неразличимы: обе дают 404 (наличие чужих записей не раскрываем);
- * - причина отмены ставится сервером (`CANCEL_REASON`), клиент её не присылает.
+ * - причина отмены ставится сервером (`CANCEL_REASON`), клиент её не присылает;
+ * - отмена снимает дедлайн холда (`payment_deadline_at = NULL`): отменённая запись оплаты
+ *   не ждёт (так же делают платёжные пути), и `awaitingPayment` заведомо `false`.
  *
  * Условия отмены проверяются одним `UPDATE ... WHERE`: гонка между проверкой и записью
  * невозможна, проигравший запрос видит уже актуальное состояние строки.
@@ -243,8 +245,9 @@ export async function listAccountBookings(
  * невозможна, а чужая запись не может быть изменена даже теоретически.
  *
  * Отмена, письма и флаг возврата — одной транзакцией. Если `updateMany` обновил строку
- * (`count === 1`), то оплаченному платежу ставится `payments.refund_required` (деньги вернёт
- * свипер возвратов), `pending`-подтверждение становится `suppressed` (диспетчер берёт только
+ * (`count === 1`), то снимается дедлайн холда (отменённая запись оплаты не ждёт),
+ * оплаченному платежу ставится `payments.refund_required` (деньги вернёт свипер возвратов),
+ * `pending`-подтверждение становится `suppressed` (диспетчер берёт только
  * `pending`), а при непустой почте клиента ставится письмо `booking_cancellation` со снимком
  * записи на момент отмены. Идемпотентность даёт тот же условный `updateMany`: повторная отмена
  * видит, что строка уже не активна, обновить её не может и не трогает ни платежи, ни письма.
@@ -275,7 +278,7 @@ export async function cancelAccountBooking(
         status: { in: ACTIVE_STATUSES },
         startsAt: { gte: new Date(now.getTime() + CANCEL_MIN_LEAD_MS) },
       },
-      data: { status: 'cancelled', cancelReason: CANCEL_REASON },
+      data: { status: 'cancelled', cancelReason: CANCEL_REASON, paymentDeadlineAt: null },
     });
 
     if (updated.count === 1) {

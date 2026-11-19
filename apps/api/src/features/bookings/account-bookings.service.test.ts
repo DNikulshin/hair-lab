@@ -357,6 +357,21 @@ describe('cancelAccountBooking: DTO отменённой записи', () => {
     expect(Object.keys(booking)).not.toContain('clientPhone');
     expect(Object.keys(booking)).not.toContain('clientEmail');
   });
+
+  it('отмена снимает дедлайн холда: отменённая запись оплаты не ждёт', async () => {
+    const record = row({
+      status: 'pending',
+      paymentDeadlineAt: new Date(NOW.getTime() + 10 * MINUTE_MS),
+    });
+    const { db } = createDbStub([record]);
+
+    const booking = await cancelAccountBooking(db, CLIENT_ID, BOOKING_ID, NOW);
+
+    expect(booking.status).toBe('cancelled');
+    // Дедлайн снят тем же UPDATE, что и статус: отдельного запроса нет.
+    expect(record.paymentDeadlineAt).toBeNull();
+    expect(booking.awaitingPayment).toBe(false);
+  });
 });
 
 describe('cancelAccountBooking: письма об отмене', () => {
@@ -468,6 +483,24 @@ describe('cancelAccountBooking: письма об отмене', () => {
     expect(outboxRows).toHaveLength(2);
     expect(confirmation.status).toBe('suppressed');
     expect(cancellation.status).toBe('pending');
+  });
+
+  it('повторная отмена идемпотентна для обеих форм причины: клиентской и салонной без причины', async () => {
+    for (const cancelReason of [CANCEL_REASON, 'cancelled_by_salon']) {
+      const confirmation = outboxRow({ status: 'suppressed', lastError: 'cancelled' });
+      const { db, outboxRows, outboxCreate, outboxUpdateMany } = createDbStub(
+        [row({ status: 'cancelled', cancelReason })],
+        [confirmation],
+      );
+
+      const booking = await cancelAccountBooking(db, CLIENT_ID, BOOKING_ID, NOW);
+
+      expect(booking.status).toBe('cancelled');
+      // Повтор ничего не пишет: ни в outbox, ни в строку записи.
+      expect(outboxUpdateMany).not.toHaveBeenCalled();
+      expect(outboxCreate).not.toHaveBeenCalled();
+      expect(outboxRows).toHaveLength(1);
+    }
   });
 
   it('409 (дедлайн, прошедшая, completed, no_show) не трогает outbox', async () => {

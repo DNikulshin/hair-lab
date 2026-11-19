@@ -56,6 +56,8 @@ interface Row {
   clientPhone: string;
   clientEmail: string | null;
   cancelReason: string | null;
+  /** Дедлайн холда: отмена обязана его снять (#253). */
+  paymentDeadlineAt: Date | null;
   updatedAt: Date;
   master: { fullName: string };
   service: { name: string };
@@ -74,6 +76,7 @@ function row(overrides: Partial<Row> = {}): Row {
     clientPhone: '+70000000001',
     clientEmail: 'guest@example.invalid',
     cancelReason: null,
+    paymentDeadlineAt: null,
     updatedAt: new Date('2030-01-01T00:00:00.000Z'),
     master: { fullName: 'Тестовый Мастер' },
     service: { name: 'Стрижка' },
@@ -422,7 +425,10 @@ describe('идемпотентность повтора', () => {
 });
 
 describe('cancelAdminAppointment: причина салона и письма', () => {
-  it('пишет причину с префиксом салона и ставит письмо об отмене', async () => {
+  /** Дедлайн холда у записи, которая ждёт оплаты: отмена его снимает. */
+  const HOLD_DEADLINE = new Date('2030-06-15T08:55:00.000Z');
+
+  it('пишет причину с префиксом салона, ставит письмо об отмене и снимает дедлайн холда', async () => {
     const confirmation: OutboxRow = {
       id: '00000000-0000-4000-8000-000000000301',
       type: BOOKING_CONFIRMATION_TYPE,
@@ -436,7 +442,7 @@ describe('cancelAdminAppointment: причина салона и письма', 
       id: '00000000-0000-4000-8000-000000000302',
       status: 'sent',
     };
-    const record = row({ status: 'confirmed' });
+    const record = row({ status: 'confirmed', paymentDeadlineAt: HOLD_DEADLINE });
     const { db, outboxRows, outboxUpdateMany, outboxCreate } = createDbStub(
       [record],
       [confirmation, alreadySent],
@@ -445,6 +451,8 @@ describe('cancelAdminAppointment: причина салона и письма', 
     const appointment = await cancelAdminAppointment(db, BOOKING_ID, 'мастер заболел');
 
     expect(appointment.status).toBe('cancelled');
+    // Отменённая запись оплаты не ждёт: дедлайн холда снят тем же UPDATE.
+    expect(record.paymentDeadlineAt).toBeNull();
     expect(record.cancelReason).toBe(`${SALON_CANCEL_REASON_PREFIX}: мастер заболел`);
     // DTO отдаёт причину: экран сотрудника показывает, что отменил салон и почему.
     expect(appointment.cancelReason).toBe(`${SALON_CANCEL_REASON_PREFIX}: мастер заболел`);
@@ -539,6 +547,23 @@ describe('cancelAdminAppointment: причина салона и письма', 
     expect(outboxUpdateMany).not.toHaveBeenCalled();
     expect(outboxCreate).not.toHaveBeenCalled();
     expect(outboxRows).toHaveLength(2);
+  });
+
+  it('голое `cancelled_by_salon` считается салонной отменой: повтор — 200 без перезаписи', async () => {
+    // Так выглядит строка после ручной правки или до нормализации (#253): причины нет.
+    const record = row({ status: 'cancelled', cancelReason: SALON_CANCEL_REASON_PREFIX });
+    const { db, outboxRows, outboxUpdateMany, outboxCreate } = createDbStub([record]);
+
+    const appointment = await cancelAdminAppointment(db, BOOKING_ID, 'мастер заболел');
+
+    expect(appointment.status).toBe('cancelled');
+    expect(appointment.cancelReason).toBe(SALON_CANCEL_REASON_PREFIX);
+    // Повтор не переписывает причину и не сдвигает отметку обновления.
+    expect(record.cancelReason).toBe(SALON_CANCEL_REASON_PREFIX);
+    expect(record.updatedAt.toISOString()).toBe('2030-01-01T00:00:00.000Z');
+    expect(outboxUpdateMany).not.toHaveBeenCalled();
+    expect(outboxCreate).not.toHaveBeenCalled();
+    expect(outboxRows).toHaveLength(0);
   });
 
   it('отмену клиента салонная отмена не перезаписывает: 409', async () => {
