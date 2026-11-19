@@ -1,0 +1,11 @@
+{
+  "$comment": "Проектный конфиг harness (issue #235, этап B). Читается ядром цикла: раздел limits — лимиты, остальные разделы добавит этап B/dev-harness.",
+  "limits": {
+    "maxCycleCostRub": 50,
+    "defaultMaxIterations": 2,
+    "maxDiffLines": 2000,
+    "maxDiffBytes": 409600,
+    "logMaxBytes": 5242880,
+    "evidenceTailLines": 200
+  }
+}

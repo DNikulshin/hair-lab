@@ -75,6 +75,7 @@ import { fileURLToPath } from 'node:url';
 import { normalizeDoc } from './cycle-decide.mjs';
 import { resolveBaseSha } from './cycle-gates.mjs';
 import { LIMITS } from './lib/cycle/config.mjs';
+import { resolveLimits } from './lib/cycle/limits.mjs';
 import { diffFromBase, intentToAddUntracked } from './lib/cycle/git.mjs';
 import { readJson, tail, writeTextAtomic } from './lib/cycle/io.mjs';
 import {
@@ -657,6 +658,8 @@ function readIssue(file) {
  * @returns {PacketPlan}
  */
 function buildPacket({ dir, root, base = null }) {
+  // Лимиты пакета — из проекта (#235): CLI → env → `.pi/harness.config.json` → дефолт ядра.
+  const projectLimits = resolveLimits({ root }).values;
   const state = readRequiredJson(join(dir, FIXED_NAMES.state), validateState, FIXED_NAMES.state);
   const iteration = /** @type {number} */ (state.iteration);
   const names = iterNames(iteration);
@@ -682,7 +685,7 @@ function buildPacket({ dir, root, base = null }) {
   intentToAddUntracked({ cwd: root });
   const rawDiff = diffFromBase(baseShaValue, { cwd: root });
 
-  const limits = diffLimits(rawDiff);
+  const limits = diffLimits(rawDiff, projectLimits);
   if (limits.tooLarge) {
     return {
       tooLarge: true,
@@ -707,7 +710,7 @@ function buildPacket({ dir, root, base = null }) {
     const logFile = logPathInside(dir, entry.log);
     if (logFile === null || !existsSync(logFile)) continue;
 
-    const text = redactLog(tail(logFile, LIMITS.evidenceTailLines));
+    const text = redactLog(tail(logFile, projectLimits.evidenceTailLines));
     files.push({
       path: `${FIXED_NAMES.evidenceDir}/${GATES_LOGS_DIR}/${entry.id}.${iteration}.log`,
       text: text === '' ? '' : `${text}\n`,
@@ -804,6 +807,7 @@ function runCriteria({ dir, issueJson }) {
  */
 function runPacket({ dir, root, base }) {
   const packet = buildPacket({ dir, root, base });
+  const projectLimits = resolveLimits({ root }).values;
 
   if (packet.tooLarge) {
     const doc = {
@@ -815,7 +819,7 @@ function runPacket({ dir, root, base }) {
     process.stdout.write(`${JSON.stringify(normalizeDoc(doc))}\n`);
     process.stderr.write(
       `cycle-evidence: ${REASON_DIFF_TOO_LARGE}: ${packet.lines} строк, ${packet.bytes} байт ` +
-        `(лимит ${LIMITS.maxDiffLines} строк, ${LIMITS.maxDiffBytes} байт)\n`,
+        `(лимит ${projectLimits.maxDiffLines} строк, ${projectLimits.maxDiffBytes} байт)\n`,
     );
     return 4;
   }

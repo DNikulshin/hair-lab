@@ -770,7 +770,7 @@ describe('decide: правило 7 — бюджетный порог (§5.6, §1
     assert.equal(result.retry_stage, null);
 
     assert.deepEqual(result.reasons, [
-      'budget: 50.01 ₽ > 50 ₽ (правило 7 §5.6)',
+      'budget: 50.01 ₽ > 50 ₽ (правило 7 §5.6, лимит: дефолт ядра)',
       'escalate:budget',
     ]);
     assert.equal(validateDecision(result).ok, true, validateDecision(result).errors.join('\n'));

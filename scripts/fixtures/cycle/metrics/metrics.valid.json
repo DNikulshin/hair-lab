@@ -1,4 +1,30 @@
 {
+  "applied_limits": {
+    "defaultMaxIterations": {
+      "source": "config",
+      "value": 2
+    },
+    "evidenceTailLines": {
+      "source": "config",
+      "value": 200
+    },
+    "logMaxBytes": {
+      "source": "config",
+      "value": 5242880
+    },
+    "maxCycleCostRub": {
+      "source": "config",
+      "value": 50
+    },
+    "maxDiffBytes": {
+      "source": "config",
+      "value": 409600
+    },
+    "maxDiffLines": {
+      "source": "config",
+      "value": 2000
+    }
+  },
   "both": 2,
   "cost_rub": null,
   "cycle_duration_s": 6750,

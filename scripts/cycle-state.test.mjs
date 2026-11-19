@@ -18,7 +18,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, test } from 'node:test';
 
-import { claimStaleFile, mandatoryGatesGreen, TRANSITIONS } from './cycle-state.mjs';
+import { advanceTo, claimStaleFile, mandatoryGatesGreen, TRANSITIONS } from './cycle-state.mjs';
 import { validateEscalation, validateState } from './lib/cycle/validate.mjs';
 
 /** Путь к CLI: тесты запускают его как отдельный процесс. */
@@ -2061,5 +2061,71 @@ describe('cycle-state: детерминизм', () => {
 
     assert.equal(stateText(dir), firstText);
     assert.equal(second.stdout, first.stdout);
+  });
+});
+
+describe('advance: выход из ESCALATED (#235)', () => {
+  /** Состояние в терминальном ESCALATED: эскалация по бюджету, история закрыта. */
+  function escalated() {
+    return {
+      issue: 42,
+      slug: 'demo',
+      branch: 'feat/42-demo',
+      base_sha: 'a'.repeat(40),
+      criteria_source: 'issue',
+      stage: 'ESCALATED',
+      stage_status: 'done',
+      iteration: 1,
+      max_iterations: 2,
+      models: {},
+      retries: { REVIEW: 0, EVALUATE: 0, evidence: 0 },
+      owner_approved: false,
+      escalation: { reason: 'budget', draft_pr_allowed: true },
+      started_at: NOW,
+      updated_at: NOW,
+      history: [
+        {
+          stage: 'DECIDE',
+          iteration: 1,
+          started_at: NOW,
+          finished_at: NOW,
+          status: 'done',
+        },
+        {
+          stage: 'ESCALATED',
+          iteration: 1,
+          started_at: NOW,
+          finished_at: NOW,
+          status: 'done',
+        },
+      ],
+    };
+  }
+
+  test('без --owner-approved переход запрещён (код 3)', () => {
+    assert.throws(
+      () => advanceTo(escalated(), { to: 'DECIDE', now: new Date(NOW) }),
+      /owner-approved/,
+    );
+  });
+
+  test('с --owner-approved открывается DECIDE, эскалация снята', () => {
+    const next = advanceTo(escalated(), { to: 'DECIDE', now: new Date(NOW), ownerApproved: true });
+
+    assert.equal(next.stage, 'DECIDE');
+    assert.equal(next.stage_status, 'running');
+    assert.equal(next.escalation, null);
+    assert.equal(next.history.at(-1).stage, 'DECIDE');
+    assert.equal(next.history.at(-1).finished_at, null);
+  });
+
+  test('любой другой переход из ESCALATED запрещён даже с флагом', () => {
+    for (const to of ['PLAN', 'CODE', 'PR', 'DONE']) {
+      assert.throws(
+        () => advanceTo(escalated(), { to, now: new Date(NOW), ownerApproved: true }),
+        /только переход в DECIDE/,
+        to,
+      );
+    }
   });
 });
