@@ -18,99 +18,35 @@
  *
  * Shebang нужен: файл запускается напрямую (гейт `node scripts/migrations-clean.mjs`).
  */
-import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { redactLog } from './lib/cycle/redact.mjs';
+import {
+  createPrismaExecutor,
+  logTail,
+  MAINTENANCE_DATABASE,
+  splitDatabaseUrl,
+  temporaryDatabaseName,
+  withDatabase,
+} from './lib/db-url.mjs';
 
-/** Обслуживающая БД для `CREATE`/`DROP DATABASE`: она есть в любом образе Postgres. */
-const MAINTENANCE_DATABASE = 'postgres';
-
-/** Предел длины идентификатора в PostgreSQL, байт. */
-const MAX_IDENTIFIER_BYTES = 63;
-
-/** Сколько строк хвоста вывода попадает в лог гейта при падении. */
-const TAIL_LINES = 40;
+// Помощники живут в `lib/db-url.mjs`: те же правила разбирают строку подключения здесь и
+// в `scripts/test-int.mjs`. Реэкспорт сохраняет прежний публичный API модуля (его импортируют тесты).
+export { logTail, splitDatabaseUrl, withDatabase };
 
 /** Prisma CLI пакета `api`: там он и установлен, и оттуда виден `prisma.config.ts`. */
 const API_DIR = join('apps', 'api');
 const PRISMA_BIN = join(API_DIR, 'node_modules', '.bin', 'prisma');
 
 /**
- * Разбирает строку подключения на базу и «шапку» без имени базы.
- * @param {string} value `DATABASE_URL`
- * @returns {{ database: string, origin: string }}
- */
-export function splitDatabaseUrl(value) {
-  if (typeof value !== 'string' || value.trim() === '') {
-    throw new TypeError('splitDatabaseUrl: ожидается непустая строка подключения');
-  }
-  const url = new URL(value);
-  const database = decodeURIComponent(url.pathname.replace(/^\//, ''));
-  if (database === '') {
-    throw new Error('splitDatabaseUrl: в DATABASE_URL не указана база данных');
-  }
-  return { database, origin: `${url.protocol}//${url.host}` };
-}
-
-/**
- * Строка подключения к другой базе того же сервера: учётные данные и параметры
- * (`?schema=…`) сохраняются, меняется только имя базы.
- * @param {string} value исходный `DATABASE_URL`
- * @param {string} database имя базы
- * @returns {string}
- */
-export function withDatabase(value, database) {
-  const url = new URL(value);
-  url.pathname = `/${encodeURIComponent(database)}`;
-  return url.toString();
-}
-
-/**
- * Имя временной базы гейта: `<database>_gate_<pid>_<время в base36>`. Уникально для
- * параллельных прогонов (pid и время) и укладывается в 63 байта — длинное имя базы
- * подрезается, хвост остаётся уникальным.
+ * Имя временной базы гейта `migrations_clean`: `<database>_gate_<pid>_<время в base36>`.
  * @param {string} database имя базы из `DATABASE_URL`
  * @param {{ pid?: number, now?: number }} [options]
  * @returns {string}
  */
-export function gateDatabaseName(database, { pid = process.pid, now = Date.now() } = {}) {
-  const suffix = `_gate_${pid}_${now.toString(36)}`;
-  const room = MAX_IDENTIFIER_BYTES - Buffer.byteLength(suffix, 'utf8');
-  return `${database.slice(0, Math.max(room, 1))}${suffix}`;
-}
-
-/**
- * Хвост вывода без секретов: пароль и строка подключения в лог гейта не попадают.
- * @param {string} text
- * @returns {string}
- */
-export function logTail(text) {
-  if (typeof text !== 'string') return '';
-  const lines = text.trimEnd().split(/\r?\n/);
-  return redactLog(lines.slice(-TAIL_LINES).join('\n'));
-}
-
-/**
- * Запуск команды без оболочки: аргументы не склеиваются в строку, `DATABASE_URL`
- * подменяется в окружении дочернего процесса.
- * @param {string} root корень репозитория
- * @returns {(args: string[], options: { url: string, input?: string }) => { ok: boolean, exit: number|null, output: string }}
- */
-function makeExecutor(root) {
-  return (args, { url, input = '' }) => {
-    const result = spawnSync(join(root, PRISMA_BIN), args, {
-      cwd: join(root, API_DIR),
-      env: { ...process.env, DATABASE_URL: url },
-      encoding: 'utf8',
-      input,
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
-    const output = `${result.stdout ?? ''}${result.stderr ?? ''}`;
-    return { ok: result.status === 0, exit: result.status, output };
-  };
+export function gateDatabaseName(database, options = {}) {
+  return temporaryDatabaseName(database, { ...options, marker: 'gate' });
 }
 
 /**
@@ -132,7 +68,7 @@ export function runCleanMigrations({
   log,
   now = Date.now(),
   pid = process.pid,
-  execute = makeExecutor(root),
+  execute = createPrismaExecutor(root),
 }) {
   const { database } = splitDatabaseUrl(url);
   const gateDatabase = gateDatabaseName(database, { pid, now });
