@@ -134,6 +134,12 @@ export async function buildServer(options: BuildServerOptions = {}) {
         fromName: env.SMTP_FROM_NAME,
       }),
   });
+  // `global: false`: лимиты задаются per-route в конфиге маршрута (см. auth.routes.ts).
+  // Регистрация обязана стоять **до** маршрутов: onRoute-хук плагина навешивает лимитный хук
+  // только на маршруты, зарегистрированные после него, — иначе `config.rateLimit` у уже
+  // добавленного маршрута молча игнорируется (так было с `POST /bookings`, #106).
+  // С `global: false` маршруты без своего `config.rateLimit` не затрагиваются.
+  await app.register(rateLimit, { global: false });
   await app.register(healthRoutes);
   await app.register(catalogRoutes);
   await app.register(bookingRoutes, { payments: bookingPayments });
@@ -145,8 +151,6 @@ export async function buildServer(options: BuildServerOptions = {}) {
       sweepIntervalMs: env.PAYMENT_SWEEP_INTERVAL_MS,
     });
   }
-  // `global: false`: лимиты задаются per-route в конфиге маршрута (см. auth.routes.ts).
-  await app.register(rateLimit, { global: false });
   await app.register(authRoutes, { delivery: tokenDelivery });
   // Вход сотрудника в админку: отдельная cookie (`hl_staff_session`) и свои сессии,
   // клиентская авторизация остаётся как есть.

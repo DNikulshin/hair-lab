@@ -2,11 +2,13 @@ import {
   apiErrorSchema,
   bookingResponseSchema,
   createBookingSchema,
+  maskPhone,
   slotsQuerySchema,
   slotsResponseSchema,
 } from '@hair-lab/contracts';
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import { buildError } from '../../shared/http/error-handler';
+import { BookingLimitError, createBookingsIpRateLimit } from './booking-limits';
 import {
   createBooking,
   PaymentCreationFailedError,
@@ -28,6 +30,12 @@ import { listSlots } from './slots.service';
  *
  * Режим оплаты — опция регистрации (`app/build-server.ts`), а не чтение окружения здесь:
  * в тестах тот же маршрут работает с поддельным шлюзом без подмены `process.env`.
+ *
+ * Анти-абьюз (issue #106): на создание записи два лимита — per-route по IP
+ * (`config.rateLimit`, 10 за 10 минут) и по телефону внутри сервиса. Оба отвечают
+ * `429 rate_limited`: кода в контракте ошибок не добавляли, старые клиенты видят тот же
+ * формат `{ error: { code, message, requestId } }`. Телефон в ответ и логи не попадает
+ * (только маска).
  */
 export interface BookingRoutesOptions {
   /** Оплата включена (`PAYMENTS_MODE != 'off'`). Не задана — поведение без оплаты. */
@@ -51,6 +59,9 @@ export const bookingRoutes: FastifyPluginAsyncZod<BookingRoutesOptions> = async 
   app.post(
     '/bookings',
     {
+      // IP-лимит живёт в `@fastify/rate-limit`: повтор по `idempotencyKey` пакет
+      // пропускает через `allowList` без инкремента счётчика (см. `booking-limits.ts`).
+      config: { rateLimit: createBookingsIpRateLimit(app.db) },
       schema: {
         tags: ['bookings'],
         summary: 'Создание записи на услугу (идемпотентно по idempotencyKey)',
@@ -59,6 +70,8 @@ export const bookingRoutes: FastifyPluginAsyncZod<BookingRoutesOptions> = async 
           200: bookingResponseSchema,
           201: bookingResponseSchema,
           409: apiErrorSchema,
+          // Лимит по IP или по телефону исчерпан: запись (и холд) не создаются.
+          429: apiErrorSchema,
           // Платёж не удалось создать: запись отменена компенсацией, слот свободен.
           502: apiErrorSchema,
         },
@@ -83,6 +96,19 @@ export const bookingRoutes: FastifyPluginAsyncZod<BookingRoutesOptions> = async 
         if (error instanceof PaymentCreationFailedError) {
           request.log.warn({ requestId: request.id }, 'платёж не создан: запись отменена');
           return reply.status(502).send(buildError('internal_error', request.id));
+        }
+        // Лимит телефона (#106): код `rate_limited` уже есть в контракте — новых полей нет.
+        // В лог — причина и маска номера: сырой телефон не пишем ни в теле, ни в логах.
+        if (error instanceof BookingLimitError) {
+          request.log.warn(
+            {
+              requestId: request.id,
+              reason: error.reason,
+              clientPhoneMasked: maskPhone(request.body.clientPhone),
+            },
+            'запись отклонена: лимит телефона',
+          );
+          return reply.status(429).send(buildError('rate_limited', request.id));
         }
         throw error;
       }

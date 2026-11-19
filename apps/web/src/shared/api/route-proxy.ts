@@ -23,7 +23,18 @@ import { apiConfig } from '@/shared/config/api';
  * - недоступность API — 503, некорректный ответ API — 502: страница записи не падает,
  *   а показывает понятное сообщение;
  * - в логи идут только метод, путь, статус и класс ошибки. Тело запроса содержит телефон
- *   клиента и не логируется ни в каком виде.
+ *   клиента и не логируется ни в каком виде; адрес клиента (см. ниже) в логи web тоже не пишется.
+ *
+ * Адрес клиента (`x-forwarded-for` / `x-real-ip`) пересылается в API: лимиты частоты API
+ * (`@fastify/rate-limit`, в том числе `/auth/*` и `POST /bookings`) считаются по `req.ip`,
+ * а `trustProxy: true` берёт его из `x-forwarded-for`. Без пересылки API видит адрес
+ * контейнера web — один на всех клиентов, — и лимит становится общим на весь сайт: 11-я
+ * запись за 10 минут от разных людей получала бы 429. Значение доверенное: nginx стоит
+ * единственной точкой входа и перезаписывает `x-forwarded-for $remote_addr` (а не дописывает),
+ * поэтому подделать его из браузера нельзя. Пересылается только строго валидный одиночный
+ * адрес: иначе наверх уходило бы подконтрольное клиенту значение ключа лимита. Проверка
+ * строгая — значение разбирается как настоящий IP, а не как «строка из допустимых символов»:
+ * `::::`, `1.2.3.4.5` и `ab.cd` адресами не считаются.
  */
 
 /** Заголовки ответа для всего, что связано с записью: персональные данные не кэшируем. */
@@ -31,6 +42,80 @@ export const NO_STORE_HEADERS = { 'Cache-Control': 'no-store' } as const;
 
 /** Ограничение ожидания API: Route Handler не должен висеть дольше пользовательского запроса. */
 const UPSTREAM_TIMEOUT_MS = 10_000;
+
+/** Максимальная длина IPv6 в текстовом виде (`fd00:...`, 39 символов) с запасом до IPv4-хвоста. */
+const MAX_IPV6_LENGTH = 45;
+
+/** Октет IPv4: 0–255 без ведущих нулей (`999` и `01` не проходят). */
+const IPV4_OCTET = '(?:25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)';
+
+/** Ровно четыре октета и ничего больше: запятые, пробелы и CR/LF не проходят. */
+const IPV4_PATTERN = new RegExp(`^(?:${IPV4_OCTET}\\.){3}${IPV4_OCTET}$`);
+
+/** Группа IPv6: от одной до четырёх hex-цифр. */
+const IPV6_GROUP_PATTERN = /^[0-9a-fA-F]{1,4}$/;
+
+function isIpv4Address(value: string): boolean {
+  return IPV4_PATTERN.test(value);
+}
+
+/**
+ * Группы IPv6 по порядку; `undefined` — строку нельзя разобрать как IPv6.
+ *
+ * `::` разрешено не больше одного раза, пустые группы вне сжатия запрещены, а последняя
+ * группа может быть IPv4-хвостом (`::ffff:192.0.2.1`).
+ */
+function parseIpv6Groups(value: string): string[] | undefined {
+  const chunks = value.split('::');
+  if (chunks.length > 2) return undefined;
+
+  const groups: string[] = [];
+  for (const chunk of chunks) {
+    if (chunk === '') continue;
+    for (const group of chunk.split(':')) {
+      if (group === '') return undefined;
+      groups.push(group);
+    }
+  }
+
+  const lastIndex = groups.length - 1;
+  for (const [index, group] of groups.entries()) {
+    if (index === lastIndex && group.includes('.')) {
+      if (!isIpv4Address(group)) return undefined;
+      continue;
+    }
+    if (!IPV6_GROUP_PATTERN.test(group)) return undefined;
+  }
+  return groups;
+}
+
+function isIpv6Address(value: string): boolean {
+  if (!value.includes(':') || value.length > MAX_IPV6_LENGTH) return false;
+  const groups = parseIpv6Groups(value);
+  if (groups === undefined) return false;
+  // IPv4-хвост занимает две группы; сжатие `::` обязано что-то заменять, поэтому групп меньше восьми.
+  const units = groups.length + ((groups.at(-1) ?? '').includes('.') ? 1 : 0);
+  return value.includes('::') ? units <= 7 : units === 8;
+}
+
+/** Строгая проверка адреса клиента: ровно один настоящий IPv4 или IPv6, без зависимостей. */
+function isClientAddress(value: string): boolean {
+  return isIpv4Address(value) || isIpv6Address(value);
+}
+
+/**
+ * Адрес клиента из входящего запроса к Route Handler.
+ *
+ * `x-forwarded-for` пишет nginx (перезаписью), `x-real-ip` — запасной вариант на случай
+ * конфигурации без XFF. Не прошедшее проверку значение не используется и не логируется.
+ */
+function clientAddressOf(request?: Request): string | undefined {
+  for (const name of ['x-forwarded-for', 'x-real-ip'] as const) {
+    const value = request?.headers.get(name);
+    if (value !== null && value !== undefined && isClientAddress(value)) return value;
+  }
+  return undefined;
+}
 
 /** Код ошибки по HTTP-статусу: та же таблица, что в обработчике ошибок API. */
 const STATUS_TO_CODE: Record<number, ApiErrorCode> = {
@@ -80,6 +165,8 @@ function statusCodeOf(status: number): ApiErrorCode {
  * Запрос в API с пробросом статуса и тела по контракту.
  * @param path путь API без базового адреса, например `/slots?date=2030-03-04…`.
  * @param init параметры `fetch`; тело запроса не логируется.
+ * @param incomingRequest входящий запрос Route Handler: из него пересылаются `cookie`,
+ * `origin`, `referer` и адрес клиента для лимитов API.
  */
 export async function proxyToApi(
   path: string,
@@ -92,6 +179,8 @@ export async function proxyToApi(
     const value = incomingRequest?.headers.get(name);
     if (value !== null && value !== undefined) headers.set(name, value);
   }
+  const clientAddress = clientAddressOf(incomingRequest);
+  if (clientAddress !== undefined) headers.set('x-forwarded-for', clientAddress);
 
   let upstream: Response;
   try {
