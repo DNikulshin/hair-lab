@@ -23,3 +23,6 @@ next-env.d.ts
 
 # генерируется Prisma Client (`pnpm --filter @hair-lab/api db:generate`)
 apps/api/src/generated/
+# Артефакты браузерных тестов (issue #114)
+test-results/
+playwright-report/
