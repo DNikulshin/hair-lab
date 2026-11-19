@@ -14,7 +14,7 @@ import {
   fetchCurrentClient,
   logoutClient,
 } from '../api/account-api';
-import { bookingStatusLabel, isActiveStatus } from '../model/account-status';
+import { bookingStatusLabel, isActiveStatus, refundStatusLabel } from '../model/account-status';
 import { mapAccountError } from '../model/map-account-error';
 
 /**
@@ -50,7 +50,11 @@ import { mapAccountError } from '../model/map-account-error';
  * Кнопка «Отменить» есть в обоих случаях — её доступность по-прежнему считает сервер (`cancellable`).
  * Черновик читаем после монтирования: `sessionStorage` есть только в браузере, а первый
  * клиентский рендер должен совпасть с серверным.
- * Про возврат денег кабинет молчит: управление возвратом — отдельная задача (#103).
+ *
+ * Возврат денег (#103): у отменённой оплаченной записи API присылает `refundStatus`
+ * (`pending`/`succeeded`/`failed`). Подпись показываем только для `cancelled` и только при
+ * непустом значении: старое API поля не присылает (undefined), а `null` значит «возврата нет».
+ * Текст подписи — в `refundStatusLabel`: срок и формулировки в одном месте.
  */
 
 type Scope = 'upcoming' | 'past';
@@ -354,6 +358,11 @@ export function AccountBookings({ timeZone }: AccountBookingsProps) {
             {booking.clientPhoneMasked === undefined ? null : (
               <p className="text-xs text-muted">Телефон для связи: {booking.clientPhoneMasked}</p>
             )}
+            {booking.status === 'cancelled' &&
+            booking.refundStatus !== null &&
+            booking.refundStatus !== undefined ? (
+              <p className="text-sm text-muted">{refundStatusLabel(booking.refundStatus)}</p>
+            ) : null}
             {scope === 'upcoming' && booking.status === 'pending'
               ? renderPaymentAction(booking)
               : null}

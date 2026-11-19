@@ -123,6 +123,16 @@ export const bookingResponseSchema = z.object({
 export type BookingResponse = z.infer<typeof bookingResponseSchema>;
 
 /**
+ * Статус возврата денег в терминах клиента (issue #103).
+ *
+ * Служебные коды провайдера (`refund_status` в БД: `pending`, `succeeded`, `canceled`,
+ * `unknown`) наружу не отдаются: клиенту важно «деньги в пути», «вернулись»,
+ * «возврат не удался». Соответствие кодов считает сервер.
+ */
+export const refundClientStatusSchema = z.enum(['pending', 'succeeded', 'failed']);
+export type RefundClientStatus = z.infer<typeof refundClientStatusSchema>;
+
+/**
  * Запись в кабинете клиента (`GET /account/bookings`, `DELETE /account/bookings/:id`).
  *
  * Инварианты, которые обеспечивает API (в схеме не выражаются):
@@ -133,7 +143,11 @@ export type BookingResponse = z.infer<typeof bookingResponseSchema>;
  *   изменившееся правило не потребует обновления приложения, а UI читает только `cancellable`;
  * - контактов клиента в ответе нет: только имя и маска телефона (`clientPhoneMasked`);
  * - `awaitingPayment` отличает «ждёт оплаты» от «ждёт подтверждения салона»: поле аддитивное,
- *   старые клиенты его игнорируют и показывают прежний нейтральный текст для `pending`.
+ *   старые клиенты его игнорируют и показывают прежний нейтральный текст для `pending`;
+ * - `refundStatus` — статус возврата по отменённой оплаченной записи: `null` значит
+ *   «возврата нет» (запись не была оплачена или деньги не должны возвращаться), `undefined` —
+ *   «поле не прислано». Поле аддитивное: старый API его не присылает, и клиент просто
+ *   не показывает подпись о возврате.
  */
 export const accountBookingSchema = z.object({
   id: idSchema,
@@ -152,6 +166,11 @@ export const accountBookingSchema = z.object({
    * `false`/отсутствие — оплата не ждётся: `PAYMENTS_MODE=off` или запись ждёт салон.
    */
   awaitingPayment: z.boolean().optional(),
+  /**
+   * Возврат денег клиенту: `pending` — в пути, `succeeded` — вернулись, `failed` — не удался.
+   * `null` — возврата нет (запись не оплачена или возврат не требуется).
+   */
+  refundStatus: refundClientStatusSchema.nullable().optional(),
 });
 export type AccountBooking = z.infer<typeof accountBookingSchema>;
 

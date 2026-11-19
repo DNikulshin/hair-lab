@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   bookingCancellationPayloadSchema,
   createBookingCancellationTemplate,
+  REFUND_NOTICE,
   renderBookingCancellation,
 } from './booking-cancellation.email';
 import { formatMoment } from './booking-confirmation.email';
@@ -112,5 +113,42 @@ describe('renderBookingCancellation', () => {
 
     expect(email.to).toBe(payload.clientEmail);
     expect(email.subject).toContain('Запись отменена');
+  });
+});
+
+describe('renderBookingCancellation: возврат денег (#103)', () => {
+  it('оплаченная запись: абзац про срок возврата дословно в тексте и в HTML', () => {
+    const email = renderBookingCancellation({ ...payload, wasPaid: true }, context);
+
+    expect(email.text).toContain(REFUND_NOTICE);
+    expect(email.html).toContain(REFUND_NOTICE);
+    // Срок — решение владельца: проверяем дословно, а не по частям.
+    expect(REFUND_NOTICE).toBe(
+      'Деньги за оплаченную запись вернём на карту: срок возврата — до 3 рабочих дней.',
+    );
+    // Абзац — отдельный: перед ним пустая строка, иначе он слипается со строкой «Стоимость».
+    expect(email.text).toContain(`\n\n${REFUND_NOTICE}\n\n`);
+  });
+
+  it('без поля (старый снимок): парсится и абзаца не получает', () => {
+    const email = renderBookingCancellation(payload, context);
+
+    expect(bookingCancellationPayloadSchema.parse(payload).wasPaid).toBeUndefined();
+    expect(email.text).not.toContain('вернём на карту');
+    expect(email.html).not.toContain('вернём на карту');
+  });
+
+  it('wasPaid: false (не оплачено) — абзаца нет', () => {
+    const email = renderBookingCancellation({ ...payload, wasPaid: false }, context);
+
+    expect(email.text).not.toContain('вернём на карту');
+    expect(email.html).not.toContain('вернём на карту');
+  });
+
+  it('снимок без поля и со старым набором полей остаётся валидным', () => {
+    const old = bookingCancellationPayloadSchema.parse(payload);
+
+    expect(old).toEqual(payload);
+    expect(() => bookingCancellationPayloadSchema.parse({ ...payload, wasPaid: 'yes' })).toThrow();
   });
 });

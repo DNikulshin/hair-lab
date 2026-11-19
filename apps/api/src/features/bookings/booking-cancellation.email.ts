@@ -30,6 +30,13 @@ export type BookingCancellationPayload = BookingConfirmationPayload;
 /** Настройки салона для рендера: те же, что у подтверждения. */
 export type BookingCancellationContext = BookingConfirmationContext;
 
+/**
+ * Абзац про срок возврата в письме об отмене (issue #103). Текст согласован владельцем
+ * дословно и живёт одной константой: кабинет и страница оплаты используют тот же срок.
+ */
+export const REFUND_NOTICE =
+  'Деньги за оплаченную запись вернём на карту: срок возврата — до 3 рабочих дней.';
+
 export function renderBookingCancellation(
   payload: unknown,
   context: BookingCancellationContext,
@@ -43,6 +50,10 @@ export function renderBookingCancellation(
 
   const subject = `Запись отменена — ${moment}`;
 
+  // Абзац про возврат — только если запись была оплачена. Старый снимок без `wasPaid`
+  // считается неоплаченным: обещать возврат денег, которых салон не получал, нельзя.
+  const refundParagraphs = data.wasPaid === true ? [REFUND_NOTICE, ''] : [];
+
   const lines = [
     `Здравствуйте, ${data.clientName}!`,
     '',
@@ -53,6 +64,7 @@ export function renderBookingCancellation(
     `Длительность: ${duration}`,
     `Стоимость: ${price}`,
     '',
+    ...refundParagraphs,
     'Если хотите записаться на другое время, ответьте на это письмо.',
     '',
     '—',
@@ -81,6 +93,7 @@ export function renderBookingCancellation(
     `<p>Здравствуйте, ${escapeHtml(data.clientName)}!</p>`,
     '<p>Ваша запись отменена:</p>',
     `<table style="border-collapse:collapse">${rowsHtml}</table>`,
+    ...(data.wasPaid === true ? [`<p>${escapeHtml(REFUND_NOTICE)}</p>`] : []),
     '<p>Если хотите записаться на другое время, ответьте на это письмо.</p>',
     `— <br>${escapeHtml(context.fromName)}`,
     '</body></html>',

@@ -1,4 +1,4 @@
-import type { BookingStatus, PaymentStatus } from '@hair-lab/contracts';
+import type { BookingStatus, PaymentStatus, RefundClientStatus } from '@hair-lab/contracts';
 import type { Prisma } from '../../generated/prisma/client';
 import type { Db } from '../../shared/db';
 import { BOOKING_CONFIRMATION_TYPE, buildBookingConfirmationPayload } from '../bookings/index';
@@ -567,6 +567,35 @@ export async function recordRefundAttempt(
     data: { refundId, refundStatus },
   });
   return updated.count === 1;
+}
+
+/**
+ * Статус возврата в терминах клиента (issue #103).
+ *
+ * Служебные коды БД и провайдера наружу не отдаются: клиенту важно «деньги в пути»,
+ * «вернулись», «возврат не удался». Соответствие:
+ * - `status === 'refunded'` → `succeeded`: возврат зафиксирован, деньги у клиента;
+ * - `refundRequired && refundStatus === 'canceled'` → `failed`: провайдер отказал, разбирать
+ *   должен человек (клиенту — «позвоните в салон»); `unknown` и `pending` — всё ещё в пути,
+ *   потому что обязанность вернуть деньги (флаг) не снята и повторит её свипер;
+ * - `refundRequired` → `pending`: деньги должны вернуться, попытки ещё идут или не было;
+ * - иначе `null`: возврата нет (запись не оплачена или платёж `pending`/`canceled` без флага).
+ *
+ * Функция чистая: её вызывает и DTO кабинета, поэтому логика статуса живёт в одном месте,
+ * а не дублируется в сервисе и в тестах через разные коды.
+ */
+export function clientRefundStatus(
+  payment: {
+    status: PaymentStatus;
+    refundRequired: boolean;
+    refundStatus: GatewayRefundStatus | null;
+  } | null,
+): RefundClientStatus | null {
+  if (payment === null) return null;
+  if (payment.status === 'refunded') return 'succeeded';
+  if (payment.refundRequired && payment.refundStatus === 'canceled') return 'failed';
+  if (payment.refundRequired) return 'pending';
+  return null;
 }
 
 /**

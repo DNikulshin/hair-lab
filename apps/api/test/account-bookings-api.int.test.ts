@@ -551,6 +551,8 @@ describe('DELETE /account/bookings/:id: письма в outbox', () => {
       endsAt: booking.endsAt.toISOString(),
       priceKopecks: 350_000,
       durationMin: 60,
+      // Платежа у записи нет: визит не оплачен, абзаца о возврате в письме не будет.
+      wasPaid: false,
     });
     // ПДн в снимке — только имя и почта; телефона нет.
     expect(JSON.stringify(email.payload)).not.toContain(fakeClient.phone);
