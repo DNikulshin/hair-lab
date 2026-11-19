@@ -20,11 +20,13 @@ argument-hint: '<номер issue и что сделать>'
 
 ## INIT
 
-1. `node scripts/cycle-state.mjs lock` — одна блокировка на дерево.
-2. `gh issue view <N> --json title,body,labels > <dir>/issue.json`.
-3. `node scripts/cycle-state.mjs init --issue <N> --slug <slug> --branch <ветка>`, ветка от
-   `main`: `feat|fix|chore|data|design/<номер>-<коротко>`.
-4. `node scripts/cycle-evidence.mjs criteria --dir <dir> --issue-json <dir>/issue.json`.
+1. Ветка цикла — **до** `init` (#274): `git switch -c <ветка>` от `main`. Имя — в `state.json`
+   (`--branch`), `init` сверяет его с git и без активной своей ветки даёт код 3.
+2. `node scripts/cycle-state.mjs lock` — одна блокировка на дерево.
+3. `gh issue view <N> --json title,body,labels > <dir>/issue.json`.
+4. `node scripts/cycle-state.mjs init --issue <N> --slug <slug> --branch <ветка>` —
+   ветка `feat|fix|chore|data|design/<номер>-<коротко>`.
+5. `node scripts/cycle-evidence.mjs criteria --dir <dir> --issue-json <dir>/issue.json`.
    Код ≠ 0 → `cycle-state escalate --reason criteria_missing`, комментарий в issue
    (`status:blocked`, `needs-owner`), стоп.
 
@@ -118,6 +120,8 @@ MCP недоступен — `{"status": "not_run", "reason": "<причина>"
   потом коммиты (`<type>(<scope>): <что>`), `git push -u origin <ветка>`, тело —
   `node scripts/cycle-pr-body.mjs` (при `PROCEED_WITH_UNVERIFIED` там будет блок «не проверено»),
   `gh pr create --body-file …`, метка `status:review`, `finish --stage PR --status done`.
+  `apply-decision` и `advance --to PR` сверяют `HEAD` со `state.branch`: код 3 — значит,
+  ветка цикла не активна (создать/переключиться и повторить, #274).
   **PR не мержить**: мерж делает владелец;
 - `ESCALATE` — автомат уже в `ESCALATED`: комментарий в issue, `status:blocked`, `needs-owner`.
   Draft PR — только если `escalation.draft_pr_allowed`: тело собирает

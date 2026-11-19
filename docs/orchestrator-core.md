@@ -103,16 +103,16 @@ scripts/
 
 ### 5.2 Общие модули
 
-| Модуль         | Содержимое                                                                                                                                                                                                                                               |
-| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `paths.mjs`    | корень репо; каталог артефактов; имена файлов с номером итерации (`plan.<n>.md` …); поиск активного цикла (единственный каталог со `stage` ≠ `DONE`/`ESCALATED`, иначе ошибка)                                                                           |
-| `io.mjs`       | `readJson`, `writeJsonAtomic`, `tail(file, lines)`, `extractLastJsonBlock(md)` (последний блок ```json, `JSON.parse`; нет блока — ошибка)                                                                                                                |
-| `validate.mjs` | валидаторы `state`, `gates`, `review`, `evaluation`, `qaWeb`, `decision`; возвращают `{ ok, errors[] }`; перечисления и обязательные поля — Приложение A                                                                                                 |
-| `refs.mjs`     | `parseRef(str)` и `resolveRef(ref, ctx)`: `path:line`, `gate:<id>`, `qa:<id>`; запрещены абсолютные пути, `..`, `.pi/artifacts/`, `node_modules/`; файл существует, строка не больше числа строк; гейт есть в `gates.<n>.json`; шаг есть в `qa-web.json` |
-| `git.mjs`      | `baseSha()`, `intentToAddUntracked()`, `diffFromBase(base)`, `changedFiles(base)`, `addedLines(diff)`; все вызовы через `execFileSync('git', …)`                                                                                                         |
-| `redact.mjs`   | `redactLog(text)`, `redactQa(obj)`, `scanSecrets(addedLines)` (§5.4, §5.5)                                                                                                                                                                               |
-| `config.mjs`   | определения гейтов, пути-условия, лимиты (`maxDiffLines` 2000 / `maxDiffBytes` 400 КБ, `logMaxBytes` 5 МБ, `evidenceTailLines` 200, `defaultMaxIterations` 2, `maxCycleCostRub` 50 ₽), стартовые тайм-ауты                                               |
-| `cost.mjs`     | `normalizeUsage`, `priceUsage`, `priceKeyFor`, `readUsage`, `readPriceSnapshot`, `cycleCostRub`: расход и его стоимость по `usage.json` и `evals/prices.json` — одна формула и для `metrics.json`, и для бюджетного порога                               |
+| Модуль         | Содержимое                                                                                                                                                                                                                                                                                                                 |
+| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `paths.mjs`    | корень репо; каталог артефактов; имена файлов с номером итерации (`plan.<n>.md` …); поиск активного цикла (единственный каталог со `stage` ≠ `DONE`/`ESCALATED`, иначе ошибка)                                                                                                                                             |
+| `io.mjs`       | `readJson`, `writeJsonAtomic`, `tail(file, lines)`, `extractLastJsonBlock(md)` (последний блок ```json, `JSON.parse`; нет блока — ошибка)                                                                                                                                                                                  |
+| `validate.mjs` | валидаторы `state`, `gates`, `review`, `evaluation`, `qaWeb`, `decision`; возвращают `{ ok, errors[] }`; перечисления и обязательные поля — Приложение A                                                                                                                                                                   |
+| `refs.mjs`     | `parseRef(str)` и `resolveRef(ref, ctx)`: `path:line`, `path:start-end`, `gate:<id>`, `qa:<id>`; запрещены абсолютные пути, `..`, `.pi/artifacts/`, `node_modules/`; файл существует, строка (обе границы диапазона) не больше числа строк, начало не больше конца; гейт есть в `gates.<n>.json`; шаг есть в `qa-web.json` |
+| `git.mjs`      | `baseSha()`, `currentBranch()`, `branchExists()`, `intentToAddUntracked()`, `diffFromBase(base)`, `changedFiles(base)`, `addedLines(diff)`; все вызовы через `execFileSync('git', …)`                                                                                                                                      |
+| `redact.mjs`   | `redactLog(text)`, `redactQa(obj)`, `scanSecrets(addedLines)` (§5.4, §5.5)                                                                                                                                                                                                                                                 |
+| `config.mjs`   | определения гейтов, пути-условия, лимиты (`maxDiffLines` 2000 / `maxDiffBytes` 400 КБ, `logMaxBytes` 5 МБ, `evidenceTailLines` 200, `defaultMaxIterations` 2, `maxCycleCostRub` 50 ₽), стартовые тайм-ауты                                                                                                                 |
+| `cost.mjs`     | `normalizeUsage`, `priceUsage`, `priceKeyFor`, `readUsage`, `readPriceSnapshot`, `cycleCostRub`: расход и его стоимость по `usage.json` и `evals/prices.json` — одна формула и для `metrics.json`, и для бюджетного порога                                                                                                 |
 
 ### 5.3 `cycle-state.mjs`
 
@@ -131,6 +131,13 @@ lock [--dir D] [--slug S] | unlock [--dir D]  блокировка дерева,
 
 `finish --detail T` и `escalate` (туда попадает причина эскалации) пишут `detail` в
 закрываемую запись `history[]`; поле необязательное, формат — Приложение A.
+
+**Ветка цикла (#274).** `init` сверяет `--branch` с git: ветка обязана существовать
+(`git show-ref --verify refs/heads/<branch>`) и быть текущей (`git rev-parse --abbrev-ref HEAD`).
+Иначе код 3 и готовая команда (`git switch -c <branch>`) — без мутации рабочего дерева.
+`advance --to PR` повторяет ту же сверку для `state.branch`: коммиты и `gh pr create` идут
+из текущего HEAD, и рассинхрон иначе всплывал бы только на коммите. Та же сверка — у
+`apply-decision`, когда решение `PROCEED*` открывает PR (этот путь идёт мимо `advance`).
 
 Два этапа закрываются без `finish` — своей работы, которую можно было бы завершить успешно
 или упасть, у них нет:
@@ -189,7 +196,8 @@ lock [--dir D] [--slug S] | unlock [--dir D]  блокировка дерева,
   иначе первый же `REWORK` упирался бы в лимит, а `iteration > max_iterations` без
   `owner_approved` не проходит схему состояния;
 - `→ DECIDE` только если для текущей итерации есть `review.<n>.md` и `evaluation.<n>.md`;
-- `→ PR` только если последнее `decision` имеет `action` `PROCEED` или `PROCEED_WITH_UNVERIFIED`;
+- `→ PR` только если последнее `decision` имеет `action` `PROCEED` или `PROCEED_WITH_UNVERIFIED`,
+  а `HEAD` совпадает со `state.branch` (#274);
 - `apply-decision` идемпотентен: `RETRY_STAGE` → `retries[stage]++` и переход в этот этап;
   `ACQUIRE_EVIDENCE` → `retries.evidence++`; `REWORK` → только переход в `REWORK` (инкремент —
   на ребре `REWORK → CODE`, п. 1); `ESCALATE` → `escalate`; `PROCEED*` → `PR`. Повторный
@@ -365,6 +373,8 @@ node scripts/cycle-decide.mjs --dir D [--iteration N]
    c. evaluation: критерий unmet — валиден, если ≥1 ссылка в evidence разрешается
                   defect BLOCKER|MAJOR — валиден, если есть repro и ≥1 разрешаемая ссылка
    Неразрешаемые ссылки: счётчик unresolved_refs (метрика); сам элемент не блокирует.
+   Диапазон `path:start-end` разрешается по началу (обе границы в пределах файла): для
+   счётчиков и понижения он одна ссылка, как `path:line` (#275).
 3. Есть блокеры:
      iteration < max_iterations → REWORK
      иначе                       → ESCALATE(iteration_limit)
@@ -717,7 +727,7 @@ A1–A9 статически; запуск `node --test` и `gh` остаётс�
 
 ## Приложение A. Схемы (для валидаторов)
 
-Общее: все ссылки — строки вида `path:line`, `gate:<id>`, `qa:<id>`; `severity` ∈
+Общее: все ссылки — строки вида `path:line`, `path:start-end`, `gate:<id>`, `qa:<id>`; `severity` ∈
 {`BLOCKER`, `MAJOR`, `MINOR`, `FOLLOW-UP`}; лишние поля игнорируются, отсутствующие
 обязательные — ошибка.
 
@@ -801,8 +811,10 @@ A1–A9 статически; запуск `node --test` и `gh` остаётс�
 
 ```
 INIT       gh issue view N --json title,body,labels > <dir>/issue.json
+           git switch -c <ветка>              (ветка цикла создаётся ДО init, #274)
            node scripts/cycle-state.mjs lock
            node scripts/cycle-state.mjs init --issue N --slug S --branch B
+             (код 3 — ветки нет или HEAD на другой: создать/переключиться, затем повторить)
            node scripts/cycle-evidence.mjs criteria --dir <dir> --issue-json <dir>/issue.json
              (код ≠ 0 → cycle-state escalate --reason criteria_missing; комментарий в issue; стоп)
 PLAN       advance --to PLAN → субагент plan → plan.<n>.md → finish
