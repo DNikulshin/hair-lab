@@ -87,6 +87,65 @@ jobs:
       - run: pnpm test:scripts
       - run: pnpm format:check
 
+  # Браузерные сценарии (issue #114): временная база, api с тестовым режимом оплаты и
+  # заглушкой провайдера, production-сборка web. Дороже остальных проверок, поэтому отдельный
+  # job: он не задерживает `checks`, а его падение видно отдельной строкой в PR.
+  e2e:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: hair_lab
+          POSTGRES_PASSWORD: change_me
+          POSTGRES_DB: hair_lab
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U hair_lab -d hair_lab"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://hair_lab:change_me@localhost:5432/hair_lab?schema=public
+      CI: 'true'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # Браузеры Playwright кэшируются: версия закреплена в lockfile, ключ — по нему.
+      - name: Кэш браузеров Playwright
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+
+      - run: pnpm exec playwright install --with-deps chromium
+
+      - run: pnpm --filter @hair-lab/contracts build
+      - run: pnpm --filter @hair-lab/api db:generate
+      - run: pnpm typecheck:e2e
+
+      # Стенд (база, миграции, сид, сборки, api, заглушка ЮKassa, web) поднимает скрипт,
+      # он же гасит процессы и удаляет базу в `finally`.
+      - run: pnpm e2e
+
+      - name: Артефакты упавших сценариев
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-results
+          path: test-results/
+          retention-days: 7
+
   # Проверка Dockerfile на каждом PR: собираем только образы затронутых компонентов.
   #
   # ВАЖНО: матрица здесь статическая (оба компонента всегда в ней), а пропуск делается

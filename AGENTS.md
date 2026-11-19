@@ -36,6 +36,7 @@
 | Форматирование (проверка / автофикс)                        | `pnpm format:check` / `pnpm format`                       |
 | Workflow GitHub Actions                                     | `pnpm lint:workflows`                                     |
 | Dockerfile и compose (hadolint, `docker compose config`)    | `pnpm lint:docker`                                        |
+| Браузерные тесты (стенд поднимает скрипт, нужен Postgres)   | `pnpm e2e` (типы: `pnpm typecheck:e2e`)                   |
 | Границы слоёв и пакетов                                     | `pnpm check:arch`                                         |
 | Harness агентов и моделей                                   | `pnpm check:harness`                                      |
 | Unit-тесты                                                  | `pnpm test`                                               |
