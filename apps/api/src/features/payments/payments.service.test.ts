@@ -7,6 +7,7 @@ import {
   applyPaymentSucceeded,
   clientRefundStatus,
   findPaymentByAppointment,
+  listCompletedRefunds,
   listPendingRefunds,
   listRefundsNeedingAttention,
   markRefunded,
@@ -67,11 +68,12 @@ interface OutboxRow {
 
 type Row = Record<string, unknown>;
 
-/** Условия `where`, которые использует сервис: равенство, `in`, `lte`, `not` и `OR`. */
+/** Условия `where`, которые использует сервис: равенство, `in`, `not`, `gte`/`lte`/`lt` и `OR`. */
 function matches(row: Row, where: Row): boolean {
   return Object.entries(where).every(([key, condition]) => {
     const value = row[key];
-    // Обзор требующих внимания соединяет два условия через `OR` (долг или отказ провайдера).
+    // `OR` поддержан наравне с остальными условиями: так писались прежние выборки обзора,
+    // и фейк не должен молча игнорировать условие, которое сервис может передать.
     if (key === 'OR' && Array.isArray(condition)) {
       return (condition as Row[]).some((clause) => matches(row, clause));
     }
@@ -79,12 +81,32 @@ function matches(row: Row, where: Row): boolean {
       const asRecord = condition as Record<string, unknown>;
       if (Array.isArray(asRecord['in'])) return (asRecord['in'] as unknown[]).includes(value);
       if ('not' in asRecord) return value !== asRecord['not'];
-      if (asRecord['lte'] instanceof Date) {
-        return value instanceof Date && value.getTime() <= asRecord['lte'].getTime();
-      }
+      // Границы сравниваются все вместе: у периода обзора возвратов в `created_at` стоят
+      // и `gte`, и `lt`.
+      return Object.entries(asRecord).every(([operator, boundary]) => {
+        if (!(value instanceof Date) || !(boundary instanceof Date)) return false;
+        switch (operator) {
+          case 'gte':
+            return value.getTime() >= boundary.getTime();
+          case 'lte':
+            return value.getTime() <= boundary.getTime();
+          case 'lt':
+            return value.getTime() < boundary.getTime();
+          default:
+            return false;
+        }
+      });
     }
     return value === condition;
   });
+}
+
+/** Сравнение значений сортировки: для дат — по времени, для строк — по порядку (как в Postgres). */
+function compare(actual: unknown, boundary: unknown): number {
+  if (actual instanceof Date && boundary instanceof Date) {
+    return actual.getTime() - boundary.getTime();
+  }
+  return String(actual).localeCompare(String(boundary));
 }
 
 interface FakeState {
@@ -184,14 +206,34 @@ function createFakeDb(options: FakeOptions = {}): { db: Db; state: FakeState } {
         }
         return updated;
       },
-      findMany: async ({ where, orderBy, take }: { where: Row; orderBy?: Row; take?: number }) => {
-        let rows = state.payments.filter((payment) => matches({ ...payment }, where));
-        if (orderBy?.['createdAt'] === 'asc') {
-          rows = [...rows].sort(
-            (left, right) => left.createdAt.getTime() - right.createdAt.getTime(),
-          );
-        }
-        return (take === undefined ? rows : rows.slice(0, take)).map((payment) => ({ ...payment }));
+      findMany: async ({
+        where,
+        orderBy,
+        take,
+      }: {
+        where: Row;
+        orderBy?: Row | Row[];
+        take?: number;
+      }) => {
+        const rows = state.payments.filter((payment) => matches({ ...payment }, where));
+        // Порядок как у Prisma: список условий, устойчивая сортировка по каждому.
+        const orders: Row[] =
+          orderBy === undefined ? [] : Array.isArray(orderBy) ? orderBy : [orderBy];
+        const sorted = [...rows].sort((left, right) => {
+          for (const order of orders) {
+            for (const [field, direction] of Object.entries(order)) {
+              const diff = compare(
+                (left as unknown as Row)[field],
+                (right as unknown as Row)[field],
+              );
+              if (diff !== 0) return direction === 'desc' ? -diff : diff;
+            }
+          }
+          return 0;
+        });
+        return (take === undefined ? sorted : sorted.slice(0, take)).map((payment) => ({
+          ...payment,
+        }));
       },
     },
     appointment: {
@@ -768,15 +810,22 @@ describe('listRefundsNeedingAttention', () => {
     };
   }
 
-  it('отбирает долг по флагу и отказ провайдера, остальное не трогает', async () => {
+  it('отбирает только строки с долгом по флагу и не берёт возвращённые', async () => {
     const debtId = '55555555-5555-4555-8555-555555555551';
     const rejectedId = '55555555-5555-4555-8555-555555555552';
+    const noFlagId = '55555555-5555-4555-8555-555555555554';
     const { db } = createFakeDb({
       payments: [
         // Долг: возврат ещё не выполнен, попытки не было.
         refundRow({ id: PAYMENT_ID, refundRequired: true }),
-        // Провайдер отказал, а флаг кто-то снял руками: разбор всё равно нужен.
-        refundRow({ id: rejectedId, refundId: 'refund-2', refundStatus: 'canceled' }),
+        // Долг с отказом провайдера: флаг на месте, статус клиента — «не удался».
+        refundRow({
+          id: rejectedId,
+          refundRequired: true,
+          refundId: 'refund-2',
+          refundStatus: 'canceled',
+          createdAt: new Date('2030-03-04T05:30:00.000Z'),
+        }),
         // Возврат выполнен — разбирать нечего.
         refundRow({
           id: debtId,
@@ -784,8 +833,9 @@ describe('listRefundsNeedingAttention', () => {
           refundId: 'refund-3',
           refundStatus: 'succeeded',
         }),
-        // Попыток не было и долга нет (NULL ≠ unknown/canceled).
-        refundRow({ id: '55555555-5555-4555-8555-555555555553' }),
+        // Отказ провайдера без флага: клиентского статуса у строки нет (`null`), свипер её
+        // тоже не трогает — в обзор не попадает (сужение отбора по флагу).
+        refundRow({ id: noFlagId, refundStatus: 'canceled' }),
       ],
     });
 
@@ -803,6 +853,8 @@ describe('listRefundsNeedingAttention', () => {
       yookassaPaymentId: '2a1b0d2f-000f-5000-9000-4f0000000000',
       createdAt: CREATED_AT,
     });
+    // Отказ провайдера с флагом остаётся в списке: разбирать должен человек.
+    expect(attention[1]?.refundStatus).toBe('canceled');
     // Состав полей — id, статусы и копейки: персональных данных клиента здесь нет.
     const serialized = JSON.stringify(attention);
     expect(serialized).not.toContain(CLIENT_EMAIL);
@@ -827,7 +879,7 @@ describe('listRefundsNeedingAttention', () => {
     });
     const { db } = createFakeDb({ payments: [newest, oldest, middle] });
 
-    const limited = await listRefundsNeedingAttention(db, 2);
+    const limited = await listRefundsNeedingAttention(db, { limit: 2 });
 
     expect(limited.map((item) => item.paymentId)).toEqual([oldest.id, middle.id]);
     // Лимит по умолчанию вмещает все три строки.
@@ -835,10 +887,151 @@ describe('listRefundsNeedingAttention', () => {
     expect(all.map((item) => item.paymentId)).toEqual([oldest.id, middle.id, newest.id]);
   });
 
-  it('без долгов и отказов — пустой список', async () => {
+  it('при одинаковом времени платежа порядок задаёт id: список не плавает', async () => {
+    const second = '55555555-5555-4555-8555-555555555572';
+    const first = '55555555-5555-4555-8555-555555555571';
+    const { db } = createFakeDb({
+      payments: [
+        refundRow({ id: second, refundRequired: true }),
+        refundRow({ id: first, refundRequired: true }),
+      ],
+    });
+
+    const attention = await listRefundsNeedingAttention(db);
+
+    expect(attention.map((item) => item.paymentId)).toEqual([first, second]);
+  });
+
+  it('ограничивает период по created_at полуоткрытым интервалом', async () => {
+    const before = refundRow({
+      id: '55555555-5555-4555-8555-555555555581',
+      refundRequired: true,
+      createdAt: new Date('2030-02-28T20:59:59.999Z'),
+    });
+    const inside = refundRow({
+      id: '55555555-5555-4555-8555-555555555582',
+      refundRequired: true,
+      createdAt: new Date('2030-03-01T00:00:00.000Z'),
+    });
+    const after = refundRow({
+      id: '55555555-5555-4555-8555-555555555583',
+      refundRequired: true,
+      createdAt: new Date('2030-04-01T00:00:00.000Z'),
+    });
+    const { db } = createFakeDb({ payments: [before, inside, after] });
+
+    const inMarch = await listRefundsNeedingAttention(db, {
+      createdFrom: new Date('2030-03-01T00:00:00.000Z'),
+      createdTo: new Date('2030-04-01T00:00:00.000Z'),
+    });
+
+    // Границы: `from` включительно, `to` не включительно — соседние месяцы не пересекаются.
+    expect(inMarch.map((item) => item.paymentId)).toEqual([inside.id]);
+  });
+
+  it('без долгов — пустой список', async () => {
     const { db } = createFakeDb();
 
     await expect(listRefundsNeedingAttention(db)).resolves.toEqual([]);
+  });
+});
+
+describe('listCompletedRefunds', () => {
+  /** Строка платежа с значениями по умолчанию: в тесте важен только статус. */
+  function refundRow(overrides: Partial<PaymentRow> & Pick<PaymentRow, 'id'>): PaymentRow {
+    return {
+      appointmentId: APPOINTMENT_ID,
+      status: 'succeeded',
+      amountKopecks: AMOUNT,
+      yookassaPaymentId: null,
+      confirmationUrl: null,
+      refundRequired: false,
+      refundId: null,
+      refundStatus: null,
+      createdAt: CREATED_AT,
+      ...overrides,
+    };
+  }
+
+  it('отбирает только возвращённые платежи', async () => {
+    const refundedId = '66666666-6666-4666-8666-666666666661';
+    const refundedOldId = '66666666-6666-4666-8666-666666666662';
+    const { db } = createFakeDb({
+      payments: [
+        // Долг по флагу: возврат ещё не выполнен — во «Возвращённых» его нет.
+        refundRow({ id: PAYMENT_ID, refundRequired: true }),
+        refundRow({
+          id: refundedId,
+          status: 'refunded',
+          refundId: 'refund-7',
+          refundStatus: 'succeeded',
+          createdAt: new Date('2030-03-04T06:00:00.000Z'),
+        }),
+        refundRow({
+          id: refundedOldId,
+          status: 'refunded',
+          refundId: 'refund-8',
+          refundStatus: 'succeeded',
+          createdAt: new Date('2030-03-04T04:00:00.000Z'),
+        }),
+        // Оплата получена, возврата нет и не требуется: в обзоре возвратов ей не место.
+        refundRow({ id: '66666666-6666-4666-8666-666666666663' }),
+      ],
+    });
+
+    const completed = await listCompletedRefunds(db);
+
+    // Старые первыми — как у незавершённых.
+    expect(completed.map((item) => item.paymentId)).toEqual([refundedOldId, refundedId]);
+    expect(completed[0]).toEqual({
+      paymentId: refundedOldId,
+      appointmentId: APPOINTMENT_ID,
+      status: 'refunded',
+      amountKopecks: AMOUNT,
+      refundRequired: false,
+      refundId: 'refund-8',
+      refundStatus: 'succeeded',
+      yookassaPaymentId: null,
+      createdAt: new Date('2030-03-04T04:00:00.000Z'),
+    });
+  });
+
+  it('уважает кап и период', async () => {
+    const january = refundRow({
+      id: '66666666-6666-4666-8666-666666666671',
+      status: 'refunded',
+      createdAt: new Date('2030-01-10T04:00:00.000Z'),
+    });
+    const marchOld = refundRow({
+      id: '66666666-6666-4666-8666-666666666672',
+      status: 'refunded',
+      createdAt: new Date('2030-03-01T04:00:00.000Z'),
+    });
+    const marchNew = refundRow({
+      id: '66666666-6666-4666-8666-666666666673',
+      status: 'refunded',
+      createdAt: new Date('2030-03-02T04:00:00.000Z'),
+    });
+    const { db } = createFakeDb({ payments: [marchNew, january, marchOld] });
+
+    expect((await listCompletedRefunds(db, { limit: 2 })).map((item) => item.paymentId)).toEqual([
+      january.id,
+      marchOld.id,
+    ]);
+    expect(
+      (
+        await listCompletedRefunds(db, {
+          createdFrom: new Date('2030-03-01T00:00:00.000Z'),
+          createdTo: new Date('2030-04-01T00:00:00.000Z'),
+        })
+      ).map((item) => item.paymentId),
+    ).toEqual([marchOld.id, marchNew.id]);
+  });
+
+  it('без возвращённых платежей — пустой список', async () => {
+    const { db } = createFakeDb();
+
+    await expect(listCompletedRefunds(db)).resolves.toEqual([]);
   });
 });
 
