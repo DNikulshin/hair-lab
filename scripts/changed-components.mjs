@@ -16,12 +16,19 @@
 import { execFileSync } from 'node:child_process';
 import { appendFileSync, readFileSync } from 'node:fs';
 
-/** Пути, которые не влияют ни на один образ. */
+/**
+ * Пути, которые не влияют ни на один образ. `deploy/` здесь намеренно (#127): nginx-конфиги,
+ * install-документы и `ssh-deploy.sh` в образы не копируются, иначе правка `deploy/**` собирала
+ * бы оба образа и перезапускала staging без изменений в коде. Скрипт на хосте обновляет сам себя
+ * при следующем деплое (сверка с `origin/main:deploy/staging/ssh-deploy.sh`, issue #141),
+ * поэтому пропуск деплоя из-за `any=false` его не «замораживает».
+ */
 const IGNORED = [
   /^docs\//,
   /^\.pi\//,
   /^\.github\//,
   /^\.githooks\//,
+  /^deploy\//,
   /^scripts\//,
   /^[^/]+\.md$/,
   /^LICENSE/,
