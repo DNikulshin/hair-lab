@@ -10,6 +10,7 @@ import {
   savePaymentDetails,
   type PaymentGateway,
 } from '../payments/index';
+import { assertPhoneBookingLimits, lockPhoneBookings } from './booking-limits';
 import {
   BOOKING_CONFIRMATION_TYPE,
   buildBookingConfirmationPayload,
@@ -25,6 +26,13 @@ import { isSlotBookable, loadSchedules, salonDateOf } from './slots.service';
  * одновременные запросы на один слот не создают дубль — проигравший получает 409.
  * Телефоны и почта клиента наружу не отдаются и в логи не пишутся: для экрана успеха
  * клиент получает только маску номера (`clientPhoneMasked`).
+ *
+ * Анти-абьюз (issue #106): телефон ограничен по числу активных будущих записей и ожидающих
+ * оплаты холдов (`assertPhoneBookingLimits`). Счёт идёт в той же транзакции, что и создание,
+ * под advisory-локом по номеру: параллельные запросы одного телефона не превышают лимит.
+ * Повтор по `idempotencyKey` возвращается раньше проверки доступности, а внутри транзакции —
+ * сразу после лока по телефону (см. комментарий в `createBooking`): иначе два одинаковых
+ * сетевых ретрая получили бы 429 вместо идемпотентного 200.
  *
  * Оплата (`PAYMENTS_MODE != 'off'`, issue #8): запись создаётся как холд на 15 минут —
  * `pending` + `paymentDeadlineAt` + строка `payments(pending)` в той же транзакции, письмо-
@@ -139,6 +147,13 @@ export interface CreateBookingResult {
   status: 200 | 201;
   booking: Booking;
 }
+
+/**
+ * Итог транзакции записи: либо созданная строка, либо уже существующая по `idempotencyKey`
+ * (повтор, найденный уже после взятия лока по телефону — транзакция тогда ничего не пишет).
+ */
+type BookingTransactionResult =
+  { repeated: AppointmentRow } | { appointment: AppointmentRow; paymentId: string | null };
 
 /**
  * Маппинг строки БД в DTO: копейки → money, время → ISO, телефон → маска.
@@ -292,6 +307,8 @@ async function resolveLostRace(
  * повторяется `MAX_WRITE_CONFLICT_ATTEMPTS` раз и лишь затем разбирается как 409.
  * Занятый на попытке слот тоже сначала сверяется с `idempotencyKey`: запись с нашим ключом
  * отдаётся как повтор (200), а не превращается в 409 `slot_unavailable`.
+ * Такая же сверка идёт внутри транзакции сразу после лока по телефону и до счёта лимитов (#106):
+ * два одинаковых параллельных ретрая иначе получили бы 429 вместо идемпотентного 200.
  *
  * `clientId` передаёт маршрут, когда запрос пришёл с сессией клиента; гостевые записи
  * остаются без аккаунта. Контракты запроса и ответа не меняются: клиент не может указать
@@ -361,7 +378,28 @@ export async function createBooking(
       // письмо-подтверждение уйдёт только после успешной оплаты (обработчик уведомления).
       const deadline = payments === undefined ? null : paymentHoldDeadline();
 
-      const created = await db.$transaction(async (tx) => {
+      const created: BookingTransactionResult = await db.$transaction(async (tx) => {
+        // Лок по телефону — до повторной сверки ключа и до счёта лимитов (#106): два
+        // одинаковых ретрая (то же тело, тот же `idempotencyKey`) выстраиваются в очередь,
+        // и второй видит закоммиченную запись первого, а не только его лимит.
+        await lockPhoneBookings(tx, dto.clientPhone);
+
+        // Ключ идемпотентности сверяем после лока, но до лимитов: пока мы ждали лок, первый
+        // из двух одинаковых ретраев мог зафиксировать запись. Без этой проверки второй
+        // посчитал бы его запись лимитом телефона и ответил бы 429, хотя запись уже создана.
+        // В этом случае транзакция не пишет ничего (ни записи, ни платежа, ни outbox):
+        // наружу отдаётся найденная строка — 200 или 409 `conflict` по содержимому.
+        const repeated = await tx.appointment.findUnique({
+          where: { idempotencyKey: dto.idempotencyKey },
+        });
+        if (repeated !== null) return { repeated };
+
+        // Лимиты телефона — до вставки и в этой же транзакции (#106): счёт видит только
+        // закоммиченные строки, а откат попытки (конфликт слота, дубль ключа) не оставляет
+        // дрейфа счётчика, потому что счётчик — сам `count` по БД. Лок она берёт повторно
+        // (`lockPhoneBookings`) — в этой же транзакции это no-op.
+        await assertPhoneBookingLimits(tx, dto.clientPhone);
+
         const appointment = await tx.appointment.create({
           data: {
             masterId: dto.masterId,
@@ -412,6 +450,10 @@ export async function createBooking(
 
         return { appointment, paymentId: null };
       });
+
+      // Повтор, найденный в транзакции после лока: та же семантика, что у `resolveLostRace`
+      // (200 при том же содержимом, 409 `conflict` при другом). Чтение платежа — вне транзакции.
+      if ('repeated' in created) return await reuseOrConflict(db, created.repeated, dto, payments);
 
       const booking = toBookingDto(created.appointment);
       if (payments === undefined || created.paymentId === null || deadline === null) {

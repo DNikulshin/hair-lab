@@ -215,11 +215,24 @@ function bookingBody(params: {
   };
 }
 
+let bookingIpCounter = 0;
+
+/**
+ * Свой адрес на каждый запрос: с #106 у `POST /bookings` включён IP-лимит 10 за 10 минут,
+ * а счётчик живёт в памяти процесса — с одного адреса файл упирался бы в 429.
+ * Сам лимит проверяется в `test/bookings-limits.int.test.ts`.
+ */
+function nextBookingIp(): string {
+  bookingIpCounter += 1;
+  return `10.23.${Math.floor(bookingIpCounter / 250)}.${(bookingIpCounter % 250) + 1}`;
+}
+
 async function postBooking(app: Server, body: object, cookie?: string) {
   const response = await app.inject({
     method: 'POST',
     url: '/bookings',
     payload: body,
+    remoteAddress: nextBookingIp(),
     ...(cookie === undefined ? {} : { headers: { cookie } }),
   });
   return { statusCode: response.statusCode, body: response.json() as unknown, raw: response.body };

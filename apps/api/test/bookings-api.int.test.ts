@@ -89,8 +89,25 @@ function bookingBody(params: {
   };
 }
 
+let ipCounter = 0;
+
+/**
+ * Свой адрес на каждый запрос: с #106 у `POST /bookings` включён IP-лимит 10 за 10 минут,
+ * а счётчик лимита живёт в памяти процесса. С одного адреса файл упирался бы в 429
+ * на середине сценария. Сам лимит проверяется в `test/bookings-limits.int.test.ts`.
+ */
+function nextIp(): string {
+  ipCounter += 1;
+  return `10.20.${Math.floor(ipCounter / 250)}.${(ipCounter % 250) + 1}`;
+}
+
 async function postBooking(body: object) {
-  const response = await app.inject({ method: 'POST', url: '/bookings', payload: body });
+  const response = await app.inject({
+    method: 'POST',
+    url: '/bookings',
+    payload: body,
+    remoteAddress: nextIp(),
+  });
   return {
     statusCode: response.statusCode,
     body: response.json() as unknown,
@@ -247,6 +264,7 @@ describe('POST /bookings', () => {
       method: 'POST',
       url: '/bookings',
       headers: { cookie: `hl_session=${token}` },
+      remoteAddress: nextIp(),
       payload: bookingBody({
         masterId,
         serviceId,
@@ -516,6 +534,7 @@ describe('POST /bookings', () => {
       app.inject({
         method: 'POST',
         url: '/bookings',
+        remoteAddress: nextIp(),
         payload: bookingBody({
           masterId,
           serviceId,
@@ -526,6 +545,7 @@ describe('POST /bookings', () => {
       app.inject({
         method: 'POST',
         url: '/bookings',
+        remoteAddress: nextIp(),
         payload: bookingBody({
           masterId,
           serviceId,

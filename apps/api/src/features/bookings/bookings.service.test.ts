@@ -9,6 +9,7 @@ import {
   MAX_WRITE_CONFLICT_ATTEMPTS,
   SlotUnavailableError,
 } from './bookings.service';
+import { BookingLimitError, MAX_ACTIVE_BOOKINGS_PER_PHONE } from './booking-limits';
 import { dayOfWeekOf, salonDateOf } from './slots.service';
 
 /**
@@ -107,6 +108,18 @@ interface DbStubOptions {
    * занял параллельный запрос, а мы успели получить транзиентный конфликт записи.
    */
   busyFromRetry?: boolean;
+  /**
+   * Сколько активных будущих записей числится за телефоном (#106): третья включает лимит.
+   * Счёт живёт внутри транзакции; по умолчанию — ноль, как у чистого телефона.
+   */
+  activeBookings?: number;
+  /** Сколько ожидающих оплаты холдов числится за телефоном: второй включает лимит. */
+  pendingHolds?: number;
+  /**
+   * Ответы `tx.appointment.findUnique` — сверка ключа внутри транзакции после лока по телефону
+   * (#106) — по порядку вызовов (`null` — записи нет). Последний повторяется, по умолчанию — `null`.
+   */
+  transactionFindUniqueResults?: readonly (typeof appointmentRow | null)[];
 }
 
 /**
@@ -118,11 +131,19 @@ function createDbStub(
   transactionFailures: readonly (unknown | null)[],
   options: DbStubOptions = {},
 ) {
-  const { findUniqueResults = [null], busy = [], busyFromRetry = false } = options;
+  const {
+    findUniqueResults = [null],
+    busy = [],
+    busyFromRetry = false,
+    activeBookings = 0,
+    pendingHolds = 0,
+    transactionFindUniqueResults = [null],
+  } = options;
   const date = salonDateOf(startsAt, env.SALON_TIMEZONE);
   const row = appointmentRow;
   let attemptIndex = 0;
   let findUniqueCalls = 0;
+  let transactionFindUniqueCalls = 0;
 
   const findUnique = vi.fn(async () => {
     const index = Math.min(findUniqueCalls, findUniqueResults.length - 1);
@@ -130,12 +151,45 @@ function createDbStub(
     return findUniqueResults[index] ?? null;
   });
 
+  // Лимиты телефона (#106) считаются внутри транзакции записи: первый `count` — активные
+  // будущие записи, второй — ожидающие оплаты холды.
+  const counts = [activeBookings, pendingHolds];
+  let countIndex = 0;
+  // Порядок действий внутри транзакции: по нему видно, что лок идёт первым, а ключ
+  // сверяется до счёта лимитов и до вставки (`txOrder`).
+  const txOrder: string[] = [];
+  const lockQuery = vi.fn(async () => {
+    txOrder.push('lock');
+    return [];
+  });
+  const transactionFindUnique = vi.fn(async () => {
+    txOrder.push('findUnique');
+    const index = Math.min(transactionFindUniqueCalls, transactionFindUniqueResults.length - 1);
+    transactionFindUniqueCalls += 1;
+    return transactionFindUniqueResults[index] ?? null;
+  });
+  const countAppointments = vi.fn(async () => {
+    txOrder.push('count');
+    const value = counts[Math.min(countIndex, counts.length - 1)] ?? 0;
+    countIndex += 1;
+    return value;
+  });
+  const createAppointment = vi.fn(async () => {
+    txOrder.push('create');
+    return row;
+  });
+
   const transaction = vi.fn(async (run: (tx: unknown) => Promise<unknown>) => {
     const failure = transactionFailures[attemptIndex] ?? null;
     attemptIndex += 1;
     if (failure !== null) throw failure;
     return run({
-      appointment: { create: vi.fn(async () => row) },
+      $queryRaw: lockQuery,
+      appointment: {
+        create: createAppointment,
+        count: countAppointments,
+        findUnique: transactionFindUnique,
+      },
       outboxMessage: { create: vi.fn(async () => ({ id: row.id })) },
     });
   });
@@ -166,7 +220,7 @@ function createDbStub(
     $transaction: transaction,
   };
 
-  return { db: stub as unknown as Db, stub };
+  return { db: stub as unknown as Db, stub, createAppointment, txOrder };
 }
 
 describe('isWriteConflict', () => {
@@ -300,5 +354,84 @@ describe('createBooking: занятый слот и ключ идемпотен�
     expect(result.booking.id).toBe(APPOINTMENT_ID);
     // Вторая попытка не дошла до записи: исход решило чтение по ключу.
     expect(stub.$transaction).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * Анти-абьюз (#106): лимиты телефона считаются в транзакции создания записи, поэтому
+ * в unit-тесте проверяется порядок «идемпотентность → лимит» и отказ до вставки строки.
+ * Сама гонка параллельных запросов проверяется на реальной БД (`test/bookings-limits.int.test.ts`).
+ */
+describe('createBooking: лимиты телефона', () => {
+  it('порог активных записей достигнут — BookingLimitError, строка не создаётся', async () => {
+    const { db, stub, createAppointment } = createDbStub([null], {
+      activeBookings: MAX_ACTIVE_BOOKINGS_PER_PHONE,
+    });
+
+    await expect(createBooking(db, dto)).rejects.toBeInstanceOf(BookingLimitError);
+    // Транзакция началась (лимит проверяется внутри неё), но до вставки дело не дошло.
+    expect(stub.$transaction).toHaveBeenCalledTimes(1);
+    expect(createAppointment).not.toHaveBeenCalled();
+  });
+
+  it('повтор по idempotencyKey возвращается до счёта лимитов', async () => {
+    const { db, stub } = createDbStub([null], {
+      findUniqueResults: [appointmentRow],
+      activeBookings: MAX_ACTIVE_BOOKINGS_PER_PHONE,
+    });
+
+    const result = await createBooking(db, dto);
+
+    expect(result.status).toBe(200);
+    expect(result.booking.id).toBe(APPOINTMENT_ID);
+    // Транзакции и счёта нет: повтор отдаётся из записи, созданной первой попыткой.
+    expect(stub.$transaction).not.toHaveBeenCalled();
+    expect(stub.appointment.findUnique).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * Гонка двух одинаковых ретраев (#106, ревью M1): оба запроса прошли предварительную проверку
+ * ключа, пока записи ещё не было. После локa по телефону второй видит закоммиченную запись
+ * первого, отдаёт её как повтор (200), а не считает её лимитом телефона и не отвечает 429.
+ */
+describe('createBooking: повтор, найденный в транзакции после лока', () => {
+  it('ключ найден в транзакции — 200, счёта лимитов и вставки нет', async () => {
+    const { db, stub, createAppointment, txOrder } = createDbStub([null], {
+      transactionFindUniqueResults: [appointmentRow],
+      // Лимит телефона исчерпан — но до счёта дело не доходит: повтор важнее лимита.
+      activeBookings: MAX_ACTIVE_BOOKINGS_PER_PHONE,
+    });
+
+    const result = await createBooking(db, dto);
+
+    expect(result.status).toBe(200);
+    expect(result.booking.id).toBe(APPOINTMENT_ID);
+    // Транзакция одна и ничего не пишет: ни записи, ни строки outbox.
+    expect(stub.$transaction).toHaveBeenCalledTimes(1);
+    expect(createAppointment).not.toHaveBeenCalled();
+    // Лок — первым, затем сверка ключа; счёта лимитов после повтора нет.
+    expect(txOrder).toEqual(['lock', 'findUnique']);
+  });
+
+  it('та же гонка, но тело другое — 409 conflict, вставки нет', async () => {
+    const { db, createAppointment } = createDbStub([null], {
+      transactionFindUniqueResults: [appointmentRow],
+    });
+
+    await expect(createBooking(db, { ...dto, serviceId: OTHER_SERVICE_ID })).rejects.toBeInstanceOf(
+      IdempotencyConflictError,
+    );
+    expect(createAppointment).not.toHaveBeenCalled();
+  });
+
+  it('записи в транзакции нет — порядок прежний: лок, сверка ключа, лимиты, вставка', async () => {
+    const { db, txOrder } = createDbStub([null]);
+
+    const result = await createBooking(db, dto);
+
+    expect(result.status).toBe(201);
+    // Два `lock`: явный лок сервиса и повторный внутри `assertPhoneBookingLimits` (no-op).
+    expect(txOrder).toEqual(['lock', 'findUnique', 'lock', 'count', 'count', 'create']);
   });
 });
