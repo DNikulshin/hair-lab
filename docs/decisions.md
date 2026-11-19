@@ -187,6 +187,35 @@ hair-lab). Пока они `status:blocked`, любые правки ядра и
 цикл не входит: таблица `appointments` мала, оба `count` идут под локом в одной транзакции;
 работа «при росте таблицы» — отдельный follow-up.
 
+## Возврат при отмене оплаченной записи (#103)
+
+Срок и тексты — решение владельца; менять их — значит менять три места сразу, поэтому
+они перечислены здесь.
+
+- **Срок возврата — до 3 рабочих дней.** Одна формулировка во всех трёх местах:
+  кабинет (`refundStatusLabel` в `apps/web/src/features/account/model/account-status.ts`),
+  страница оплаты (состояние `refundPending` в `apps/web/src/features/payment/model/payment-state.ts`)
+  и письмо об отмене (абзац `REFUND_NOTICE` в `apps/api/src/features/bookings/booking-cancellation.email.ts`).
+- **Кабинет**: подпись о возврате показывается только у отменённой записи и только при непустом
+  `refundStatus`. Письмо: абзац про возврат добавляется только если запись была оплачена
+  (`wasPaid` в снимке outbox; старые снимки без поля парсятся и абзаца не получают).
+- **Контракт**: аддитивное опциональное `refundStatus: 'pending' | 'succeeded' | 'failed' | null`
+  в `accountBookingSchema` (`null` — возврата нет; старое API поле не присылает). Служебные коды
+  провайдера (`RefundStatus` в БД: `pending`, `succeeded`, `canceled`, `unknown`) наружу
+  не отдаются: их переводит чистый хелпер `clientRefundStatus` в `apps/api/src/features/payments/payments.service.ts`.
+- **Источник статусов** — только `payments`: `status` (`refunded` → `succeeded`),
+  `refund_required` (деньги должны вернуться → `pending`) и `refund_status = canceled`
+  при выставленном флаге (провайдер отказал → `failed`). Строка платежа читается тем же
+  запросом, что и запись кабинета (relation `payment`, без N+1).
+- **C3 (#105)**: `refund_id` и `refund_status` уже хранятся в `payments` с миграцией
+  `add_payment_refund_fields` — новых полей и миграций эта задача не добавляет.
+  Клиенту `refund_id` не отдаём: это идентификатор в ЮKassa, клиенту он бесполезен и раскрывает
+  внутреннюю трассировку платежа. Хранение `refund_id` согласовано в #105.
+
+Проверка: `packages/contracts/src/booking/booking.contract.test.ts`,
+`payments.service.test.ts`, `account-bookings.service.test.ts`,
+`booking-cancellation.email.test.ts`, `account-status.test.ts`, `payment-state.test.ts`.
+
 ## Открытые вопросы
 
 - Мультилокация: у референса два адреса. Модели филиала в схеме нет; когда понадобится,

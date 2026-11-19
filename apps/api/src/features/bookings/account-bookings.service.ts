@@ -3,10 +3,15 @@ import type {
   AccountBookingsQuery,
   AccountBookingsResponse,
   BookingStatus,
+  PaymentStatus,
 } from '@hair-lab/contracts';
 import { idSchema, isoDateTimeSchema, maskPhone } from '@hair-lab/contracts';
 import type { Db } from '../../shared/db';
-import { markRefundRequiredByAppointment } from '../payments/index';
+import {
+  clientRefundStatus,
+  markRefundRequiredByAppointment,
+  type GatewayRefundStatus,
+} from '../payments/index';
 import { BOOKING_CANCELLATION_TYPE } from './booking-cancellation.email';
 import { BOOKING_CONFIRMATION_TYPE } from './booking-confirmation.email';
 
@@ -23,6 +28,9 @@ import { BOOKING_CONFIRMATION_TYPE } from './booking-confirmation.email';
  * - «ждёт оплаты» и «ждёт подтверждения салона» различает аддитивное `awaitingPayment`:
  *   сервер ставит его по дедлайну холда (`pending` + непустой `paymentDeadlineAt`), клиент
  *   это правило не дублирует, а старые клиенты поля просто игнорируют;
+ * - статус возврата по отменённой оплаченной записи клиент видит в том же DTO (`refundStatus`,
+ *   issue #103): служебные коды платежа/провайдера переводит в термины клиента
+ *   `clientRefundStatus`, поэтому строку `payments` читаем тем же запросом, без N+1;
  * - чужая и несуществующая запись неразличимы: обе дают 404 (наличие чужих записей не раскрываем);
  * - причина отмены ставится сервером (`CANCEL_REASON`), клиент её не присылает;
  * - отмена снимает дедлайн холда (`payment_deadline_at = NULL`): отменённая запись оплаты
@@ -92,13 +100,20 @@ interface AccountBookingRow {
   clientPhone: string;
   /** Дедлайн холда: не `null` только когда запись ждёт оплаты. */
   paymentDeadlineAt: Date | null;
+  /** Платёж записи: `null` — оплата не создавалась (`PAYMENTS_MODE=off` или запись без неё). */
+  payment: {
+    status: PaymentStatus;
+    refundRequired: boolean;
+    refundStatus: GatewayRefundStatus | null;
+  } | null;
   master: { fullName: string };
   service: { name: string };
 }
 
 /**
  * Выборка для DTO: имена мастера и услуги приходят в том же запросе (`select` с relation),
- * без N+1. Телефон нужен только для маски, почта не читается.
+ * без N+1. Телефон нужен только для маски, почта не читается. Платёж — только служебные
+ * поля, из которых считается `refundStatus`; персональных данных в нём нет.
  */
 const accountBookingSelect = {
   id: true,
@@ -110,6 +125,7 @@ const accountBookingSelect = {
   clientName: true,
   clientPhone: true,
   paymentDeadlineAt: true,
+  payment: { select: { status: true, refundRequired: true, refundStatus: true } },
   master: { select: { fullName: true } },
   service: { select: { name: true } },
 } as const;
@@ -134,7 +150,9 @@ function isCancellable(row: AccountBookingRow, now: Date): boolean {
  * `cancellable` считает сервер по текущему моменту.
  *
  * `awaitingPayment` тоже считает сервер: дедлайн холда есть только у записи, которая ждёт
- * оплаты, поэтому join с `payments` не нужен. При `PAYMENTS_MODE=off` дедлайна нет — `false`.
+ * оплаты, поэтому отдельный запрос к `payments` не нужен. При `PAYMENTS_MODE=off` дедлайна нет — `false`.
+ *
+ * `refundStatus` считается той же строкой платежа, что пришла в выборке: `null` — возврата нет.
  */
 function toAccountBookingDto(row: AccountBookingRow, now: Date): AccountBooking {
   return {
@@ -150,6 +168,7 @@ function toAccountBookingDto(row: AccountBookingRow, now: Date): AccountBooking 
     clientPhoneMasked: maskPhone(row.clientPhone),
     cancellable: isCancellable(row, now),
     awaitingPayment: row.status === 'pending' && row.paymentDeadlineAt !== null,
+    refundStatus: clientRefundStatus(row.payment),
   };
 }
 
@@ -249,7 +268,8 @@ export async function listAccountBookings(
  * оплаченному платежу ставится `payments.refund_required` (деньги вернёт свипер возвратов),
  * `pending`-подтверждение становится `suppressed` (диспетчер берёт только
  * `pending`), а при непустой почте клиента ставится письмо `booking_cancellation` со снимком
- * записи на момент отмены. Идемпотентность даёт тот же условный `updateMany`: повторная отмена
+ * записи на момент отмены и признаком `wasPaid` (был ли визит оплачен): по нему шаблон
+ * добавляет абзац о сроке возврата денег (#103). Идемпотентность даёт тот же условный `updateMany`: повторная отмена
  * видит, что строка уже не активна, обновить её не может и не трогает ни платежи, ни письма.
  *
  * Если ни одна строка не обновилась, перечитываем запись по `id`, чтобы объяснить причину:
@@ -282,16 +302,17 @@ export async function cancelAccountBooking(
     });
 
     if (updated.count === 1) {
-      // Отмена состоялась: читаем снимок для письма (включая почту) — запись уже cancelled,
+      // Сначала фиксируем обязанность вернуть деньги: отмена состоялась, а флаг нужен и письму,
+      // и DTO ответа (в `refundStatus` клиент должен увидеть «возврат в пути»). Флаг ставится
+      // в этой же транзакции, возврат дальше добивает свипер.
+      await markRefundRequiredByAppointment(tx, id);
+
+      // Затем читаем снимок для письма (включая почту и строку платежа) — запись уже cancelled,
       // поэтому повторный запрос в эту ветку не попадёт и дубля письма не будет.
       const snapshot = await tx.appointment.findFirstOrThrow({
         where: { id, clientId },
         select: cancelledBookingSelect,
       });
-
-      // Деньги за отменённую запись остаются у салона, пока их не вернут: обязанность
-      // фиксируется флагом в этой же транзакции, возврат дальше добивает свипер.
-      await markRefundRequiredByAppointment(tx, id);
 
       // Подтверждение уже неуместно: `pending` → `suppressed` с коротким кодом причины.
       // Прочие статусы (sent, failed) не трогаем: письмо либо уже ушло, либо не уйдёт.
@@ -299,6 +320,14 @@ export async function cancelAccountBooking(
         where: { appointmentId: id, type: BOOKING_CONFIRMATION_TYPE, status: 'pending' },
         data: { status: 'suppressed', lastError: CANCELLATION_SUPPRESS_REASON },
       });
+
+      // Был ли визит оплачен: абзац про срок возврата в письме — только для оплаченной записи
+      // (issue #103). Читаем ту же строку платежа, что пришла со снимком, и после флага:
+      // у `succeeded` он уже стоит, у `pending`/`canceled` денег не было. Старый снимок
+      // без `wasPaid` парсится и абзаца не получает.
+      const wasPaid =
+        snapshot.payment !== null &&
+        (snapshot.payment.status === 'succeeded' || snapshot.payment.refundRequired);
 
       // Без почты клиента письмо поставить некуда: подтверждение всё равно снято.
       const clientEmail = snapshot.clientEmail?.trim() ?? '';
@@ -316,6 +345,7 @@ export async function cancelAccountBooking(
               endsAt: snapshot.endsAt.toISOString(),
               priceKopecks: snapshot.priceKopecks,
               durationMin: snapshot.durationMin,
+              wasPaid,
             },
           },
         });

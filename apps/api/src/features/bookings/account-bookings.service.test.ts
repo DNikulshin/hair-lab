@@ -95,6 +95,7 @@ interface PaymentRow {
   status: 'pending' | 'succeeded' | 'canceled' | 'refunded';
   amountKopecks: number;
   refundRequired: boolean;
+  refundStatus: 'succeeded' | 'pending' | 'canceled' | 'unknown' | null;
 }
 
 function paymentRow(overrides: Partial<PaymentRow> = {}): PaymentRow {
@@ -104,6 +105,7 @@ function paymentRow(overrides: Partial<PaymentRow> = {}): PaymentRow {
     status: 'succeeded',
     amountKopecks: 350_000,
     refundRequired: false,
+    refundStatus: null,
     ...overrides,
   };
 }
@@ -159,6 +161,15 @@ function direction(orders: OrderBy | OrderBy[], key: keyof OrderBy): 1 | -1 {
  * стабом: транзакция в тесте без БД не нужна, важно, какие запросы делает сервис.
  */
 function createDbStub(rows: Row[], outboxRows: OutboxRow[] = [], paymentRows: PaymentRow[] = []) {
+  /**
+   * Запись с вложенным платежом — как у Prisma с `select: { payment: { select: … } }`:
+   * связь one-to-one, строка платежа либо есть, либо `null`.
+   */
+  const withPayment = (record: Row): Row & { payment: PaymentRow | null } => ({
+    ...record,
+    payment: paymentRows.find((payment) => payment.appointmentId === record.id) ?? null,
+  });
+
   const updateMany = vi.fn(async (args: { where: Where; data: Partial<Row> }) => {
     const matched = rows.filter((record) => matches(record, args.where));
     for (const record of matched) Object.assign(record, args.data, { updatedAt: NOW });
@@ -166,13 +177,14 @@ function createDbStub(rows: Row[], outboxRows: OutboxRow[] = [], paymentRows: Pa
   });
 
   const findFirst = vi.fn(async (args: { where: Where }) => {
-    return rows.find((record) => matches(record, args.where)) ?? null;
+    const found = rows.find((record) => matches(record, args.where));
+    return found === undefined ? null : withPayment(found);
   });
 
   const findFirstOrThrow = vi.fn(async (args: { where: Where }) => {
     const found = rows.find((record) => matches(record, args.where));
     if (found === undefined) throw new Error('запись не найдена');
-    return found;
+    return withPayment(found);
   });
 
   const findMany = vi.fn(
@@ -186,7 +198,7 @@ function createDbStub(rows: Row[], outboxRows: OutboxRow[] = [], paymentRows: Pa
           if (byStart !== 0) return byStart;
           return a.id.localeCompare(b.id) * idDirection;
         });
-      return matched.slice(0, args.take);
+      return matched.slice(0, args.take).map(withPayment);
     },
   );
 
@@ -436,6 +448,8 @@ describe('cancelAccountBooking: письма об отмене', () => {
         endsAt: new Date(CANCELABLE_STARTS_AT.getTime() + 60 * MINUTE_MS).toISOString(),
         priceKopecks: 350_000,
         durationMin: 60,
+        // Платёж в этом стабе не заведён: визит не оплачен, абзаца о возврате не будет.
+        wasPaid: false,
       },
     });
   });
@@ -748,5 +762,82 @@ describe('DTO кабинета: awaitingPayment', () => {
     const booking = await cancelAccountBooking(db, CLIENT_ID, BOOKING_ID, NOW);
 
     expect(booking.awaitingPayment).toBe(false);
+  });
+});
+
+describe('DTO кабинета: refundStatus (#103)', () => {
+  /** Отменённая запись в «Прошлых»: именно её видит клиент в кабинете. */
+  function cancelledBooking(): Row {
+    return row({ status: 'cancelled', cancelReason: CANCEL_REASON });
+  }
+
+  async function cancelledDto(payment: PaymentRow | null): Promise<string | null | undefined> {
+    const { db } = createDbStub([cancelledBooking()], [], payment === null ? [] : [payment]);
+    const [item] = (await listAccountBookings(db, CLIENT_ID, query({ scope: 'past' }), NOW)).items;
+    return item?.refundStatus;
+  }
+
+  it('оплаченная и отменённая запись: возврат в пути', async () => {
+    const { db } = createDbStub([row()], [], [paymentRow()]);
+
+    const booking = await cancelAccountBooking(db, CLIENT_ID, BOOKING_ID, NOW);
+
+    // Ответ отмены и список считают статус одинаково: флаг возврата поставлен, деньги у салона.
+    expect(booking.refundStatus).toBe('pending');
+    await expect(cancelledDto(paymentRow({ refundRequired: true }))).resolves.toBe('pending');
+  });
+
+  it('деньги вернулись: succeeded', async () => {
+    await expect(
+      cancelledDto(paymentRow({ status: 'refunded', refundStatus: 'succeeded' })),
+    ).resolves.toBe('succeeded');
+  });
+
+  it('провайдер отказал в возврате: failed', async () => {
+    await expect(
+      cancelledDto(paymentRow({ refundRequired: true, refundStatus: 'canceled' })),
+    ).resolves.toBe('failed');
+  });
+
+  it('платежа нет или возврат не требуется: null', async () => {
+    // PAYMENTS_MODE=off: платежа нет вовсе.
+    await expect(cancelledDto(null)).resolves.toBeNull();
+    // Платёж был, но деньги не приходили (холд снят): возвращать нечего.
+    await expect(cancelledDto(paymentRow({ status: 'canceled' }))).resolves.toBeNull();
+  });
+
+  it('активная запись: возврата нет, даже если платёж прошёл', async () => {
+    const { db } = createDbStub([row({ status: 'confirmed' })], [], [paymentRow()]);
+
+    const [item] = (await listAccountBookings(db, CLIENT_ID, query(), NOW)).items;
+
+    expect(item?.refundStatus).toBeNull();
+  });
+});
+
+describe('письмо об отмене: wasPaid (#103)', () => {
+  it('оплаченная запись: в снимке wasPaid = true', async () => {
+    const { db, outboxRows } = createDbStub([row()], [], [paymentRow()]);
+
+    await cancelAccountBooking(db, CLIENT_ID, BOOKING_ID, NOW);
+
+    expect(outboxRows[0]?.type).toBe(BOOKING_CANCELLATION_TYPE);
+    expect(outboxRows[0]?.payload).toMatchObject({ wasPaid: true });
+  });
+
+  it('платёж не прошёл (pending): wasPaid = false, абзаца о возврате не будет', async () => {
+    const { db, outboxRows } = createDbStub([row()], [], [paymentRow({ status: 'pending' })]);
+
+    await cancelAccountBooking(db, CLIENT_ID, BOOKING_ID, NOW);
+
+    expect(outboxRows[0]?.payload).toMatchObject({ wasPaid: false });
+  });
+
+  it('прошлый возврат по платежу не считается оплатой этого визита', async () => {
+    const { db, outboxRows } = createDbStub([row()], [], [paymentRow({ status: 'refunded' })]);
+
+    await cancelAccountBooking(db, CLIENT_ID, BOOKING_ID, NOW);
+
+    expect(outboxRows[0]?.payload).toMatchObject({ wasPaid: false });
   });
 });

@@ -8,6 +8,7 @@ import {
   bookingResponseSchema,
   bookingSchema,
   createBookingSchema,
+  refundClientStatusSchema,
   slotsQuerySchema,
   slotsResponseSchema,
 } from './booking.contract';
@@ -199,6 +200,28 @@ describe('accountBookingSchema', () => {
     expect(() =>
       accountBookingSchema.parse({ ...accountBooking, awaitingPayment: 'yes' }),
     ).toThrow();
+  });
+
+  it('принимает аддитивный refundStatus: три значения и null, без поля — тоже валидно', () => {
+    for (const status of ['pending', 'succeeded', 'failed'] as const) {
+      expect(
+        accountBookingSchema.parse({ ...accountBooking, refundStatus: status }).refundStatus,
+      ).toBe(status);
+    }
+    // `null` — возврата нет; `undefined` — старое API поле не прислало.
+    expect(accountBookingSchema.parse({ ...accountBooking, refundStatus: null }).refundStatus).toBe(
+      null,
+    );
+    expect(accountBookingSchema.parse(accountBooking).refundStatus).toBeUndefined();
+    expect(refundClientStatusSchema.options).toEqual(['pending', 'succeeded', 'failed']);
+  });
+
+  it('отклоняет чужой статус возврата: служебные коды провайдера наружу не отдаём', () => {
+    for (const foreign of ['canceled', 'unknown', 'refunded', '']) {
+      expect(() =>
+        accountBookingSchema.parse({ ...accountBooking, refundStatus: foreign }),
+      ).toThrow();
+    }
   });
 
   it('отклоняет время без зоны, пустые имена и неизвестный статус', () => {

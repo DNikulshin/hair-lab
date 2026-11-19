@@ -28,6 +28,12 @@ export const bookingConfirmationPayloadSchema = z.object({
   endsAt: z.iso.datetime(),
   priceKopecks: z.number().int().nonnegative(),
   durationMin: z.number().int().positive(),
+  /**
+   * Запись была оплачена (issue #103). Письмо об отмене по этому признаку добавляет абзац
+   * о сроке возврата денег. Поле аддитивное и опциональное: снимки, записанные раньше,
+   * его не имеют и парсятся по-прежнему (абзаца просто нет).
+   */
+  wasPaid: z.boolean().optional(),
 });
 export type BookingConfirmationPayload = z.infer<typeof bookingConfirmationPayloadSchema>;
 

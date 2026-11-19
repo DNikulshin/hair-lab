@@ -5,6 +5,7 @@ import { BOOKING_CONFIRMATION_TYPE } from '../bookings/index';
 import {
   applyPaymentCanceled,
   applyPaymentSucceeded,
+  clientRefundStatus,
   findPaymentByAppointment,
   listPendingRefunds,
   listRefundsNeedingAttention,
@@ -867,5 +868,50 @@ describe('findPaymentByAppointment', () => {
     await expect(
       findPaymentByAppointment(db, '99999999-9999-4999-8999-999999999999'),
     ).resolves.toBeNull();
+  });
+});
+
+describe('clientRefundStatus', () => {
+  it('платежа нет — возврата нет', () => {
+    expect(clientRefundStatus(null)).toBeNull();
+  });
+
+  it('refunded — деньги вернулись, даже если флаг уже снят', () => {
+    expect(
+      clientRefundStatus({ status: 'refunded', refundRequired: false, refundStatus: 'succeeded' }),
+    ).toBe('succeeded');
+  });
+
+  it('долг по флагу — возврат в пути', () => {
+    expect(
+      clientRefundStatus({ status: 'succeeded', refundRequired: true, refundStatus: null }),
+    ).toBe('pending');
+    // Попытка была, провайдер ещё не подтвердил завершение — всё ещё в пути.
+    expect(
+      clientRefundStatus({ status: 'succeeded', refundRequired: true, refundStatus: 'pending' }),
+    ).toBe('pending');
+    // Незнакомый ответ провайдера — тоже «в пути»: флаг не снят, свипер повторит.
+    expect(
+      clientRefundStatus({ status: 'canceled', refundRequired: true, refundStatus: 'unknown' }),
+    ).toBe('pending');
+  });
+
+  it('флаг и отказ провайдера — возврат не удался', () => {
+    expect(
+      clientRefundStatus({ status: 'succeeded', refundRequired: true, refundStatus: 'canceled' }),
+    ).toBe('failed');
+  });
+
+  it('не оплачено — возврата нет', () => {
+    expect(
+      clientRefundStatus({ status: 'pending', refundRequired: false, refundStatus: null }),
+    ).toBeNull();
+    expect(
+      clientRefundStatus({ status: 'canceled', refundRequired: false, refundStatus: null }),
+    ).toBeNull();
+    // Отказ провайдера без флага возврата не показываем: возвращать было нечего.
+    expect(
+      clientRefundStatus({ status: 'canceled', refundRequired: false, refundStatus: 'canceled' }),
+    ).toBeNull();
   });
 });

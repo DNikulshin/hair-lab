@@ -21,6 +21,7 @@ export { paymentsRoutes, type PaymentsRoutesOptions } from './payments.routes';
 export {
   applyPaymentCanceled,
   applyPaymentSucceeded,
+  clientRefundStatus,
   createPaymentHold,
   failPaymentCreation,
   findPaymentByAppointment,

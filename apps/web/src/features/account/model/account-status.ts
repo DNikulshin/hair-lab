@@ -1,4 +1,4 @@
-import type { BookingStatus } from '@hair-lab/contracts';
+import type { BookingStatus, RefundClientStatus } from '@hair-lab/contracts';
 
 /**
  * Подписи статусов записи для кабинета.
@@ -30,4 +30,22 @@ export function bookingStatusLabel(status: BookingStatus, awaitingPayment = fals
 /** Активная запись: её ещё ждут — статус выделяем цветом. */
 export function isActiveStatus(status: BookingStatus): boolean {
   return status === 'pending' || status === 'confirmed';
+}
+
+/**
+ * Подписи возврата денег по отменённой оплаченной записи (#103).
+ *
+ * Служебные коды провайдера сюда не доходят: сервер отдаёт уже переведённый статус
+ * (`pending`/`succeeded`/`failed`), а клиент его только называет. Срок тот же, что
+ * в письме об отмене и на странице оплаты: до 3 рабочих дней.
+ */
+const REFUND_LABELS: Record<RefundClientStatus, string> = {
+  pending: 'Возврат на карту — до 3 рабочих дней.',
+  succeeded: 'Деньги за запись возвращены.',
+  failed: 'Возврат не удался — позвоните в салон.',
+};
+
+/** Подпись статуса возврата; неизвестный код (новый статус от API) не роняет рендер. */
+export function refundStatusLabel(status: RefundClientStatus): string {
+  return REFUND_LABELS[status] ?? '';
 }

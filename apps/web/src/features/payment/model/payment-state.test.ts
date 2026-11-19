@@ -197,7 +197,7 @@ describe('resolvePaymentState: результаты оплаты', () => {
     },
   );
 
-  it('succeeded + отменённая запись: возврат в пути', () => {
+  it('succeeded + отменённая запись: возврат в пути, срок — до 3 рабочих дней', () => {
     const state = resolvePaymentState({
       view: ready('succeeded', 'cancelled'),
       draft: DRAFT,
@@ -207,6 +207,10 @@ describe('resolvePaymentState: результаты оплаты', () => {
     expect(state.kind).toBe('refundPending');
     expect(state.terminal).toBe(true);
     expect(state.shouldPoll).toBe(false);
+    // Срок согласован с письмом и кабинетом: текст проверяем дословно.
+    expect(state.description).toBe(
+      'Запись отменена, деньги вернутся на карту — до 3 рабочих дней.',
+    );
   });
 
   it('canceled: оплата не состоялась, ссылки нет', () => {

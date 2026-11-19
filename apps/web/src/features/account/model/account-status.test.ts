@@ -1,6 +1,6 @@
-import type { BookingStatus } from '@hair-lab/contracts';
+import type { BookingStatus, RefundClientStatus } from '@hair-lab/contracts';
 import { describe, expect, it } from 'vitest';
-import { bookingStatusLabel, isActiveStatus } from './account-status';
+import { bookingStatusLabel, isActiveStatus, refundStatusLabel } from './account-status';
 
 /**
  * Подписи статусов: `awaitingPayment` отличает «ждёт оплаты» от «ждёт подтверждения салона».
@@ -36,5 +36,23 @@ describe('isActiveStatus', () => {
     expect(isActiveStatus('cancelled')).toBe(false);
     expect(isActiveStatus('completed')).toBe(false);
     expect(isActiveStatus('no_show')).toBe(false);
+  });
+});
+
+describe('refundStatusLabel', () => {
+  it('возврат в пути: тот же срок, что в письме и на странице оплаты', () => {
+    expect(refundStatusLabel('pending')).toBe('Возврат на карту — до 3 рабочих дней.');
+  });
+
+  it('деньги вернулись', () => {
+    expect(refundStatusLabel('succeeded')).toBe('Деньги за запись возвращены.');
+  });
+
+  it('возврат не удался: клиенту есть куда позвонить', () => {
+    expect(refundStatusLabel('failed')).toBe('Возврат не удался — позвоните в салон.');
+  });
+
+  it('новый статус от API не роняет рендер', () => {
+    expect(refundStatusLabel('processing' as RefundClientStatus)).toBe('');
   });
 });
