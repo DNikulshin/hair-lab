@@ -124,7 +124,10 @@ export function AdminAppointmentRow({
                 {...control}
                 name="cancelReason"
                 rows={2}
-                required
+                // Без `required`: нативная подсказка браузера зависит от локали и гасит отправку
+                // до `onSubmit`, поэтому своё сообщение ("Укажите причину отмены: её увидит клиент")
+                // не показывалось (#259). Проверка живёт в `submitCancel`.
+                aria-required="true"
                 maxLength={CANCEL_REASON_MAX}
                 value={cancelReason}
                 onChange={(event) => setCancelReason(event.target.value)}
