@@ -294,20 +294,36 @@ describe('summaryItems: источник пунктов «Что сделано�
     assert.deepEqual(summaryItems(dir, names), ['сделано 1', 'сделано 2']);
   });
 
-  test('без явного раздела — первый раздел после «Файлы»', () => {
+  test('«Проверки» сразу после «Файлы» — не источник «Что сделано» (#267)', () => {
     const dir = cycleDir({
       'code-report.1.md': [
         '# Отчёт',
         '## Файлы',
         '- `scripts/a.mjs`',
-        '## Что в документе',
-        '- пункт из раздела после «Файлы»',
+        '## Проверки',
+        '- `pnpm test:scripts` — 723 passed',
+        '- `pnpm lint` — зелёный',
         '## Расхождения с планом',
         '- расхождение',
       ].join('\n'),
     });
 
-    assert.deepEqual(summaryItems(dir, names), ['пункт из раздела после «Файлы»']);
+    assert.deepEqual(summaryItems(dir, names), []);
+  });
+
+  test('«Не проверено» и «Вывод проверок» после «Файлы» — тоже не источник', () => {
+    for (const heading of ['Не проверено', 'Вывод проверок (запускал супервизор)', 'Follow-ups']) {
+      const dir = cycleDir({
+        'code-report.1.md': [
+          '## Изменённые файлы',
+          '- `a.mjs`',
+          `## ${heading}`,
+          '- чужой пункт',
+        ].join('\n'),
+      });
+
+      assert.deepEqual(summaryItems(dir, names), [], heading);
+    }
   });
 
   test('нет подходящего раздела и нет «Файлы» — пустой список', () => {
