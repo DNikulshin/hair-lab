@@ -43,6 +43,11 @@ jobs:
       any: ${{ steps.detect.outputs.any }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Нужна история: дифф считается от `github.event.before`, а при глубине 1 этого
+          # объекта в клоне нет — классификация падала в «собираем всё» и стенд деплоился
+          # на любой push, включая docs-only (issue #295). Как в `ci.yml` и `release.yml`.
+          fetch-depth: 0
 
       - name: Определить, что изменилось
         id: detect
@@ -73,7 +78,22 @@ jobs:
           install -m 700 -d ~/.ssh
           printf '%s\n' "$SSH_KEY" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
-          ssh-keyscan -T 10 -p "$STAGING_PORT" -H "$STAGING_HOST" >> ~/.ssh/known_hosts
+          # Хост за домашним NAT: один неудачный коннект не должен ронять деплой (issue #295).
+          # Ключи пишем в known_hosts только после успешной попытки — без мусора от обрывов.
+          keys="$(mktemp)"
+          for attempt in 1 2 3; do
+            if ssh-keyscan -T 10 -p "$STAGING_PORT" -H "$STAGING_HOST" > "$keys" && [ -s "$keys" ]; then
+              cat "$keys" >> ~/.ssh/known_hosts
+              break
+            fi
+            if [ "$attempt" = 3 ]; then
+              echo "ssh-keyscan: $STAGING_HOST:$STAGING_PORT недоступен после 3 попыток" >&2
+              exit 1
+            fi
+            echo "ssh-keyscan: попытка $attempt не удалась, повтор через 5 с" >&2
+            sleep 5
+          done
+          rm -f "$keys"
 
       - name: Собрать и перезапустить staging
         env:
