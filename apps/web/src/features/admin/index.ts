@@ -1,7 +1,9 @@
 /**
  * Публичный API фичи админки.
  *
- * Страница `app/admin` рендерит `AdminScreen`; запросы (`api/`) и чистые помощники
- * (`model/`) остаются внутренними — снаружи нужен только экран.
+ * Страницы `app/admin` и `app/admin/refunds` рендерят `AdminScreen` и `RefundsScreen`;
+ * запросы (`api/`) и чистые помощники (`model/`) остаются внутренними — снаружи нужны
+ * только экраны.
  */
 export { AdminScreen, type AdminScreenProps } from './ui/admin-screen';
+export { RefundsScreen, type RefundsScreenProps } from './ui/refunds-screen';
