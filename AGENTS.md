@@ -35,6 +35,7 @@
 | Линтер                                                      | `pnpm lint`                                               |
 | Форматирование (проверка / автофикс)                        | `pnpm format:check` / `pnpm format`                       |
 | Workflow GitHub Actions                                     | `pnpm lint:workflows`                                     |
+| Dockerfile и compose (hadolint, `docker compose config`)    | `pnpm lint:docker`                                        |
 | Границы слоёв и пакетов                                     | `pnpm check:arch`                                         |
 | Harness агентов и моделей                                   | `pnpm check:harness`                                      |
 | Unit-тесты                                                  | `pnpm test`                                               |
@@ -45,7 +46,8 @@
 | Запуск в dev                                                | `pnpm dev`                                                |
 
 Порядок проверки после правок: `contracts build` → `format:check` → `typecheck` → `lint` +
-`check:arch` + `check:harness` → `lint:workflows` → затронутые тесты.
+`check:arch` + `check:harness` → `lint:workflows` + `lint:docker` (если тронуты workflow,
+Dockerfile или compose) → затронутые тесты.
 Проверку, которую нельзя выполнить (нет БД, окружения), помечай «не проверено» и называй причину.
 Не заявляй «проверено» без фактического запуска.
 
@@ -53,9 +55,10 @@
 
 Хук `.githooks/pre-commit` запускает `scripts/precommit.mjs` (`pnpm precommit`) по staged-файлам:
 prettier `--write`, eslint `--fix` (исправления возвращаются в индекс), `pnpm check:arch`, если тронуты
-`apps/*/src` или `packages/*/src`, `pnpm check:harness`, если тронут `.pi/**`, и `pnpm lint:workflows`
+`apps/*/src` или `packages/*/src`, `pnpm check:harness`, если тронут `.pi/**`, `pnpm lint:workflows`
 (`actionlint`), если тронуты
-`.github/workflows/*.yml`. Первым делом хук проверяет ветку: коммит в `main`/`master` отклоняется
+`.github/workflows/*.yml`, и `pnpm lint:docker` (`hadolint` + `docker compose config`), если тронуты
+Dockerfile или compose-файлы. Первым делом хук проверяет ветку: коммит в `main`/`master` отклоняется
 с подсказкой создать ветку по задаче (`scripts/lib/git-guard.mjs`) — правило «коммитить только
 в рабочую ветку» проверяется механизмом, а не памятью.
 Полный `typecheck` и тесты остаются в CI: на каждый коммит это слишком

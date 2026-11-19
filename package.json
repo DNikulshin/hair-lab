@@ -30,7 +30,8 @@
     "precommit": "node scripts/precommit.mjs",
     "rag:sync": "node scripts/rag-sync.mjs",
     "git:hygiene": "node scripts/git-hygiene.mjs",
-    "lint:workflows": "node scripts/lint-workflows.mjs"
+    "lint:workflows": "node scripts/lint-workflows.mjs",
+    "lint:docker": "node scripts/lint-docker.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
