@@ -6,6 +6,7 @@ import {
   type ZodTypeProvider,
 } from 'fastify-type-provider-zod';
 import { adminAppointmentsRoutes } from '../features/admin-appointments';
+import { adminRefundsRoutes } from '../features/admin-refunds';
 import {
   authRoutes,
   createMagicLinkTemplate,
@@ -157,6 +158,8 @@ export async function buildServer(options: BuildServerOptions = {}) {
   await app.register(staffAuthRoutes);
   // Админка записей: список дня и переходы статусов, все маршруты — только для сотрудника.
   await app.register(adminAppointmentsRoutes);
+  // Обзор возвратов: чтение, обе роли админки (#298, матрица #252).
+  await app.register(adminRefundsRoutes);
 
   return app;
 }

@@ -719,10 +719,29 @@ export async function listPendingRefunds(
 export const REFUNDS_NEEDING_ATTENTION_LIMIT = 50;
 
 /**
- * Строка обзора «возвраты, требующие внимания»: только id, статусы и копейки.
+ * Опции обзора возвратов: кап и границы периода.
+ *
+ * Период считается по `payments.created_at` (момент платежа), а не по дате записи: возврат
+ * относится к деньгам, а не к визиту. Интервал полуоткрытый — `[createdFrom, createdTo)`:
+ * так границы календарных дней в TZ салона не пересекаются и не теряют строку на стыке.
+ */
+export interface RefundListOptions {
+  /** Сколько строк вернуть. По умолчанию — `REFUNDS_NEEDING_ATTENTION_LIMIT`. */
+  limit?: number;
+  /** Нижняя граница периода включительно (начало дня `from` в TZ салона). */
+  createdFrom?: Date;
+  /** Верхняя граница периода не включительно (начало следующего за `to` дня в TZ салона). */
+  createdTo?: Date;
+}
+
+/**
+ * Строка обзора возвратов: только id, статусы и копейки.
  *
  * `yookassa_payment_id` — id провайдера (не ПДн): без него ручной разбор в личном кабинете
  * ЮKassa невозможен. Ни телефона, ни почты, ни имени клиента здесь нет и не будет.
+ *
+ * Тип общий для обоих списков обзора (`listRefundsNeedingAttention` и `listCompletedRefunds`):
+ * поля те же, отличается только отбор.
  */
 export interface RefundNeedingAttention {
   paymentId: string;
@@ -736,35 +755,45 @@ export interface RefundNeedingAttention {
   createdAt: Date;
 }
 
+/** Фильтр периода по `payments.created_at`; без границ периода — пустой объект. */
+function refundPeriodWhere(options: RefundListOptions): {
+  createdAt?: { gte?: Date; lt?: Date };
+} {
+  const range: { gte?: Date; lt?: Date } = {};
+  if (options.createdFrom !== undefined) range.gte = options.createdFrom;
+  if (options.createdTo !== undefined) range.lt = options.createdTo;
+  return range.gte === undefined && range.lt === undefined ? {} : { createdAt: range };
+}
+
+/** Поля строки обзора: без ПДн, только id платежа/записи, статусы и копейки. */
+const refundOverviewSelect = {
+  id: true,
+  appointmentId: true,
+  status: true,
+  amountKopecks: true,
+  refundRequired: true,
+  refundId: true,
+  refundStatus: true,
+  yookassaPaymentId: true,
+  createdAt: true,
+} as const;
+
 /**
- * «Возвраты, требующие внимания» одним запросом: долг по флагу или отказ провайдера.
+ * Одна выборка обзора возвратов для обоих списков: отличается только `where`.
  *
- * Отбор — `refund_required = true` (возврат ещё не выполнен) ИЛИ `refund_status = 'canceled'`
- * (провайдер отказал, повторы могут длиться бесконечно, а разбирать надо руками). Старые —
- * первыми, как в свипере: никто не ждёт вечно, пока новые забирают лимит.
- *
- * Маршрута у обзора пока нет (админки и матрицы разрешений тоже) — это функция сервиса,
- * готовая к подключению. ПДн не читаются: только id платёжа/записи, статусы и копейки.
+ * Старые — первыми (как в свипере), затем `id`: одинаковое время платежа не даёт плавающего
+ * порядка, иначе строки «прыгали» бы между запросами и лимит отрезал бы то одну, то другую.
  */
-export async function listRefundsNeedingAttention(
+async function findRefundOverview(
   db: Db,
-  limit: number = REFUNDS_NEEDING_ATTENTION_LIMIT,
+  where: Prisma.PaymentWhereInput,
+  options: RefundListOptions,
 ): Promise<RefundNeedingAttention[]> {
   const rows = await db.payment.findMany({
-    where: { OR: [{ refundRequired: true }, { refundStatus: 'canceled' }] },
-    select: {
-      id: true,
-      appointmentId: true,
-      status: true,
-      amountKopecks: true,
-      refundRequired: true,
-      refundId: true,
-      refundStatus: true,
-      yookassaPaymentId: true,
-      createdAt: true,
-    },
-    orderBy: { createdAt: 'asc' },
-    take: limit,
+    where: { ...where, ...refundPeriodWhere(options) },
+    select: refundOverviewSelect,
+    orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+    take: options.limit ?? REFUNDS_NEEDING_ATTENTION_LIMIT,
   });
 
   return rows.map((row) => ({
@@ -778,6 +807,37 @@ export async function listRefundsNeedingAttention(
     yookassaPaymentId: row.yookassaPaymentId,
     createdAt: row.createdAt,
   }));
+}
+
+/**
+ * «Возвраты, требующие внимания»: деньги должны вернуться (`refund_required = true`),
+ * включая неудачную попытку (тогда `refund_status = 'canceled'` → статус клиента `failed`).
+ *
+ * Почему не OR с `refund_status = 'canceled'`, как было в заготовке: строка без флага
+ * (кто-то снял его руками) не имеет клиентского статуса — `clientRefundStatus` даёт `null`,
+ * а свипер такую строку тоже не трогает (`listPendingRefunds` идёт по флагу). В обзоре она
+ * была бы строкой без статуса, то есть мусором; разбор такой аномалии — отдельная задача.
+ *
+ * Показываем кап (`REFUNDS_NEEDING_ATTENTION_LIMIT`): обзор для человека, а не выгрузка;
+ * остальное видно после разбора верхних строк. ПДн не читаются.
+ */
+export async function listRefundsNeedingAttention(
+  db: Db,
+  options: RefundListOptions = {},
+): Promise<RefundNeedingAttention[]> {
+  return findRefundOverview(db, { refundRequired: true }, options);
+}
+
+/**
+ * «Возвращённые»: возврат зафиксирован (`payments.status = 'refunded'`, флаг уже снят
+ * в `markRefunded`), статус клиента — `succeeded`. Тот же обзор, что и у незавершённых:
+ * старые первыми, с капом и периодом по `created_at`.
+ */
+export async function listCompletedRefunds(
+  db: Db,
+  options: RefundListOptions = {},
+): Promise<RefundNeedingAttention[]> {
+  return findRefundOverview(db, { status: 'refunded' }, options);
 }
 
 /** Платёж записи для страницы статуса оплаты. `null` — платежа нет (оплата не создавалась). */
