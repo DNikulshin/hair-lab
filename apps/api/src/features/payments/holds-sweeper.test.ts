@@ -320,9 +320,14 @@ describe('createHoldsSweeper', () => {
     const expired = state.appointments.find((row) => row.id === EXPIRED_ID);
     expect(expired?.status).toBe('cancelled');
     expect(expired?.cancelReason).toBe(PAYMENT_EXPIRED_REASON);
+    // Дедлайн снимается тем же UPDATE: отменённая запись оплаты больше не ждёт.
+    expect(expired?.paymentDeadlineAt).toBeNull();
 
     // Будущий дедлайн и подтверждённую запись не трогаем.
     expect(state.appointments.find((row) => row.id === FUTURE_ID)?.status).toBe('pending');
+    expect(state.appointments.find((row) => row.id === FUTURE_ID)?.paymentDeadlineAt).toEqual(
+      FUTURE_DEADLINE,
+    );
     expect(state.appointments.find((row) => row.id === PAID_ID)?.status).toBe('confirmed');
 
     expect(state.payments.find((row) => row.id === 'payment-1')?.status).toBe('canceled');

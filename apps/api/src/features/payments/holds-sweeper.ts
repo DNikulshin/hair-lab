@@ -17,7 +17,8 @@ import {
  *
  * Запись с обязательной оплатой создаётся `pending` с `payment_deadline_at = now + 15 мин`.
  * Если деньги не пришли, по истечении срока запись отменяется (`cancelled`,
- * причина `payment_expired`), а платёж переводится в `canceled`. Слот освобождается сам:
+ * причина `payment_expired`, `payment_deadline_at` снимается), а платёж переводится
+ * в `canceled`. Слот освобождается сам:
  * EXCLUDE-констрейнт занятости смотрит только на записи со статусом `<> 'cancelled'`.
  *
  * Правила (issue #8, #104):
@@ -273,7 +274,9 @@ async function expireHolds(
   const canceled = await db.$transaction(async (tx) => {
     const expired = await tx.appointment.updateManyAndReturn({
       where: { id: { in: cancelIds }, status: 'pending', paymentDeadlineAt: { lte: now } },
-      data: { status: 'cancelled', cancelReason: PAYMENT_EXPIRED_REASON },
+      // Дедлайн снимается в том же UPDATE: у отменённой записи оплаты больше не ждут,
+      // иначе в строке осталось бы значение, которое всеми читателями значит «ждёт оплаты».
+      data: { status: 'cancelled', cancelReason: PAYMENT_EXPIRED_REASON, paymentDeadlineAt: null },
       select: { id: true },
     });
 

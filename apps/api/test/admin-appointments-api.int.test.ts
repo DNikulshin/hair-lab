@@ -117,6 +117,8 @@ async function setupCatalog(): Promise<{ masterId: string; serviceId: string }> 
 interface AppointmentOptions {
   status?: BookingStatus;
   clientEmail?: string | null;
+  /** Дедлайн холда: не `null` только у записи, которая ждёт оплаты. */
+  paymentDeadlineAt?: Date | null;
 }
 
 /** Запись в обход HTTP: время и статус нужны тесту, а не сценарию записи. */
@@ -138,6 +140,9 @@ async function createAppointment(
       status: options.status ?? 'pending',
       priceKopecks: 350_000,
       durationMin: 60,
+      ...(options.paymentDeadlineAt === undefined
+        ? {}
+        : { paymentDeadlineAt: options.paymentDeadlineAt }),
     },
     select: { id: true },
   });
@@ -148,7 +153,12 @@ async function createAppointment(
 function readAppointment(id: string) {
   return db.appointment.findFirstOrThrow({
     where: { id },
-    select: { status: true, cancelReason: true, updatedAt: true },
+    select: {
+      status: true,
+      cancelReason: true,
+      updatedAt: true,
+      paymentDeadlineAt: true,
+    },
   });
 }
 
@@ -369,11 +379,12 @@ describe('переходы статусов записи', () => {
 });
 
 describe('POST /admin/appointments/:id/cancel', () => {
-  it('пишет причину салона, снимает подтверждение и ставит письмо об отмене', async () => {
+  it('пишет причину салона, снимает дедлайн холда, подтверждение и ставит письмо об отмене', async () => {
     const cookie = await loginAsStaff('admin');
     const { masterId, serviceId } = await setupCatalog();
     const id = await createAppointment(masterId, serviceId, at(salonDatePlus(2), 14 * 60), {
       status: 'confirmed',
+      paymentDeadlineAt: new Date(Date.now() + 10 * MINUTE_MS),
     });
     // Подтверждение ещё не отправлено: оно должно быть подавлено отменой.
     await db.outboxMessage.create({
@@ -395,6 +406,8 @@ describe('POST /admin/appointments/:id/cancel', () => {
     const stored = await readAppointment(id);
     expect(stored.status).toBe('cancelled');
     expect(stored.cancelReason).toBe('cancelled_by_salon: мастер заболел');
+    // Отменённая запись оплаты не ждёт: дедлайн холда снят в той же транзакции (#253).
+    expect(stored.paymentDeadlineAt).toBeNull();
 
     const outbox = await readOutbox(id);
     expect(outbox).toEqual([
@@ -428,6 +441,38 @@ describe('POST /admin/appointments/:id/cancel', () => {
         where: { appointmentId: id, type: BOOKING_CANCELLATION_TYPE },
       }),
     ).toBe(1);
+  });
+
+  it('голое `cancelled_by_salon` в БД: повтор отмены — 200, причина и письма не тронуты', async () => {
+    // Так выглядит строка после ручной правки или до нормализации данных (#253).
+    const cookie = await loginAsStaff('admin');
+    const { masterId, serviceId } = await setupCatalog();
+    const id = await createAppointment(masterId, serviceId, at(salonDatePlus(2), 18 * 60), {
+      status: 'cancelled',
+    });
+    const bare = await db.appointment.update({
+      where: { id },
+      data: { cancelReason: 'cancelled_by_salon' },
+      select: { cancelReason: true, updatedAt: true },
+    });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: `/admin/appointments/${id}/cancel`,
+      headers: { ...headers(), cookie },
+      payload: { reason: 'мастер заболел' },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(adminAppointmentResponseSchema.parse(response.json()).booking.cancelReason).toBe(
+      'cancelled_by_salon',
+    );
+    // Повтор ничего не переписал и не поставил: причина без «: причина» остаётся как есть,
+    // нормализовать её должна миграция, а не чужой вызов отмены.
+    const after = await readAppointment(id);
+    expect(after.cancelReason).toBe(bare.cancelReason);
+    expect(after.updatedAt).toEqual(bare.updatedAt);
+    expect(await readOutbox(id)).toEqual([]);
   });
 
   it('отмену клиента не перезаписывает: 409 и прежняя причина', async () => {

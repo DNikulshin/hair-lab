@@ -422,6 +422,11 @@ describe('DELETE /account/bookings/:id', () => {
     expect(body.status).toBe('cancelled');
     // Оплата больше не ждётся: кабинет не должен предлагать оплатить отменённую запись.
     expect(body.awaitingPayment).toBe(false);
+
+    // Дедлайн снят в БД, а не только скрыт в DTO: отменённая запись оплаты не ждёт (#253).
+    const stored = await db.appointment.findUniqueOrThrow({ where: { id: booking.id } });
+    expect(stored.status).toBe('cancelled');
+    expect(stored.paymentDeadlineAt).toBeNull();
   });
 
   it('отмена в пределах двух часов — 409, запись остаётся активной', async () => {
@@ -457,7 +462,7 @@ describe('DELETE /account/bookings/:id', () => {
     }
   });
 
-  it('повторная отмена идемпотентна: 200, причина и updatedAt не перезаписываются', async () => {
+  it('повторная отмена обеих форм причины идемпотентна: 200, причина и updatedAt не перезаписываются', async () => {
     const { masterId, serviceId, clientId, cookie } = await setup();
     const booking = await addBooking(masterId, serviceId, fromNow(5 * DAY_MS), clientId);
 
