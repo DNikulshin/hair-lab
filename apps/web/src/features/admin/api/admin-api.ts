@@ -1,10 +1,13 @@
 import {
   adminAppointmentResponseSchema,
   adminAppointmentsResponseSchema,
+  adminRefundsResponseSchema,
   okResponseSchema,
   staffAuthResponseSchema,
   type AdminAppointment,
   type AdminAppointmentsResponse,
+  type AdminRefundsResponse,
+  type AdminRefundsScope,
   type StaffAccount,
   type StaffLoginRequest,
 } from '@hair-lab/contracts';
@@ -102,6 +105,30 @@ export async function fetchAdminAppointments(
   if (!result.ok) return result;
 
   const parsed = adminAppointmentsResponseSchema.safeParse(result.data);
+  if (!parsed.success) return { ok: false, failure: { kind: 'network' } };
+  return { ok: true, data: parsed.data };
+}
+
+/**
+ * Обзор возвратов: `scope` — список (требуют внимания или возвращённые), `from`/`to` —
+ * необязательный период в календарных днях TZ салона.
+ *
+ * Невалидный payload — «сервис недоступен» (`network`), а не пустой список: пустой обзор
+ * и сбой сервиса выглядят по-разному и требуют разных действий сотрудника.
+ */
+export async function fetchAdminRefunds(query: {
+  scope: AdminRefundsScope;
+  from?: string;
+  to?: string;
+}): Promise<AdminResult<AdminRefundsResponse>> {
+  const search = new URLSearchParams({ scope: query.scope });
+  if (query.from !== undefined) search.set('from', query.from);
+  if (query.to !== undefined) search.set('to', query.to);
+
+  const result = await send(`/api/admin/refunds?${search.toString()}`, {});
+  if (!result.ok) return result;
+
+  const parsed = adminRefundsResponseSchema.safeParse(result.data);
   if (!parsed.success) return { ok: false, failure: { kind: 'network' } };
   return { ok: true, data: parsed.data };
 }

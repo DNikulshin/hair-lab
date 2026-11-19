@@ -1,11 +1,15 @@
 import type { Metadata } from 'next';
 import { AdminScreen } from '@/features/admin';
 import { siteConfig } from '@/shared/config/site';
+import { ButtonLink } from '@/shared/ui/button';
 import { Card } from '@/shared/ui/card';
 import { Container } from '@/shared/ui/container';
 
 /**
  * Админка салона: вход сотрудника, записи на день и действия над ними.
+ *
+ * Ссылка «Возвраты» ведёт на отдельный экран обзора возвратов (#298); сессия сотрудника там
+ * проверяется так же, повторный вход не нужен.
  *
  * Страница тонкая: сессию сотрудника проверяет клиентский компонент (`GET /api/staff/me`),
  * потому что серверного механизма сессий в web нет, а паттерн клиентского фетча через
@@ -33,6 +37,11 @@ export default function AdminPage() {
             <p className="text-sm text-muted">
               Рабочее место сотрудника: записи на день, подтверждение, завершение и отмена визита.
             </p>
+          </div>
+          <div className="flex flex-wrap gap-2 border-b border-border pb-5">
+            <ButtonLink href="/admin/refunds" variant="ghost" size="sm">
+              Возвраты
+            </ButtonLink>
           </div>
           <AdminScreen timeZone={siteConfig.timeZone} />
         </Card>
