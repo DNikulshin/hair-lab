@@ -221,7 +221,8 @@ function redacted(value) {
 
 /**
  * Ссылка находки ревью: `<file>:<line>` — единственная форма свидетельства, которая
- * есть в схеме ревью (Приложение A/B).
+ * есть в схеме ревью (Приложение A/B). Диапазоны бывают только в `evaluation.criteria[].
+ * evidence`, поэтому здесь хвост один.
  * @param {Record<string, any>} finding
  * @returns {string|null}
  */
@@ -247,13 +248,22 @@ function isEnvSegment(segment) {
 /**
  * Ведёт ли ссылка в `.env*`. Проверяется каждый сегмент пути, поэтому ловятся и
  * `.env`, `.env.local`, `.env.production`, и `./.env`, и вложенные `apps/api/.env.local`.
- * Номер строки отрезается: `path:line` → `path`.
+ * Номер строки или диапазон отрезается: `path:line` / `path:start-end` → `path`.
  * @param {unknown} ref
  * @returns {boolean}
  */
 function isForbiddenEnvRef(ref) {
   if (typeof ref !== 'string') return false;
-  return ref.trim().replace(/:\d+$/, '').split('/').some(isEnvSegment);
+  return stripLineSuffix(ref).split('/').some(isEnvSegment);
+}
+
+/**
+ * Отрезает хвост `:<строка>` или `:<начало>-<конец>` (#275): путь остаётся путём.
+ * @param {string} ref
+ * @returns {string}
+ */
+function stripLineSuffix(ref) {
+  return ref.trim().replace(/:\d+(?:-\d+)?$/, '');
 }
 
 /**
@@ -271,8 +281,9 @@ function safeResolveRef(ref, ctx) {
     ok: false,
     ref,
     kind: 'path',
-    value: ref.trim().replace(/:\d+$/, ''),
+    value: stripLineSuffix(ref),
     line: null,
+    endLine: null,
     file: null,
     error: 'файл .env* не читается (AGENTS.md)',
   };

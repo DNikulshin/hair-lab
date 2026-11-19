@@ -1,11 +1,14 @@
 /**
  * Ссылки на свидетельства цикла (docs/orchestrator-core.md §5.2).
  *
- * Формы: `path:line` (файл репозитория и номер строки), `gate:<id>` (гейт из
- * `gates.<n>.json`), `qa:<id>` (шаг из `qa-web.json`). Ссылки приходят из вывода
+ * Формы: `path:line` (файл репозитория и номер строки), `path:start-end` (диапазон строк
+ * того же файла, обе границы включительно), `gate:<id>` (гейт из `gates.<n>.json`),
+ * `qa:<id>` (шаг из `qa-web.json`). Ссылки приходят из вывода
  * агентов, поэтому разрешение защитное: абсолютные пути, `..`, `.pi/artifacts/`,
  * `node_modules/` и `.env*` (кроме `.env.example`) запрещены, файл должен
- * существовать, строка — попадать в файл. Запрет `.env*` живёт здесь, а не в
+ * существовать, строка (обе границы диапазона) — попадать в файл. Диапазон разрешается
+ * по началу: счётчики §5.6 и понижение невалидных блокеров считают его одной ссылкой,
+ * иначе правка одной формы записи меняла бы вердикты. Запрет `.env*` живёт здесь, а не в
  * потребителях: `resolveRef` открывает файл, чтобы проверить номер строки, значит
  * проверка обязана быть до чтения и в одном месте для всех вызывающих (AGENTS.md,
  * «Персональные данные и безопасность»).
@@ -20,8 +23,11 @@ import { isAbsolute, join, relative, sep } from 'node:path';
 const GATE_REF = /^gate:([A-Za-z0-9_-]+)$/;
 /** `qa:<id>`: id шагов QA — `s1`, `s2`, … (D8). */
 const QA_REF = /^qa:([A-Za-z0-9_-]+)$/;
-/** `path:line`: путь без двоеточия в конце, номер строки — цифры. */
-const PATH_REF = /^(.+):(\d+)$/;
+/**
+ * `path:line` и `path:start-end`: путь без двоеточия в конце, номер строки — цифры,
+ * необязательный диапазон — `start-end` (обе границы включительно).
+ */
+const PATH_REF = /^(.+):(\d+)(?:-(\d+))?$/;
 
 /** Привод Windows-пути: `C:\repo` абсолютен, хотя posix `isAbsolute` этого не видит. */
 const WINDOWS_ABSOLUTE = /^[A-Za-z]:/;
@@ -45,7 +51,8 @@ function isEnvSegment(segment) {
  * @typedef {object} ParsedRef
  * @property {'path'|'gate'|'qa'} kind вид ссылки
  * @property {string} value путь (для `path`) или идентификатор (`gate`, `qa`)
- * @property {number|null} line номер строки; у `gate:`/`qa:` — `null`
+ * @property {number|null} line номер строки (у диапазона — начало); у `gate:`/`qa:` — `null`
+ * @property {number|null} endLine конец диапазона; `null` для одиночной строки и `gate:`/`qa:`
  */
 
 /**
@@ -61,7 +68,8 @@ function isEnvSegment(segment) {
  * @property {string} ref исходная строка
  * @property {'path'|'gate'|'qa'|null} kind вид ссылки (`null`, если форма не распознана)
  * @property {string|null} value нормализованный путь или идентификатор
- * @property {number|null} line номер строки
+ * @property {number|null} line номер строки (у диапазона — начало)
+ * @property {number|null} endLine конец диапазона (`null`, если ссылка не диапазон)
  * @property {string|null} file абсолютный путь к файлу (только для `path`)
  * @property {string|null} error причина отказа (только при `ok: false`)
  */
@@ -80,16 +88,23 @@ export function parseRef(ref) {
   const value = ref.trim();
 
   const gate = GATE_REF.exec(value);
-  if (gate) return { kind: 'gate', value: gate[1], line: null };
+  if (gate) return { kind: 'gate', value: gate[1], line: null, endLine: null };
 
   const qa = QA_REF.exec(value);
-  if (qa) return { kind: 'qa', value: qa[1], line: null };
+  if (qa) return { kind: 'qa', value: qa[1], line: null, endLine: null };
 
   const path = PATH_REF.exec(value);
-  if (path) return { kind: 'path', value: path[1], line: Number(path[2]) };
+  if (path) {
+    return {
+      kind: 'path',
+      value: path[1],
+      line: Number(path[2]),
+      endLine: path[3] === undefined ? null : Number(path[3]),
+    };
+  }
 
   throw new Error(
-    `ссылка: не распознана форма (ожидается path:line, gate:<id>, qa:<id>): ${value}`,
+    `ссылка: не распознана форма (ожидается path:line, path:start-end, gate:<id>, qa:<id>): ${value}`,
   );
 }
 
@@ -152,6 +167,7 @@ function emptyResolution(ref) {
     kind: null,
     value: null,
     line: null,
+    endLine: null,
     file: null,
     error: null,
   };
@@ -171,6 +187,7 @@ function fail(base, parsed, error) {
     kind: parsed ? parsed.kind : null,
     value: parsed ? parsed.value : null,
     line: parsed ? parsed.line : null,
+    endLine: parsed ? parsed.endLine : null,
     error,
   };
 }
@@ -179,7 +196,7 @@ function fail(base, parsed, error) {
  * Разрешает ссылку в контексте цикла. Отсутствие `gates`/`qa` в контексте (`null`)
  * означает, что такие ссылки разрешить нельзя: молча считать их верными нельзя,
  * на этом строится счётчик `unresolved_refs` (§5.6).
- * @param {unknown} ref строка `path:line`, `gate:<id>` или `qa:<id>`
+ * @param {unknown} ref строка `path:line`, `path:start-end`, `gate:<id>` или `qa:<id>`
  * @param {RefContext} ctx
  * @returns {RefResolution}
  */
@@ -211,7 +228,8 @@ function isInside(parent, child) {
 }
 
 /**
- * `path:line`: путь внутри репозитория и существующая строка файла.
+ * `path:line` / `path:start-end`: путь внутри репозитория и существующая строка (обе
+ * границы диапазона в пределах файла, начало не больше конца).
  * @param {RefResolution} base
  * @param {ParsedRef} parsed
  * @param {RefContext} ctx
@@ -277,7 +295,25 @@ function resolvePath(base, parsed, ctx) {
     return fail(base, parsed, `строка ${line} за концом файла ${relativePath} (строк: ${lines})`);
   }
 
-  return { ...base, ok: true, kind: 'path', value: relativePath, line, file };
+  const endLine = parsed.endLine ?? null;
+  if (endLine !== null) {
+    if (endLine < line) {
+      return fail(
+        base,
+        parsed,
+        `диапазон ${line}-${endLine}: конец меньше начала (${relativePath})`,
+      );
+    }
+    if (endLine > lines) {
+      return fail(
+        base,
+        parsed,
+        `строка ${endLine} за концом файла ${relativePath} (строк: ${lines})`,
+      );
+    }
+  }
+
+  return { ...base, ok: true, kind: 'path', value: relativePath, line, endLine, file };
 }
 
 /**

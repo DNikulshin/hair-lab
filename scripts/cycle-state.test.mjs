@@ -118,6 +118,10 @@ function gitRun(cwd, args) {
 /**
  * Временный git-репозиторий с одним коммитом в `main`. `.pi/artifacts/` в `.gitignore` —
  * как в рабочем репозитории. Идентичность фиктивная: настоящие имя и адрес не нужны (§4, ПДн).
+ *
+ * После коммита тест переключается на ветку цикла (`stateDoc.branch`): `init` и
+ * `advance --to PR` сверяют `HEAD` с веткой из `state.json` (#274), а база диффа — по-прежнему
+ * `main` (sha тот же, пока в репозитории один коммит).
  * @param {import('node:test').TestContext} t
  * @returns {{ root: string, baseSha: string }}
  */
@@ -140,7 +144,10 @@ function makeRepo(t) {
   gitRun(root, ['add', '.gitignore', 'tracked.txt']);
   gitRun(root, ['commit', '--quiet', '-m', 'база']);
 
-  return { root, baseSha: gitRun(root, ['rev-parse', 'HEAD']) };
+  const baseSha = gitRun(root, ['rev-parse', 'HEAD']);
+  gitRun(root, ['switch', '--quiet', '-c', stateDoc(baseSha).branch]);
+
+  return { root, baseSha };
 }
 
 /**
@@ -496,6 +503,49 @@ describe('cycle-state: init', () => {
     assert.equal(result.status, 2);
     assert.equal(existsSync(join(root, '.pi', 'artifacts', CYCLE_NAME, 'state.json')), false);
   });
+
+  test('чужая текущая ветка: код 3, каталог не создаётся (#274)', (t) => {
+    const { root } = makeRepo(t);
+    gitRun(root, ['switch', '--quiet', 'main']);
+
+    const result = runCli(root, [
+      'init',
+      '--issue',
+      '157',
+      '--slug',
+      'cycle-state',
+      '--branch',
+      'chore/157-cycle-state',
+      '--now',
+      NOW,
+    ]);
+
+    assert.equal(result.status, 3);
+    assert.match(result.stderr, /HEAD на «main», а ветка цикла — «chore\/157-cycle-state»/);
+    assert.match(result.stderr, /git switch chore\/157-cycle-state/);
+    assert.equal(existsSync(join(root, '.pi', 'artifacts', CYCLE_NAME, 'state.json')), false);
+  });
+
+  test('несуществующая ветка: код 3 и готовая команда создания (#274)', (t) => {
+    const { root } = makeRepo(t);
+
+    const result = runCli(root, [
+      'init',
+      '--issue',
+      '157',
+      '--slug',
+      'cycle-state',
+      '--branch',
+      'chore/157-missing',
+      '--now',
+      NOW,
+    ]);
+
+    assert.equal(result.status, 3);
+    assert.match(result.stderr, /ветки «chore\/157-missing» нет/);
+    assert.match(result.stderr, /git switch -c chore\/157-missing/);
+    assert.equal(existsSync(join(root, '.pi', 'artifacts', CYCLE_NAME, 'state.json')), false);
+  });
 });
 
 describe('cycle-state: get', () => {
@@ -681,6 +731,23 @@ describe('cycle-state: защиты переходов', () => {
       const result = runCli(root, ['advance', '--dir', dir, '--to', 'PR', '--now', LATER]);
       assert.equal(result.status, item.code, `${JSON.stringify(item.decision)}: ${result.stderr}`);
     }
+  });
+
+  test('→ PR в чужой ветке — код 3, состояние не меняется (#274)', (t) => {
+    const { root, baseSha } = makeRepo(t);
+    const dir = makeCycle(root, { state: stateDoc(baseSha, { stage: 'DECIDE' }) });
+    writeFileSync(
+      join(dir, 'decision.1.json'),
+      `${JSON.stringify(decisionDoc('PROCEED'), null, 2)}\n`,
+    );
+    const before = stateText(dir);
+    gitRun(root, ['switch', '--quiet', 'main']);
+
+    const refused = runCli(root, ['advance', '--dir', dir, '--to', 'PR', '--now', LATER]);
+
+    assert.equal(refused.status, 3);
+    assert.match(refused.stderr, /advance --to PR: HEAD на «main»/);
+    assert.equal(stateText(dir), before);
   });
 
   test('REWORK → CODE: инкремент и граница max_iterations', (t) => {
@@ -1002,6 +1069,18 @@ describe('cycle-state: apply-decision', () => {
       0,
       'незакрытых записей нет — unclosed_stages станет нулём',
     );
+  });
+
+  test('apply-decision с PROCEED в чужой ветке — код 3, состояние не меняется (#274)', (t) => {
+    const { root, dir } = decideCycle(t, decisionDoc('PROCEED'));
+    const before = stateText(dir);
+    gitRun(root, ['switch', '--quiet', 'main']);
+
+    const refused = runCli(root, ['apply-decision', '--dir', dir, '--now', LATER]);
+
+    assert.equal(refused.status, 3);
+    assert.match(refused.stderr, /apply-decision: HEAD на «main»/);
+    assert.equal(stateText(dir), before);
   });
 
   test('PROCEED и PROCEED_WITH_UNVERIFIED ведут в PR', (t) => {

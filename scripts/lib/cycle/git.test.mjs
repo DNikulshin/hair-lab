@@ -9,7 +9,9 @@ import {
   addedLines,
   addedLinesByFile,
   baseSha,
+  branchExists,
   changedFiles,
+  currentBranch,
   diffFromBase,
   intentToAddUntracked,
 } from './git.mjs';
@@ -189,6 +191,29 @@ describe('git', () => {
 
     assert.match(sha, /^[0-9a-f]{40}$/);
     assert.equal(sha, git(['rev-parse', 'HEAD'], dir).trim());
+  });
+
+  test('currentBranch отдаёт текущую ветку, branchExists — наличие локальной', (t) => {
+    const { dir } = makeRepo(t);
+
+    assert.equal(currentBranch({ cwd: dir }), 'main');
+    assert.equal(branchExists('main', { cwd: dir }), true);
+
+    git(['switch', '-c', 'chore/1-demo'], dir);
+    assert.equal(currentBranch({ cwd: dir }), 'chore/1-demo');
+    assert.equal(branchExists('chore/1-demo', { cwd: dir }), true);
+    assert.equal(branchExists('chore/1-missing', { cwd: dir }), false);
+  });
+
+  test('branchExists не падает на негодном имени и на отделённом HEAD', (t) => {
+    const { dir, sha } = makeRepo(t);
+
+    assert.equal(branchExists('', { cwd: dir }), false);
+    assert.equal(branchExists('-x', { cwd: dir }), false);
+    assert.equal(branchExists(undefined, { cwd: dir }), false);
+
+    git(['checkout', '--detach', sha], dir);
+    assert.equal(currentBranch({ cwd: dir }), 'HEAD');
   });
 
   test('addedLines оставляет только добавленные строки без префикса', () => {
