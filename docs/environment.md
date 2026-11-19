@@ -69,7 +69,7 @@ POSTGRES_PORT=55432 docker compose up -d db
 
 Схема накатывается миграциями: `pnpm --filter @hair-lab/api db:migrate:dev --name <имя>` —
 перед этим нужен сгенерированный клиент (`db:generate`). Интеграционные тесты (`pnpm test:int`)
-идут в ту же БД, что и `DATABASE_URL`.
+идут в **своей временной БД прогона** (см. ниже), а не в dev-базе.
 
 ### `DATABASE_URL` и гейты `migrations_clean`/`test_int` в `/cycle`
 
@@ -83,9 +83,18 @@ node scripts/cycle-gates.mjs --dir <каталог цикла>
 
 `migrations_clean` (`pnpm migrations:clean`, #250) создаёт на том же сервере временную базу
 `<database>_gate_<pid>_<время>`, применяет `prisma migrate deploy`, проверяет
-`prisma migrate status` и удаляет базу в `finally`. Данные dev-БД не трогаются, но роль
-`DATABASE_URL` нужна с правом `CREATEDB`; если база после сбоя осталась, её видно по имени
-`*_gate_*` в `psql` и можно удалить руками (`DROP DATABASE`).
+`prisma migrate status` и удаляет базу в `finally`.
+
+`test_int` (`pnpm test:int`, #89) устроен так же: `scripts/test-int.mjs` создаёт базу
+`<database>_test_<pid>_<время>`, накатывает на неё миграции (`prisma migrate deploy`), запускает
+`turbo run test:int` с подменённым `DATABASE_URL` и удаляет базу в `finally`. Поэтому интеграционные
+тесты видят пустую БД — как в CI, где Postgres поднимается пустым, — и не читают и не портят
+dev-данные: раньше тесты диспетчера почты забирали чужие `pending`-строки и помечали их
+`sent`/`failed` (#89), а тест списка записей дня падал на посторонних строках (#253).
+
+Обе команды берут `DATABASE_URL` как **шаблон** (сервер, логин, `?schema=…`) и требуют роль
+с правом `CREATEDB`. Если временная база после сбоя осталась, её видно по имени `*_gate_*` или
+`*_test_*` в `psql` и можно удалить руками (`DROP DATABASE`).
 
 Исходы гейтов различаются по смыслу (docs/orchestrator-core.md §5.5):
 
@@ -201,7 +210,7 @@ pnpm typecheck
 pnpm lint
 pnpm check:arch
 pnpm test
-pnpm test:int        # нужны PostgreSQL и заполненный .env
+pnpm test:int        # нужны PostgreSQL и DATABASE_URL в окружении (база прогона временная)
 pnpm format:check    # проверка форматирования
 ```
 

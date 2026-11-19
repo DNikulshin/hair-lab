@@ -15,7 +15,7 @@
     "test": "turbo run test",
     "test:scripts": "node --test \"scripts/**/*.test.mjs\"",
     "migrations:clean": "node scripts/migrations-clean.mjs",
-    "test:int": "turbo run test:int",
+    "test:int": "node scripts/test-int.mjs",
     "check:arch": "node scripts/check-arch.mjs",
     "check:harness": "node scripts/check-harness.mjs",
     "check:prod-urls": "node scripts/check-prod-urls.mjs",
