@@ -33,8 +33,17 @@ docker run --rm -p 3201:3001 hair-lab-api:local   # curl localhost:3201/health
 ## 2. CI
 
 `ci.yml` на каждый PR: `contracts build` → `typecheck` → `lint` → `check:arch` → `test` →
-`format:check`, затем сборка обоих Docker-образов (без push), а для `api` — ещё и стадии
-`migrations` того же Dockerfile. Это ловит ошибки Dockerfile до main.
+`format:check` → `lint:workflows` → `lint:docker`, затем сборка обоих Docker-образов (без push),
+а для `api` — ещё и стадии `migrations` того же Dockerfile. Это ловит ошибки Dockerfile до main.
+
+`pnpm lint:docker` (#110) — дешёвая половина той же проверки, без сборки: `hadolint` по
+`apps/*/Dockerfile*` и `docker compose config --quiet --no-interpolate` по `docker-compose.yml` и
+`docker-compose.prod.yml` (схема и структура; значения переменных не подставляются, поэтому
+секреты в проверке не участвуют). Линтер скачивается с GitHub Releases в кэш
+`~/.cache/hair-lab/hadolint/<версия>` (как `actionlint`; без Docker Hub), версия закреплена
+в `scripts/lint-docker.mjs`. Локально без `docker` проверка compose пропускается с предупреждением,
+в CI (`CI=1`) отсутствие `hadolint` или `docker compose` — отказ: гейт не должен быть зелёным
+без проверки.
 
 ## 3. Образы в GHCR
 

@@ -14,6 +14,7 @@
  * - `check:arch` — только если тронуты `apps/<app>/src` или `packages/<pkg>/src`;
  * - `check:harness` — только если тронут `.pi/**` (агенты, настройки, промпт цикла);
  * - `actionlint` — только если тронуты `.github/workflows/*.yml`;
+ * - `lint:docker` — только если тронуты `Dockerfile*` или compose-файлы;
  * - полный `typecheck` и тесты осознанно не запускаем: это делает CI, иначе коммит станет медленным.
  *
  * Хук обходится `git commit --no-verify`; правки не теряются — они уже в рабочем дереве.
@@ -28,6 +29,8 @@ const PRETTIER_FILES = /\.(?:md|mdx|json|jsonc|ya?ml|ts|tsx|mts|cts|js|jsx|mjs|c
 const ESLINT_FILES = /\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs)$/;
 const ARCH_FILES = /^(?:apps|packages)\/[^/]+\/src\//;
 const WORKFLOW_FILES = /^\.github\/workflows\/.*\.ya?ml$/;
+/** Dockerfile и compose: их проверяет `lint:docker` (hadolint + `docker compose config`). */
+const DOCKER_FILES = /^(?:apps\/[^/]+\/Dockerfile[^/]*|docker-compose[^/]*\.ya?ml)$/;
 /** Harness агентов: правка `.pi/**` может сломать H1–H6 (docs/orchestrator-core.md §5.9). */
 const HARNESS_FILES = /^\.pi\//;
 
@@ -118,6 +121,12 @@ function main() {
   if (workflows.length > 0) {
     console.log(`pre-commit: actionlint — ${workflows.length} файл(ов)`);
     run('node', ['scripts/lint-workflows.mjs', ...workflows]);
+  }
+
+  const docker = staged.filter((file) => DOCKER_FILES.test(file));
+  if (docker.length > 0) {
+    console.log(`pre-commit: lint:docker — ${docker.length} файл(ов)`);
+    run('node', ['scripts/lint-docker.mjs', ...docker]);
   }
 
   const arch = staged.filter((file) => ARCH_FILES.test(file));

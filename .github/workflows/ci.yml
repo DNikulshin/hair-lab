@@ -71,6 +71,18 @@ jobs:
       # Схемные ошибки workflow (например, недопустимое значение permissions) GitHub
       # находит только при запуске; actionlint ловит их до мержа.
       - run: pnpm lint:workflows
+
+      # Бинарник hadolint кэшируется так же, как actionlint: скрипт скачивает его
+      # с GitHub Releases, а не тянет Docker-образ.
+      - name: Кэш hadolint
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/hair-lab/hadolint
+          key: hadolint-2.12.0-${{ runner.os }}-${{ runner.arch }}
+
+      # Dockerfile и compose проверяются без сборки образа (#110): hadolint и
+      # `docker compose config`. В CI наличие обоих инструментов обязательно.
+      - run: pnpm lint:docker
       - run: pnpm test
       - run: pnpm test:scripts
       - run: pnpm format:check
