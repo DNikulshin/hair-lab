@@ -49,15 +49,31 @@ export async function bookAppointment(page: Page): Promise<{ time: string; phone
   await master.selectOption((await masterOption.getAttribute('value')) ?? '');
 
   const date = page.locator('#booking-date');
-  // Первый пункт — выбранная по умолчанию ближайшая дата; слоты придут после её загрузки.
   await expect(date.locator('option')).not.toHaveCount(0);
-  const firstDate = await date.locator('option').first().getAttribute('value');
-  if (firstDate !== null) await date.selectOption(firstDate);
 
   const slot = page.locator(
     '#booking-slots ~ * button, section[aria-labelledby="booking-slots"] button',
   );
-  await expect(slot.first()).toBeVisible({ timeout: 20_000 });
+  // Первая дата в списке — сегодня. Если предыдущие сценарии заняли дневные слоты (или прогон
+  // идёт поздно), свободного времени на сегодня нет. Перебираем даты со второй и берём первую,
+  // где слоты появились: сценарий не зависит ни от порядка тестов, ни от часа прогона.
+  const dates = await date
+    .locator('option')
+    .evaluateAll((options) => options.map((option) => option.getAttribute('value') ?? ''));
+  let found = false;
+  for (const value of dates.slice(1)) {
+    if (value === '') continue;
+    await date.selectOption(value);
+    try {
+      await expect(slot.first()).toBeVisible({ timeout: 8_000 });
+      found = true;
+      break;
+    } catch {
+      // На этой дате свободного времени нет — пробуем следующую.
+    }
+  }
+  expect(found, 'ни на одну дату нет свободных слотов').toBe(true);
+
   const time = (await slot.first().innerText()).trim();
   await slot.first().click();
   await expect(slot.first()).toHaveAttribute('aria-pressed', 'true');
