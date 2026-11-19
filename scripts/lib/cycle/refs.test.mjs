@@ -26,6 +26,8 @@ function makeRoot(t) {
   // Файл без завершающего перевода строки: две строки, третьей нет.
   writeFileSync(join(root, 'src', 'no-newline.mjs'), 'alpha\nbeta');
   writeFileSync(join(root, 'src', 'empty.mjs'), '');
+  // Имя файла с дефисами и цифрами: диапазон не должен откусывать их себе (#275).
+  writeFileSync(join(root, 'src', 'migration-2026-11-18.md'), 'one\ntwo\nthree\nfour\n');
   mkdirSync(join(root, 'node_modules', 'left-pad'), { recursive: true });
   writeFileSync(join(root, 'node_modules', 'left-pad', 'index.js'), 'module.exports = 1;\n');
   mkdirSync(join(root, '.pi', 'artifacts', '2026-11-16-1-slug'), { recursive: true });
@@ -67,6 +69,7 @@ describe('parseRef', () => {
         kind: sample.kind,
         value: sample.value,
         line: sample.line,
+        endLine: sample.endLine,
       });
     });
   }
@@ -199,6 +202,87 @@ describe('resolveRef: path:line', () => {
     assert.equal(result.ok, true);
     assert.equal(result.value, '.env.example');
     assert.equal(result.line, 2);
+  });
+});
+
+describe('resolveRef: диапазон строк', () => {
+  test('диапазон внутри файла разрешается, границы — в результате', (t) => {
+    const root = makeRoot(t);
+
+    const result = resolveRef('src/app.mjs:1-2', { root });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.kind, 'path');
+    assert.equal(result.value, 'src/app.mjs');
+    assert.equal(result.line, 1);
+    assert.equal(result.endLine, 2);
+    assert.equal(result.file, join(root, 'src', 'app.mjs'));
+  });
+
+  test('диапазон на весь файл разрешается', (t) => {
+    const root = makeRoot(t);
+
+    const result = resolveRef('src/app.mjs:1-3', { root });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.endLine, 3);
+  });
+
+  test('`start = end` — тот же файл и та же строка', (t) => {
+    const root = makeRoot(t);
+
+    const result = resolveRef('src/app.mjs:2-2', { root });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.line, 2);
+    assert.equal(result.endLine, 2);
+  });
+
+  test('конец меньше начала — отказ с причиной', (t) => {
+    const root = makeRoot(t);
+
+    const result = resolveRef('src/app.mjs:3-1', { root });
+
+    assert.equal(result.ok, false);
+    assert.match(result.error, /диапазон 3-1: конец меньше начала/);
+  });
+
+  test('конец за концом файла — отказ с причиной', (t) => {
+    const root = makeRoot(t);
+
+    const result = resolveRef('src/app.mjs:1-4', { root });
+
+    assert.equal(result.ok, false);
+    assert.match(result.error, /строка 4 за концом файла src\/app\.mjs \(строк: 3\)/);
+  });
+
+  test('начало за концом файла — тот же отказ, что у одиночной строки', (t) => {
+    const root = makeRoot(t);
+
+    const result = resolveRef('src/app.mjs:4-5', { root });
+
+    assert.equal(result.ok, false);
+    assert.match(result.error, /строка 4 за концом файла/);
+  });
+
+  test('имя файла с дефисами и цифрами не ломает разбор', (t) => {
+    const root = makeRoot(t);
+
+    const result = resolveRef('src/migration-2026-11-18.md:2-3', { root });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.value, 'src/migration-2026-11-18.md');
+    assert.equal(result.line, 2);
+    assert.equal(result.endLine, 3);
+  });
+
+  test('диапазон в несуществующем файле не разрешается', (t) => {
+    const root = makeRoot(t);
+
+    const result = resolveRef('src/missing.mjs:1-2', { root });
+
+    assert.equal(result.ok, false);
+    assert.match(result.error, /файл не найден: src\/missing\.mjs/);
   });
 });
 

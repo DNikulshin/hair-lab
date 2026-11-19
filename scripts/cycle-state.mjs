@@ -31,7 +31,7 @@
  * Коды выхода §4: `0` — успех; `2` — ошибка использования или внутренняя (нет/битый
  * `state.json` или `decision.<n>.json`, мусор в аргументах, опечатка в стадии, неизвестная
  * причина эскалации); `3` — конфликт состояния (недопустимый переход, открытый этап,
- * терминальная стадия, живой lock, повторный `init`). Коды `1` (отрицательный результат
+ * терминальная стадия, живой lock, повторный `init`, ветка цикла не активна). Коды `1` (отрицательный результат
  * гейта) и `4` (`diff_too_large`) этим скриптом не используются: он не запускает проверок.
  *
  * Ключевые решения реализации:
@@ -64,6 +64,11 @@
  *   не мог бы стать нулём ни на одном успешном цикле.
  * - **Повторный вход в этап** (после сбоя, §13) — `advance --to <текущий этап>` при
  *   `stage_status = 'error'`; при `running` сначала нужен `finish`.
+ * - **Ветка (#274).** `init` проверяет, что ветка `--branch` существует и `HEAD` на ней,
+ *   `advance --to PR` и `apply-decision` с `PROCEED*` — что `HEAD` всё ещё совпадает со
+ *   `state.branch`: коммиты и `gh pr create` идут из текущего HEAD, а рассинхрон иначе
+ *   всплывал только на коммите. Рабочее дерево проверка не меняет: ветку создаёт
+ *   человек или агент.
  * - **Защиты §5.3.** `→ DECIDE` требует `review.<n>.md` и `evaluation.<n>.md` текущей
  *   итерации; `→ PR` — `decision.<n>.json` с `action` `PROCEED` или
  *   `PROCEED_WITH_UNVERIFIED`; `advance --to ESCALATED` запрещён — только `escalate`
@@ -141,7 +146,7 @@ import { fileURLToPath } from 'node:url';
 import { normalizeDoc } from './cycle-decide.mjs';
 import { assertWritableDir } from './cycle-evidence.mjs';
 import { LIMITS } from './lib/cycle/config.mjs';
-import { baseSha as gitBaseSha } from './lib/cycle/git.mjs';
+import { baseSha as gitBaseSha, branchExists, currentBranch } from './lib/cycle/git.mjs';
 import { readJson, writeJsonAtomic } from './lib/cycle/io.mjs';
 import {
   FIXED_NAMES,
@@ -1253,6 +1258,31 @@ function assertValidEscalation(escalation) {
 }
 
 /**
+ * Ветка цикла существует и является текущей (issue #274). `init` фиксирует имя ветки
+ * только в `state.json` и git не трогает, поэтому рассинхрон («цикл думает, что он в
+ * ветке, а HEAD на `main`») всплывал поздно — на коммите в PR-стадии. Проверка ничего
+ * не мутирует: ветку создаёт человек или агент, `init` только отказывается работать в
+ * чужой ветке с готовой командой.
+ * @param {string} branch имя ветки из `state.json`/`--branch`
+ * @param {string} root корень репозитория (там же живёт git)
+ * @param {string} where подкоманда для сообщения
+ * @returns {void}
+ */
+function assertOnCycleBranch(branch, root, where) {
+  if (!branchExists(branch, { cwd: root })) {
+    throw new ConflictError(
+      `${where}: ветки «${branch}» нет. Создайте её и переключитесь: git switch -c ${branch}`,
+    );
+  }
+  const head = currentBranch({ cwd: root });
+  if (head !== branch) {
+    throw new ConflictError(
+      `${where}: HEAD на «${head}», а ветка цикла — «${branch}». Переключитесь: git switch ${branch}`,
+    );
+  }
+}
+
+/**
  * `init`: каталог цикла и `state.json`. Повторный `init` в тот же каталог — код 3.
  * @param {ReturnType<typeof parseArgs>} args
  * @param {string} root
@@ -1262,6 +1292,10 @@ function runInit(args, root) {
   if (args.issue === null || args.slug === null || args.branch === null) {
     throw new UsageError('init: обязательны --issue, --slug и --branch');
   }
+
+  // Ветка создаётся до `init` (#274): иначе `base_sha` считается от `main`, а коммит
+  // цикла уходит в `main` — это ловит только pre-commit хук (#269), уже после работы.
+  assertOnCycleBranch(args.branch, root, 'init');
 
   const now = resolveNow(args);
   const date = args.date ?? now.slice(0, 10);
@@ -1326,6 +1360,10 @@ function runAdvance(args, root) {
   const state = readState(file);
   const now = resolveNow(args);
   const names = iterNames(state.iteration);
+
+  // Тот же рассинхрон, что в `init`, но со стороны PR (#274): коммиты и `gh pr create`
+  // идут из текущего HEAD, поэтому перед PR ветка обязана совпадать со `state.branch`.
+  if (args.to === 'PR') assertOnCycleBranch(state.branch, root, 'advance --to PR');
 
   const next = advanceTo(state, {
     to: args.to,
@@ -1414,6 +1452,12 @@ function runApplyDecision(args, root) {
     ...applyDecisionToState(state, { decision, now, escalation }),
     applied_decision: marker,
   };
+
+  // `PROCEED*` открывает PR мимо `advance`, поэтому та же сверка ветки, что и там (#274):
+  // тело PR, коммиты и `gh pr create` должны относиться к ветке цикла, а не к `main`.
+  if (next.stage === 'PR' && state.stage !== 'PR') {
+    assertOnCycleBranch(state.branch, root, 'apply-decision');
+  }
 
   // escalation.json пишется до состояния: state остаётся источником истины, а лишний
   // документ будет перезаписан следующим запуском.
