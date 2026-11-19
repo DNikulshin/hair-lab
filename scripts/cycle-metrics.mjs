@@ -76,6 +76,7 @@ import {
   readUsage,
 } from './lib/cycle/cost.mjs';
 import { readJson, writeJsonAtomic } from './lib/cycle/io.mjs';
+import { describedLimits, resolveLimits } from './lib/cycle/limits.mjs';
 import {
   FIXED_NAMES,
   artifactsDir,
@@ -346,7 +347,13 @@ export function evaluatorSharesFamilyWithPlan(models) {
  * }} inputs
  * @returns {Metrics}
  */
-export function buildMetrics({ state, iterations, usage = null, prices = null }) {
+export function buildMetrics({
+  state,
+  iterations,
+  usage = null,
+  prices = null,
+  appliedLimits = null,
+}) {
   /** @type {Record<string, number>} */
   const stageTotals = {};
   const history = Array.isArray(state.history) ? state.history : [];
@@ -465,6 +472,8 @@ export function buildMetrics({ state, iterations, usage = null, prices = null })
     evaluator_shares_family_with_plan: evaluatorSharesFamilyWithPlan(state.models),
     tokens,
     cost_rub: priceUsage(tokens, state.models, prices),
+    // Применённые лимиты цикла (#235): видно, с каким порогом считали бюджет и дифф.
+    ...(appliedLimits === null ? {} : { applied_limits: appliedLimits }),
   };
 }
 
@@ -606,6 +615,7 @@ function main() {
       iterations: readIterations(dir, state),
       usage: readUsage(dir),
       prices: readPriceSnapshot(root),
+      appliedLimits: describedLimits(resolveLimits({ root })),
     });
 
     // Самопроверка: метрики обязаны проходить собственный валидатор (Приложение A).

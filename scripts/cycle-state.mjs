@@ -146,6 +146,7 @@ import { fileURLToPath } from 'node:url';
 import { normalizeDoc } from './cycle-decide.mjs';
 import { assertWritableDir } from './cycle-evidence.mjs';
 import { LIMITS } from './lib/cycle/config.mjs';
+import { resolveLimits } from './lib/cycle/limits.mjs';
 import { baseSha as gitBaseSha, branchExists, currentBranch } from './lib/cycle/git.mjs';
 import { readJson, writeJsonAtomic } from './lib/cycle/io.mjs';
 import {
@@ -186,6 +187,13 @@ const STAGES = Object.freeze([
 
 /** Терминальные этапы: мутации запрещены, `get` и `unlock` работают. */
 const TERMINAL_STAGES = Object.freeze(['DONE', 'ESCALATED']);
+
+/**
+ * Выход из терминального `ESCALATED` (#235): единственное обратное ребро — в `DECIDE`,
+ * чтобы владелец мог поднять бюджет и досчитать решение в том же цикле. Разрешено только
+ * с `--owner-approved`; `DONE` остаётся терминальным без исключений.
+ */
+const ESCALATED_RECOURSE = Object.freeze(['DECIDE']);
 
 /** Действия решения, разрешающие переход в PR (§5.3). */
 const PROCEED_ACTIONS = Object.freeze(['PROCEED', 'PROCEED_WITH_UNVERIFIED']);
@@ -357,6 +365,36 @@ export function startStage(state, { stage, iteration = state.iteration, now }) {
  * @returns {Record<string, any>} новое состояние
  */
 export function advanceTo(state, { to, now, ownerApproved = false, artifacts = {} }) {
+  // Возврат из `ESCALATED` в `DECIDE` (#235): только осознанно, флагом владельца.
+  if (state.stage === 'ESCALATED') {
+    if (!ESCALATED_RECOURSE.includes(to)) {
+      throw new ConflictError(
+        `из ESCALATED допустим только переход в DECIDE (с --owner-approved), запрошено ${to}`,
+      );
+    }
+    if (!ownerApproved) {
+      throw new ConflictError('переход ESCALATED → DECIDE требует --owner-approved');
+    }
+    return {
+      ...state,
+      stage: 'DECIDE',
+      stage_status: 'running',
+      // Эскалация снята: решение пересчитывается с новым лимитом, история остаётся в history.
+      escalation: null,
+      updated_at: now.toISOString(),
+      history: [
+        ...state.history,
+        {
+          stage: to,
+          iteration: state.iteration,
+          started_at: now.toISOString(),
+          finished_at: null,
+          status: 'running',
+        },
+      ],
+    };
+  }
+
   assertNotTerminal(state);
 
   if (to === 'ESCALATED') {
@@ -1317,7 +1355,9 @@ function runInit(args, root) {
     baseSha: gitBaseSha({ branch: 'main', cwd: root }),
     models: readModels(root),
     now,
-    maxIterations: args.maxIterations ?? LIMITS.defaultMaxIterations,
+    // Дефолт — из проектного конфига (#235): CLI `--max-iterations` → env → файл → дефолт ядра.
+    maxIterations:
+      args.maxIterations ?? resolveLimits({ root, cli: {} }).values.defaultMaxIterations,
   });
 
   mkdirSync(dir, { recursive: true });

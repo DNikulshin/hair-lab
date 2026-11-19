@@ -82,7 +82,7 @@ import { fileURLToPath } from 'node:url';
 
 import { changedFiles } from './lib/cycle/git.mjs';
 import { cycleCostRub, readPriceSnapshot } from './lib/cycle/cost.mjs';
-import { LIMITS } from './lib/cycle/config.mjs';
+import { describedLimits, resolveLimits } from './lib/cycle/limits.mjs';
 import { extractLastJsonBlock, readJson, writeJsonAtomic } from './lib/cycle/io.mjs';
 import { FIXED_NAMES, findActiveCycle, iterNames, repoRoot } from './lib/cycle/paths.mjs';
 import { redactLog } from './lib/cycle/redact.mjs';
@@ -356,6 +356,14 @@ function invalidOutputDetails(agentErrors, stage) {
  * @param {DecideInputs} inputs
  * @returns {Decision}
  */
+/** Человекочитаемые источники лимита для текста причины бюджета. */
+const LIMIT_SOURCE_LABELS = Object.freeze({
+  cli: 'CLI-флаг',
+  env: 'переменная окружения',
+  config: '.pi/harness.config.json',
+  default: 'дефолт ядра',
+});
+
 export function decide(inputs) {
   const {
     iteration,
@@ -370,6 +378,12 @@ export function decide(inputs) {
     costRub = null,
     agentErrors = {},
   } = inputs;
+
+  // Лимиты проекта (#235): CLI → env → `.pi/harness.config.json` → дефолт ядра.
+  const resolvedLimits = resolveLimits({
+    root: inputs.root ?? process.cwd(),
+    cli: inputs.limits ?? {},
+  });
 
   /** @type {Record<string, number>} */
   const counts = {
@@ -414,14 +428,18 @@ export function decide(inputs) {
       downgraded,
       counts,
       unresolved_refs: unresolvedRefs,
+      applied_limits: describedLimits(resolvedLimits),
     };
   }
 
   // Правило 7 (§5.6, §11): жёсткий бюджетный порог проверяется первым — цикл дороже
   // порога останавливается до любых доработок, ведь каждая из них тратит ещё. `null` —
   // замера нет, проверять нечего: порог не срабатывает, решение идёт по общим правилам.
-  if (costRub !== null && costRub > LIMITS.maxCycleCostRub) {
-    reasons.push(`budget: ${costRub} ₽ > ${LIMITS.maxCycleCostRub} ₽ (правило 7 §5.6)`);
+  const budgetLimit = resolvedLimits.values.maxCycleCostRub;
+  if (costRub !== null && costRub > budgetLimit) {
+    const source =
+      LIMIT_SOURCE_LABELS[resolvedLimits.sources.maxCycleCostRub] ?? 'источник неизвестен';
+    reasons.push(`budget: ${costRub} ₽ > ${budgetLimit} ₽ (правило 7 §5.6, лимит: ${source})`);
     reasons.push('escalate:budget');
     return finalize('ESCALATE');
   }

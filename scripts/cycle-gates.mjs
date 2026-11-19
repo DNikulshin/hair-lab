@@ -56,7 +56,8 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 
 import { normalizeDoc } from './cycle-decide.mjs';
-import { GATES, GATE_TIMEOUTS, LIMITS } from './lib/cycle/config.mjs';
+import { GATES, GATE_TIMEOUTS } from './lib/cycle/config.mjs';
+import { resolveLimits } from './lib/cycle/limits.mjs';
 import {
   addedLinesByFile,
   baseSha,
@@ -271,17 +272,19 @@ function logRelativePath(id, iteration) {
  * на каждом шаге приемлемо. `tail` отдаёт хвост без завершающего перевода строки —
  * возвращаем его, чтобы файл оставался текстовым логом.
  * @param {string} file
+ * @param {{ root?: string }} [options] корень проекта для чтения лимита из конфига (#235)
  * @returns {boolean} true, если лог был обрезан
  */
-export function trimLog(file) {
+export function trimLog(file, { root = process.cwd() } = {}) {
+  const maxBytes = resolveLimits({ root }).values.logMaxBytes;
   const size = statSync(file).size;
-  if (size <= LIMITS.logMaxBytes) return false;
+  if (size <= maxBytes) return false;
 
   let low = 0;
   let high = size;
   while (low < high) {
     const mid = Math.ceil((low + high) / 2);
-    if (Buffer.byteLength(tail(file, mid), 'utf8') <= LIMITS.logMaxBytes) low = mid;
+    if (Buffer.byteLength(tail(file, mid), 'utf8') <= maxBytes) low = mid;
     else high = mid - 1;
   }
 
