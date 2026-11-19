@@ -1,0 +1,13 @@
+[Unit]
+Description=Проверка и продление wildcard-сертификата *.dnikulshin.ru (issue #112)
+
+[Timer]
+# Дважды в сутки, но не в те же минуты у всех хостов: разброс до часа.
+OnCalendar=*-*-* 03,15:17:00
+RandomizedDelaySec=1h
+# Пропущенный запуск (хост был выключен) выполняется при загрузке.
+Persistent=true
+Unit=hair-lab-cert-renew.service
+
+[Install]
+WantedBy=timers.target
