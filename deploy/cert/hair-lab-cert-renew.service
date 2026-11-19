@@ -1,0 +1,20 @@
+[Unit]
+Description=Продление wildcard-сертификата *.dnikulshin.ru (issue #112)
+Documentation=https://github.com/DNikulshin/hair-lab/blob/main/deploy/cert/install.md
+# Сеть нужна: acme.sh ходит в Let's Encrypt и в API DNS-провайдера.
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# Скрипт и конфигурация ставятся по deploy/cert/install.md; путь можно переопределить drop-in'ом.
+Environment=CERT_ENV=/etc/hair-lab/cert.env
+ExecStart=/usr/local/sbin/hair-lab-cert-renew
+# nginx перезагружается из скрипта (CERT_RELOAD_CMD); systemd правит только сам сервис.
+User=root
+Nice=10
+# Сеть/DNS могут быть недоступны сразу после загрузки — один повтор через 30 минут.
+Restart=on-failure
+RestartSec=30min
+# Скрипт не должен висеть вечно на медленном API провайдера.
+TimeoutStartSec=15min
