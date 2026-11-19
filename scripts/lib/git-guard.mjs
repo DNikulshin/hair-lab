@@ -44,19 +44,20 @@ export function commitBlockReason(branch) {
 
 /**
  * Разбирает stdin `pre-push` (по строке на ref): `<local ref> <local sha> <remote ref> <remote sha>`.
+ * SHA нужен гейту смерженных веток (`scripts/lib/branch-guard.mjs`): у удаления ветки он нулевой.
  * @param {string} text
- * @returns {{ localRef: string, remoteRef: string }[]}
+ * @returns {{ localRef: string, localSha: string, remoteRef: string }[]}
  */
 export function parsePushRefs(text) {
   if (typeof text !== 'string') return [];
-  /** @type {{ localRef: string, remoteRef: string }[]} */
+  /** @type {{ localRef: string, localSha: string, remoteRef: string }[]} */
   const refs = [];
 
   for (const line of text.split(/\r?\n/)) {
     const fields = line.trim().split(/\s+/);
     // Строки без четырёх полей — мусор в stdin: пропускаем, а не падаем на push.
     if (fields.length < 4) continue;
-    refs.push({ localRef: fields[0], remoteRef: fields[2] });
+    refs.push({ localRef: fields[0], localSha: fields[1], remoteRef: fields[2] });
   }
   return refs;
 }

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, test } from 'node:test';
@@ -21,6 +21,19 @@ const PRECOMMIT = fileURLToPath(new URL('./precommit.mjs', import.meta.url));
 
 /** Имя ветки, куда коммитить можно: под ним идёт работа по задачам. */
 const FEATURE_BRANCH = 'fix/250-migrations-clean-gate';
+
+/**
+ * PATH с подставным `gh`, который не нашёл ни одного PR: тест не ходит в сеть.
+ * Реальные каталоги PATH сохраняются — скриптам нужны `git`/`node`.
+ * @returns {string}
+ */
+function noPullGhPath() {
+  const dir = mkdtempSync(join(tmpdir(), 'hair-lab-gh-'));
+  const script = join(dir, 'gh');
+  writeFileSync(script, "#!/bin/sh\necho '[]'\n");
+  chmodSync(script, 0o755);
+  return `${dir}:${process.env.PATH}`;
+}
 
 /**
  * Временный git-репозиторий с указанной текущей веткой и одним закоммиченным файлом.
@@ -87,8 +100,12 @@ describe('git-guard: pre-push', () => {
     );
 
     assert.deepEqual(refs, [
-      { localRef: 'refs/heads/fix/250-gate', remoteRef: 'refs/heads/fix/250-gate' },
-      { localRef: 'refs/heads/main', remoteRef: 'refs/heads/main' },
+      {
+        localRef: 'refs/heads/fix/250-gate',
+        localSha: 'abc123',
+        remoteRef: 'refs/heads/fix/250-gate',
+      },
+      { localRef: 'refs/heads/main', localSha: 'def456', remoteRef: 'refs/heads/main' },
     ]);
   });
 
@@ -136,11 +153,15 @@ describe('git-guard: хуки в реальном репозитории', () =>
     assert.match(result.stderr, /защищённую ветку «main»/);
   });
 
-  test('pre-push-скрипт: код 0 при push в рабочую ветку', () => {
+  test('pre-push-скрипт: код 0 при push в рабочую ветку без смерженного PR', (t) => {
+    const path = noPullGhPath();
+    t.after(() => rmSync(path.split(':')[0], { recursive: true, force: true }));
+
     const result = spawnSync(process.execPath, [PRE_PUSH], {
       cwd: REPO_ROOT,
       encoding: 'utf8',
       input: `refs/heads/${FEATURE_BRANCH} 111 refs/heads/${FEATURE_BRANCH} 222\n`,
+      env: { ...process.env, PATH: path },
     });
 
     assert.equal(result.status, 0);
